@@ -1,4 +1,204 @@
-# Convergence — Dual-Model Collaboration Studio (with backend)
+# Convergence — Dual-Model Collaboration Studio + Growth Engine
+
+This repo contains:
+
+1. **Convergence** — Dual-model collaboration studio (Claude + Gemini)
+2. **Growth Engine** — Production-ready SaaS backend for social media auditing with subscription tiers
+
+## Growth Engine — Quick Start for Frontend
+
+**Status:** Backend complete, ready for frontend integration.
+
+### For Haron's UI Team
+
+The Growth Engine API is ready at `/api/growth-engine/v1`. Here's what you need to build:
+
+#### 1. Start the Backend
+```bash
+cd server
+npm install
+cp .env.example .env
+# Add real keys:
+CLAUDE_API_KEY=sk-ant-...
+GEMINI_API_KEY=...
+STRIPE_API_KEY=sk_test_...
+
+npm start
+# Backend running on http://localhost:3000
+```
+
+#### 2. Frontend Workflow (Async Pattern)
+
+```
+User submits: @handle + platform + category
+  ↓
+Frontend: POST /api/growth-engine/v1/evaluate/social-snapshot
+  ↓ Response: { job_id, status: "queued" }
+  ↓
+Frontend: Show "Evaluating..." spinner
+  ↓
+Poll: GET /api/growth-engine/v1/job/{job_id} every 2 seconds
+  ↓ Response: { status: "running" } ... { status: "complete" }
+  ↓
+Fetch: GET /api/growth-engine/v1/reports/{report_id}
+  ↓ Response: Full report with scores, growth path, upsell
+  ↓
+Display: Show report in UI
+```
+
+#### 3. API Endpoints for Frontend
+
+```javascript
+// Queue evaluation (free tier)
+POST /api/growth-engine/v1/evaluate/social-snapshot
+Body: { handle, platform, category, email }
+Returns: { job_id, status: "queued" }
+
+// Poll job status
+GET /api/growth-engine/v1/job/{job_id}
+Returns: { status, stage, created_at, updated_at, error }
+
+// Retrieve completed report
+GET /api/growth-engine/v1/reports/{report_id}
+Returns: { report_id, tier, scores, growth_path, business, upsell }
+
+// List user's reports
+GET /api/growth-engine/v1/reports
+Returns: { reports: [...] }
+
+// Check subscription tier
+GET /api/growth-engine/v1/entitlements
+Returns: { account_id, current_tier }
+
+// Get pricing tiers
+GET /api/growth-engine/v1/billing/pricing
+Returns: { tiers: [...], discount: "25% off annual" }
+
+// Create subscription
+POST /api/growth-engine/v1/billing/subscribe
+Body: { tier, billingCycle }
+Returns: { tier, amountFormatted, status }
+```
+
+#### 4. Example Frontend Code
+
+```javascript
+// Step 1: Queue evaluation
+async function evaluateSocialProfile(handle, platform, category, email) {
+  const response = await fetch('/api/growth-engine/v1/evaluate/social-snapshot', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ handle, platform, category, email })
+  });
+  return response.json(); // { job_id, status: "queued" }
+}
+
+// Step 2: Poll for completion
+async function pollJobStatus(jobId, onStatusChange) {
+  while (true) {
+    const response = await fetch(`/api/growth-engine/v1/job/${jobId}`);
+    const job = await response.json();
+    
+    onStatusChange(job.status); // "running", "complete", "failed"
+    
+    if (job.status === "complete") {
+      return job;
+    }
+    if (job.status === "failed") {
+      throw new Error(job.error);
+    }
+    
+    await new Promise(r => setTimeout(r, 2000)); // Poll every 2 seconds
+  }
+}
+
+// Step 3: Fetch report
+async function getReport(reportId) {
+  const response = await fetch(`/api/growth-engine/v1/reports/${reportId}`);
+  return response.json(); // Full report
+}
+
+// Put it together
+async function runEvaluation(handle, platform, category, email) {
+  try {
+    // Queue
+    const queueResponse = await evaluateSocialProfile(handle, platform, category, email);
+    const jobId = queueResponse.job_id;
+    
+    // Poll
+    await pollJobStatus(jobId, status => {
+      console.log(`Status: ${status}`);
+      // Update UI: show spinner for "running", etc.
+    });
+    
+    // Fetch report (job response contains report_id)
+    const jobResponse = await fetch(`/api/growth-engine/v1/job/${jobId}`);
+    const job = await jobResponse.json();
+    const report = await getReport(job.resultPayload.report_id);
+    
+    // Display report
+    console.log(report);
+    // Render: scores, growth_path, upsell button
+  } catch (error) {
+    console.error('Evaluation failed:', error);
+  }
+}
+```
+
+#### 5. Subscription Flow
+
+```javascript
+// Get pricing
+async function getPricing() {
+  const response = await fetch('/api/growth-engine/v1/billing/pricing');
+  return response.json();
+}
+
+// Subscribe to tier
+async function subscribe(tier, billingCycle = 'monthly') {
+  const response = await fetch('/api/growth-engine/v1/billing/subscribe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tier, billingCycle })
+  });
+  return response.json();
+}
+```
+
+#### 6. Response Shapes (What Frontend Gets)
+
+**Tier 0 Report:**
+```json
+{
+  "report_id": "rpt_...",
+  "tier": "social_snapshot",
+  "scores": {
+    "overall": 47,
+    "category_avg": 61,
+    "dimensions": [
+      { "label": "Posting Consistency", "score": 35, "explanation": "..." }
+    ]
+  },
+  "growth_path": {
+    "phases": [
+      {
+        "range": "1-30",
+        "visible_action": "Shift toward short-form video...",
+        "locked": { "count": 4, "teaser": "4 specific moves + weekly calendar" }
+      }
+    ]
+  },
+  "upsell": {
+    "cta_label": "Unlock your full Growth Plan",
+    "target_tier": "growth_plan",
+    "unlock_count": 12
+  }
+}
+```
+
+---
+
+## Convergence — Dual-Model Collaboration Studio
 
 Claude and Gemini collaborate on a prompt — side-by-side, chained, or talking
 directly to each other — with a small Node backend that now does the parts a
