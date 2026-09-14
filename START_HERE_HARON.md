@@ -1,6 +1,8 @@
-# 🎯 HARON — START HERE
+# 🎯 HARON — YOUR DOMAIN
 
-Your frontend template is **live and ready** for integration development.
+Backend is done. Here's what's ready for you to build with.
+
+**You own the frontend.** Build it your way. These docs are just reference material—use what's helpful, ignore what's not. The backend will work with whatever you build as long as you hit the endpoints.
 
 ---
 
