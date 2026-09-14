@@ -1,0 +1,10 @@
+server/
+frontend-template/
+.git/
+.claude/
+*.md
+node_modules/
+package-lock.json
+.env
+.env.local
+.gitignore
