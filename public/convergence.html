@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Convergence — Dual-LLM Analysis Engine</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root {
+      --claude: #5c5c5c;
+      --gemini: #6b5b95;
+      --groq: #ff6b35;
+      --mod: #888;
+      --ink: #1a1a1a;
+      --ink-faint: #aaa;
+      --danger: #ef4444;
+    }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    .glow-claude { border-left: 3px solid var(--claude); }
+    .glow-gemini { border-left: 3px solid var(--gemini); }
+    .glow-groq { border-left: 3px solid var(--groq); }
+    .tick { font-size: 0.85rem; letter-spacing: 0.05em; font-weight: 600; }
+    .glass { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); }
+  </style>
+</head>
+<body class="bg-slate-900 text-white">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useRef, useEffect } = React;
+
+    /* Constants */
+    const DEFAULT_RATES = {
+      "claude-opus-5": { input: 15, output: 75 },
+      "claude-sonnet-5": { input: 3, output: 15 },
+      "gemini-2.5-flash": { input: 0.075, output: 0.3 },
+      "gemini-2.0-flash": { input: 0.075, output: 0.3 },
+      "llama-3.3-70b-versatile": { input: 0.59, output: 0.79 },
+    };
+
+    const LEFT_PROVIDER_INFO = {
+      anthropic: { label: "CLAUDE", key: "claudeKey", model: "claudeModel", custom: "claudeCustom" },
+      groq: { label: "GROQ", key: "groqKey", model: "groqModel", custom: "groqCustom" },
+      gemini: { label: "GEMINI", key: "geminiKey", model: "geminiModel", custom: "geminiCustom" },
+    };
+
+    const RIGHT_PROVIDER_INFO = {
+      gemini: { label: "GEMINI", key: "geminiKey", model: "geminiModel", custom: "geminiCustom" },
+      groq: { label: "GROQ", key: "groqKey", model: "groqModel", custom: "groqCustom" },
+    };
+
+    /* API Client */
+    const api = {
+      me: () => fetch("/api/auth/me").then(r => r.json()),
+      saveKeys: (patch) => fetch("/api/keys", { method: "POST", body: JSON.stringify(patch), headers: { "Content-Type": "application/json" } }).then(r => r.json()),
+      getKeyStatus: () => fetch("/api/keys").then(r => r.json()),
+      listModels: (provider) => fetch(`/api/proxy/${provider}/models`).then(r => r.json()),
+      streamClaude: (payload) => fetch("/api/proxy/claude/stream", { method: "POST", body: JSON.stringify(payload), headers: { "Content-Type": "application/json" } }).then(r => r.body),
+      streamGemini: (payload) => fetch("/api/proxy/gemini/stream", { method: "POST", body: JSON.stringify(payload), headers: { "Content-Type": "application/json" } }).then(r => r.body),
+      streamGroq: (payload) => fetch("/api/proxy/groq/stream", { method: "POST", body: JSON.stringify(payload), headers: { "Content-Type": "application/json" } }).then(r => r.body),
+    };
+
+    /* Main App */
+    function App() {
+      const [sessionId, setSessionId] = useState(null);
+      const [turns, setTurns] = useState([]);
+      const [prompt, setPrompt] = useState("");
+      const [busy, setBusy] = useState(false);
+      const [mode, setMode] = useState("parallel");
+      const [sequentialOrder, setSequentialOrder] = useState("claude-first");
+
+      const [claudeProvider, setClaudeProvider] = useState("anthropic");
+      const [rightProvider, setRightProvider] = useState("gemini");
+      const [claudeModel, setClaudeModel] = useState("claude-sonnet-5");
+      const [geminiModel, setGeminiModel] = useState("gemini-2.5-flash");
+      const [groqModel, setGroqModel] = useState("llama-3.3-70b-versatile");
+
+      const scrollRef = useRef(null);
+
+      const resolvedLeftModel = claudeProvider === "groq" ? groqModel
+        : claudeProvider === "gemini" ? geminiModel
+        : claudeModel;
+      const leftDisplayName = claudeProvider === "groq" ? "Groq" : claudeProvider === "gemini" ? "Gemini" : "Claude";
+
+      const resolvedRightModel = rightProvider === "groq" ? groqModel : geminiModel;
+      const rightDisplayName = rightProvider === "groq" ? "Groq" : "Gemini";
+
+      useEffect(() => {
+        setSessionId(Math.random().toString(36).substr(2, 9));
+      }, []);
+
+      const handleSendTurn = async () => {
+        if (!prompt.trim()) return;
+        const currentPrompt = prompt.trim();
+        setPrompt("");
+        setBusy(true);
+
+        const turnId = Math.random().toString(36).substr(2, 9);
+        const baseTurn = {
+          id: turnId,
+          prompt: currentPrompt,
+          mode,
+          claudeText: "",
+          geminiText: "",
+          status: "running",
+        };
+        setTurns(prev => [...prev, baseTurn]);
+
+        try {
+          if (mode === "parallel") {
+            await Promise.all([
+              streamLeftModel(turnId, currentPrompt),
+              streamRightModel(turnId, currentPrompt),
+            ]);
+          }
+          setTurns(prev => prev.map(t => t.id === turnId ? { ...t, status: "done" } : t));
+        } catch (err) {
+          setTurns(prev => prev.map(t => t.id === turnId ? { ...t, status: "error", error: err.message } : t));
+        } finally {
+          setBusy(false);
+        }
+      };
+
+      const streamLeftModel = async (turnId, text) => {
+        const payload = {
+          model: resolvedLeftModel,
+          system: "You are a helpful AI assistant.",
+          messages: [{ role: "user", content: text }],
+        };
+        const stream = await api.streamClaude(payload);
+        const reader = stream.getReader();
+        let fullText = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = new TextDecoder().decode(value);
+          fullText += chunk;
+          setTurns(prev => prev.map(t => t.id === turnId ? { ...t, claudeText: fullText } : t));
+        }
+      };
+
+      const streamRightModel = async (turnId, text) => {
+        const payload = rightProvider === "gemini"
+          ? { model: resolvedRightModel, systemInstruction: "You are a helpful AI assistant.", contents: [{ role: "user", parts: [{ text }] }] }
+          : { model: resolvedRightModel, system: "You are a helpful AI assistant.", messages: [{ role: "user", content: text }] };
+
+        const stream = await api.streamGroq(payload);
+        const reader = stream.getReader();
+        let fullText = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = new TextDecoder().decode(value);
+          fullText += chunk;
+          setTurns(prev => prev.map(t => t.id === turnId ? { ...t, geminiText: fullText } : t));
+        }
+      };
+
+      return (
+        <div className="min-h-screen bg-slate-900 text-white p-6">
+          <div className="max-w-7xl mx-auto">
+            <div className="mb-8">
+              <h1 className="text-3xl font-bold mb-2">Convergence</h1>
+              <p className="text-slate-400">Dual-LLM analysis engine. Compare Claude, Gemini, and Groq in parallel or sequential modes.</p>
+            </div>
+
+            {/* Settings Panel */}
+            <div className="glass p-6 rounded-lg mb-8">
+              <div className="grid grid-cols-2 gap-6">
+                <div>
+                  <label className="tick block mb-2">Mode</label>
+                  <select value={mode} onChange={e => setMode(e.target.value)} className="w-full bg-slate-800 p-2 rounded">
+                    <option value="parallel">Parallel (simultaneous)</option>
+                    <option value="sequential">Sequential (chained)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="tick block mb-2">Left Provider</label>
+                  <select value={claudeProvider} onChange={e => setClaudeProvider(e.target.value)} className="w-full bg-slate-800 p-2 rounded">
+                    <option value="anthropic">Claude</option>
+                    <option value="groq">Groq</option>
+                    <option value="gemini">Gemini</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="tick block mb-2">Right Provider</label>
+                  <select value={rightProvider} onChange={e => setRightProvider(e.target.value)} className="w-full bg-slate-800 p-2 rounded">
+                    <option value="gemini">Gemini</option>
+                    <option value="groq">Groq</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Conversation */}
+            <div ref={scrollRef} className="space-y-6 mb-8 h-96 overflow-y-auto">
+              {turns.map(turn => (
+                <div key={turn.id} className="space-y-4">
+                  <div className="glass p-4 rounded-lg">
+                    <div className="tick mb-2 text-slate-300">Prompt</div>
+                    <p>{turn.prompt}</p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="glass p-4 rounded-lg glow-claude">
+                      <div className="tick mb-2">{leftDisplayName}</div>
+                      <p className="text-sm">{turn.claudeText || "..."}</p>
+                    </div>
+                    <div className="glass p-4 rounded-lg glow-gemini">
+                      <div className="tick mb-2">{rightDisplayName}</div>
+                      <p className="text-sm">{turn.geminiText || "..."}</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Input */}
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={prompt}
+                onChange={e => setPrompt(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && handleSendTurn()}
+                placeholder="Enter your prompt..."
+                className="flex-1 bg-slate-800 p-3 rounded text-white placeholder-slate-500"
+                disabled={busy}
+              />
+              <button
+                onClick={handleSendTurn}
+                disabled={busy}
+                className="px-6 py-3 bg-blue-600 rounded font-semibold hover:bg-blue-700 disabled:opacity-50"
+              >
+                {busy ? "Running..." : "Send"}
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
