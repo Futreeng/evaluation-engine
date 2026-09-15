@@ -21,10 +21,11 @@ const proxyRoutes = require("./routes/proxy");
 const growthEngineRoutes = require("./routes/growth-engine");
 const geDb = require("./growth_engine_db");
 
-// Phase 2: Import Phase 2 services
-const Database = require("./db/init");
-const JobQueue = require("./services/jobQueue");
-const AuditAnalyzer = require("./services/auditAnalyzer");
+// NOTE: Growth Engine uses its own sql.js database (geDb)
+// Convergence services below are commented out—Growth Engine doesn't need them
+// const Database = require("./db/init");
+// const JobQueue = require("./services/jobQueue");
+// const AuditAnalyzer = require("./services/auditAnalyzer");
 
 const app = express();
 app.set("trust proxy", 1);
@@ -62,27 +63,22 @@ geDb.initDb().catch((err) => {
   process.exit(1);
 });
 
-// Initialize Phase 2 services
+// NOTE: Phase 2 services (Convergence app) disabled for Growth Engine
+// Growth Engine uses its own sql.js-based database (geDb) initialized above
+// Commented out to avoid sqlite3 dependency during Growth Engine mode
+/*
 let db = null;
 let jobQueue = null;
 (async () => {
   try {
     console.log("[Server] Initializing Phase 2 services...");
-
-    // Initialize database
     db = new Database(process.env.DB_PATH || "./server/data/convergence.db");
     await db.init();
     console.log("[Server] Database initialized");
-
-    // Initialize job queue
     jobQueue = new JobQueue(db);
     console.log("[Server] Job queue initialized");
-
-    // Create audit analyzer
     const auditAnalyzer = new AuditAnalyzer(db, null, null);
     jobQueue.setAuditAnalyzer(auditAnalyzer);
-
-    // Initialize growth engine routes with services
     growthEngineRoutes.initializeServices(db, jobQueue);
     console.log("[Server] Growth Engine routes initialized");
   } catch (err) {
@@ -90,6 +86,7 @@ let jobQueue = null;
     process.exit(1);
   }
 })();
+*/
 
 const BUILD_VERSION = "2026-09-14-a";
 
