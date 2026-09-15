@@ -3,7 +3,7 @@ const { v4: uid } = require("uuid");
 const geDb = require("../growth_engine_db");
 const { evaluateProfile } = require("../growth_engine_evaluator");
 const BillingManager = require("../growth_engine_billing");
-const { JobQueue } = require("../growth_engine_job_queue");
+const JobQueue = require("../growth_engine_job_queue");
 
 const router = express.Router();
 let jobQueue = new JobQueue();
