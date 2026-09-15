@@ -379,12 +379,22 @@
   </footer>
 
   <script>
-    // Read API endpoint from window config or environment
-    const API_BASE = window.__API_BASE__ ||
-                     (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_API_BASE) ||
-                     '/api/growth-engine/v1';
+    // Read API endpoint from: query param > localStorage > environment > default local
+    const urlParams = new URLSearchParams(window.location.search);
+    const apiBase = urlParams.get('api') ||
+                    localStorage.getItem('GROWTH_ENGINE_API_BASE') ||
+                    window.__API_BASE__ ||
+                    (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_API_BASE) ||
+                    'http://localhost:3005/api/growth-engine/v1';
 
+    // Save to localStorage if provided via query param
+    if (urlParams.get('api')) {
+      localStorage.setItem('GROWTH_ENGINE_API_BASE', apiBase);
+    }
+
+    const API_BASE = apiBase;
     console.log('Growth Engine API endpoint:', API_BASE);
+    console.log('Tip: Change endpoint via ?api=YOUR_URL (e.g., ?api=http://localhost:3005/api/growth-engine/v1)');
 
     function navigateTo(section) {
       document.querySelectorAll('section').forEach(s => s.classList.add('hidden'));
