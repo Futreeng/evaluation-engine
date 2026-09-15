@@ -5,10 +5,16 @@ const { v4: uid } = require("uuid");
 // Uses in-memory queue (MVP); upgrade to Bull + Redis for production
 
 class JobQueue {
-  constructor(db) {
+  constructor(db, auditAnalyzer = null) {
     this.db = db;
+    this.auditAnalyzer = auditAnalyzer;
     this.queue = [];
     this.processing = false;
+  }
+
+  // Set audit analyzer (can be called after construction)
+  setAuditAnalyzer(auditAnalyzer) {
+    this.auditAnalyzer = auditAnalyzer;
   }
 
   // Create and queue a new job
@@ -116,11 +122,22 @@ class JobQueue {
     }
   }
 
-  // Audit analysis (calls Convergence)
+  // Audit analysis (calls auditAnalyzer which fetches data and runs analysis)
   async runAudit(job) {
-    const { auditAnalyzer } = require("./auditAnalyzer");
-    const result = await auditAnalyzer.analyze(job.userId, job.input);
-    await this.completeJob(job.jobId, result);
+    try {
+      // auditAnalyzer is injected from outside
+      // It will fetch social profile data and run scoring
+      if (!this.auditAnalyzer) {
+        throw new Error("Audit analyzer not initialized");
+      }
+
+      const result = await this.auditAnalyzer.analyze(job.userId, job.input);
+      const resultJson = JSON.stringify(result);
+      await this.completeJob(job.jobId, resultJson);
+    } catch (err) {
+      console.error(`Audit job ${job.jobId} failed:`, err);
+      await this.completeJob(job.jobId, null, err.message);
+    }
   }
 
   // Refresh existing audit

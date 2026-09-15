@@ -79,27 +79,73 @@ class SocialMediaClient {
   }
 
   // Twitter/X API v2
-  // Requires: Twitter API v2 key, bearer token
+  // Requires: Twitter API v2 bearer token
   // Docs: https://developer.twitter.com/en/docs/twitter-api/users/lookup/api-reference/get-users-by-username-username
   async getTwitterProfile(handle) {
     console.log(`Fetching Twitter/X profile: ${handle}`);
 
-    // TODO: Implement
-    // Steps:
-    // 1. Lookup user by username: GET /2/users/by/username/{username}
-    // 2. Get user tweets: GET /2/users/{id}/tweets
-    // 3. Get public metrics for each tweet
-    // 4. Parse and return structured data
+    if (!this.twitterToken) {
+      throw new Error("Twitter bearer token not configured");
+    }
 
-    return {
-      platform: "x",
-      handle: handle,
-      followers: 0,
-      following: 0,
-      postCount: 0,
-      bio: "",
-      recentPosts: [],
-    };
+    try {
+      // Step 1: Lookup user by username
+      const userResponse = await fetch(
+        `https://api.twitter.com/2/users/by/username/${handle}?user.fields=public_metrics,description,created_at`,
+        {
+          headers: { Authorization: `Bearer ${this.twitterToken}` },
+        }
+      );
+
+      if (!userResponse.ok) {
+        const error = await userResponse.json();
+        if (userResponse.status === 404) {
+          throw new Error(`Twitter user not found: ${handle}`);
+        }
+        throw new Error(`Twitter API error: ${error.detail || userResponse.statusText}`);
+      }
+
+      const userData = await userResponse.json();
+      const user = userData.data;
+
+      if (!user) {
+        throw new Error(`No user data returned for ${handle}`);
+      }
+
+      // Step 2: Get user's recent tweets
+      const tweetsResponse = await fetch(
+        `https://api.twitter.com/2/users/${user.id}/tweets?max_results=10&tweet.fields=public_metrics,created_at&expansions=author_id`,
+        {
+          headers: { Authorization: `Bearer ${this.twitterToken}` },
+        }
+      );
+
+      if (!tweetsResponse.ok) {
+        console.warn(`Could not fetch tweets for ${handle}, using empty list`);
+      }
+
+      const tweetsData = await tweetsResponse.json();
+      const tweets = tweetsData.data || [];
+
+      // Step 3: Parse and return structured data
+      return {
+        platform: "x",
+        handle: handle,
+        followers: user.public_metrics.followers_count,
+        following: user.public_metrics.following_count,
+        postCount: user.public_metrics.tweet_count,
+        bio: user.description || "",
+        recentPosts: tweets.map((tweet) => ({
+          caption: tweet.text,
+          likes: tweet.public_metrics.like_count,
+          comments: tweet.public_metrics.reply_count,
+          date: new Date(tweet.created_at).toISOString().split("T")[0],
+        })),
+      };
+    } catch (err) {
+      console.error(`Twitter API error for ${handle}:`, err.message);
+      throw err;
+    }
   }
 
   // Facebook Graph API

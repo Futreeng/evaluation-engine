@@ -18,8 +18,13 @@ const authRoutes = require("./routes/auth");
 const keysRoutes = require("./routes/keys");
 const sessionsRoutes = require("./routes/sessions");
 const proxyRoutes = require("./routes/proxy");
-const growthEngineRoutes = require("./routes/growth_engine");
+const growthEngineRoutes = require("./routes/growth-engine");
 const geDb = require("./growth_engine_db");
+
+// Phase 2: Import Phase 2 services
+const Database = require("./db/init");
+const JobQueue = require("./services/jobQueue");
+const AuditAnalyzer = require("./services/auditAnalyzer");
 
 const app = express();
 app.set("trust proxy", 1);
@@ -51,11 +56,40 @@ app.use((err, req, res, next) => {
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false });
 const apiLimiter = rateLimit({ windowMs: 60 * 1000, max: 120, standardHeaders: true, legacyHeaders: false });
 
-// Initialize Growth Engine database
+// Initialize Growth Engine database (legacy)
 geDb.initDb().catch((err) => {
   console.error("Failed to initialize Growth Engine database:", err);
   process.exit(1);
 });
+
+// Initialize Phase 2 services
+let db = null;
+let jobQueue = null;
+(async () => {
+  try {
+    console.log("[Server] Initializing Phase 2 services...");
+
+    // Initialize database
+    db = new Database(process.env.DB_PATH || "./server/data/convergence.db");
+    await db.init();
+    console.log("[Server] Database initialized");
+
+    // Initialize job queue
+    jobQueue = new JobQueue(db);
+    console.log("[Server] Job queue initialized");
+
+    // Create audit analyzer
+    const auditAnalyzer = new AuditAnalyzer(db, null, null);
+    jobQueue.setAuditAnalyzer(auditAnalyzer);
+
+    // Initialize growth engine routes with services
+    growthEngineRoutes.initializeServices(db, jobQueue);
+    console.log("[Server] Growth Engine routes initialized");
+  } catch (err) {
+    console.error("[Server] Failed to initialize Phase 2 services:", err);
+    process.exit(1);
+  }
+})();
 
 const BUILD_VERSION = "2026-09-14-a";
 
