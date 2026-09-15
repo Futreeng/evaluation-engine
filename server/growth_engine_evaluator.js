@@ -98,9 +98,10 @@ function getMockPostData(handle, platform, category) {
 function getDecryptedKeys(userId) {
   const rec = db.getApiKeysRecord(userId);
   return {
-    claudeKey: rec?.claudeKeyEnc ? decrypt(rec.claudeKeyEnc, process.env.ENCRYPTION_KEY) : null,
+    claudeKey: rec?.claudeKeyEnc ? decrypt(rec.claudeKeyEnc, process.env.ENCRYPTION_KEY) : process.env.CLAUDE_API_KEY,
     claudeWorkspaceId: rec?.claudeWorkspaceId || null,
-    geminiKey: rec?.geminiKeyEnc ? decrypt(rec.geminiKeyEnc, process.env.ENCRYPTION_KEY) : null,
+    geminiKey: rec?.geminiKeyEnc ? decrypt(rec.geminiKeyEnc, process.env.ENCRYPTION_KEY) : process.env.GEMINI_API_KEY,
+    groqKey: process.env.GROQ_API_KEY,
   };
 }
 
@@ -157,6 +158,32 @@ async function callGeminiNonStreaming(geminiKey, systemInstruction, userMessage)
   return candidates[0].content.parts[0].text;
 }
 
+async function callGroqNonStreaming(groqKey, systemInstruction, userMessage) {
+  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "authorization": `Bearer ${groqKey}`,
+    },
+    body: JSON.stringify({
+      model: "mixtral-8x7b-32768",
+      messages: [
+        { role: "system", content: systemInstruction },
+        { role: "user", content: userMessage },
+      ],
+      max_tokens: 2048,
+    }),
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Groq API error ${response.status}: ${detail.slice(0, 200)}`);
+  }
+
+  const data = await response.json();
+  return data.choices[0].message.content;
+}
+
 function interpolateTemplate(template, vars) {
   let result = template;
   Object.entries(vars).forEach(([key, value]) => {
@@ -165,10 +192,23 @@ function interpolateTemplate(template, vars) {
   return result;
 }
 
+async function callWithFallback(primaryCall, fallbackCall, label) {
+  try {
+    return await primaryCall();
+  } catch (err) {
+    console.log(`[Growth Engine] ${label} failed, trying fallback...`, err.message);
+    try {
+      return await fallbackCall();
+    } catch (fallbackErr) {
+      throw new Error(`${label} failed: ${err.message}; Fallback also failed: ${fallbackErr.message}`);
+    }
+  }
+}
+
 async function evaluateTier0(accountId, inputParams) {
-  const { claudeKey, claudeWorkspaceId, geminiKey } = getDecryptedKeys(accountId);
-  if (!claudeKey && !geminiKey) {
-    throw new Error("No Claude or Gemini API keys configured for this account");
+  const { claudeKey, claudeWorkspaceId, geminiKey, groqKey } = getDecryptedKeys(accountId);
+  if (!claudeKey && !geminiKey && !groqKey) {
+    throw new Error("No Claude, Gemini, or Groq API keys configured");
   }
 
   const { handle, platform, category } = inputParams;
@@ -183,23 +223,46 @@ async function evaluateTier0(accountId, inputParams) {
     CATEGORY_BENCHMARKS: JSON.stringify(benchmarks),
   };
 
-  // Call both personas in parallel
+  // Call both personas in parallel with fallback logic
+  const prompt1 = interpolateTemplate(PERSONA_PROMPTS.tier0.growthScanner, templateVars);
+  const prompt2 = interpolateTemplate(PERSONA_PROMPTS.tier0.gapAuditor, templateVars);
+
   const [personaAResponse, personaBResponse] = await Promise.all([
+    // Persona A: Growth Scanner (Claude > Gemini > Groq)
     (async () => {
-      if (!claudeKey) {
-        const prompt = interpolateTemplate(PERSONA_PROMPTS.tier0.growthScanner, templateVars);
-        return await callGeminiNonStreaming(geminiKey, "You are an expert social media strategist.", prompt);
+      if (claudeKey) {
+        return await callWithFallback(
+          () => callClaudeNonStreaming(claudeKey, claudeWorkspaceId, "You are an expert social media strategist.", prompt1),
+          () => geminiKey ? callGeminiNonStreaming(geminiKey, "You are an expert social media strategist.", prompt1) : callGroqNonStreaming(groqKey, "You are an expert social media strategist.", prompt1),
+          "Growth Scanner with Claude"
+        );
+      } else if (geminiKey) {
+        return await callWithFallback(
+          () => callGeminiNonStreaming(geminiKey, "You are an expert social media strategist.", prompt1),
+          () => callGroqNonStreaming(groqKey, "You are an expert social media strategist.", prompt1),
+          "Growth Scanner with Gemini"
+        );
+      } else {
+        return await callGroqNonStreaming(groqKey, "You are an expert social media strategist.", prompt1);
       }
-      const prompt = interpolateTemplate(PERSONA_PROMPTS.tier0.growthScanner, templateVars);
-      return await callClaudeNonStreaming(claudeKey, claudeWorkspaceId, "You are an expert social media strategist.", prompt);
     })(),
+    // Persona B: Gap Auditor (Gemini > Claude > Groq)
     (async () => {
-      if (!geminiKey) {
-        const prompt = interpolateTemplate(PERSONA_PROMPTS.tier0.gapAuditor, templateVars);
-        return await callClaudeNonStreaming(claudeKey, claudeWorkspaceId, "You are a data-driven social media analyst.", prompt);
+      if (geminiKey) {
+        return await callWithFallback(
+          () => callGeminiNonStreaming(geminiKey, "You are a data-driven social media analyst.", prompt2),
+          () => claudeKey ? callClaudeNonStreaming(claudeKey, claudeWorkspaceId, "You are a data-driven social media analyst.", prompt2) : callGroqNonStreaming(groqKey, "You are a data-driven social media analyst.", prompt2),
+          "Gap Auditor with Gemini"
+        );
+      } else if (claudeKey) {
+        return await callWithFallback(
+          () => callClaudeNonStreaming(claudeKey, claudeWorkspaceId, "You are a data-driven social media analyst.", prompt2),
+          () => callGroqNonStreaming(groqKey, "You are a data-driven social media analyst.", prompt2),
+          "Gap Auditor with Claude"
+        );
+      } else {
+        return await callGroqNonStreaming(groqKey, "You are a data-driven social media analyst.", prompt2);
       }
-      const prompt = interpolateTemplate(PERSONA_PROMPTS.tier0.gapAuditor, templateVars);
-      return await callGeminiNonStreaming(geminiKey, "You are a data-driven social media analyst.", prompt);
     })(),
   ]);
 
@@ -214,18 +277,19 @@ async function evaluateTier0(accountId, inputParams) {
   let mergedReport;
 
   if (claudeKey) {
-    mergedReport = await callClaudeNonStreaming(
-      claudeKey,
-      claudeWorkspaceId,
-      "You are an expert at synthesizing independent analyses into clear, customer-facing reports.",
-      mergePrompt
+    mergedReport = await callWithFallback(
+      () => callClaudeNonStreaming(claudeKey, claudeWorkspaceId, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt),
+      () => geminiKey ? callGeminiNonStreaming(geminiKey, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt) : callGroqNonStreaming(groqKey, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt),
+      "Merge with Claude"
+    );
+  } else if (geminiKey) {
+    mergedReport = await callWithFallback(
+      () => callGeminiNonStreaming(geminiKey, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt),
+      () => callGroqNonStreaming(groqKey, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt),
+      "Merge with Gemini"
     );
   } else {
-    mergedReport = await callGeminiNonStreaming(
-      geminiKey,
-      "You are an expert at synthesizing independent analyses into clear, customer-facing reports.",
-      mergePrompt
-    );
+    mergedReport = await callGroqNonStreaming(groqKey, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt);
   }
 
   // Parse the merged report into structured format matching api-contract §2
