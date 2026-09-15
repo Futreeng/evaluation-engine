@@ -46,6 +46,22 @@
     .score-good { background: #d1fae5; color: var(--secondary); }
     .score-fair { background: #fef3c7; color: var(--accent); }
     .score-poor { background: #fee2e2; color: #ef4444; }
+
+    button {
+      cursor: pointer;
+      border: none;
+      font-weight: 600;
+      transition: all 0.2s;
+    }
+
+    button:hover {
+      opacity: 0.9;
+      transform: scale(1.02);
+    }
+
+    button:active {
+      transform: scale(0.98);
+    }
   </style>
 </head>
 <body class="bg-neutral-light">
@@ -70,7 +86,7 @@
     <div class="max-w-4xl mx-auto text-center">
       <h2 class="text-5xl font-bold mb-6">Grow Your Social Presence</h2>
       <p class="text-xl mb-8 opacity-90">Get a personalized audit of your social media, discover your biggest opportunities, and unlock a data-driven growth strategy.</p>
-      <button onclick="navigateTo('evaluate')" class="px-8 py-3 bg-white text-primary font-semibold rounded-lg hover:bg-opacity-90">
+      <button onclick="navigateTo('evaluate')" class="px-8 py-4 bg-white text-primary font-bold rounded-lg hover:bg-gray-100 text-lg shadow-lg">
         Get Your Free Audit
       </button>
     </div>
@@ -120,7 +136,7 @@
             <input type="email" id="email" placeholder="you@example.com" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary" required>
           </div>
 
-          <button type="submit" class="w-full px-6 py-3 bg-primary text-white font-semibold rounded-lg hover:bg-primary-dark">
+          <button type="submit" class="w-full px-6 py-3 bg-primary text-white font-bold rounded-lg hover:bg-primary-dark text-lg shadow-md">
             Generate My Free Audit
           </button>
         </form>
@@ -180,7 +196,7 @@
       <div class="bg-gradient-to-r from-primary to-primary-dark text-white rounded-lg shadow-lg p-8 card-hover">
         <h3 class="text-2xl font-bold mb-4">Ready to Accelerate Your Growth?</h3>
         <p class="mb-6 opacity-90">Unlock your personalized 90-day content calendar, competitor analysis, and ready-to-use prompts for content generation.</p>
-        <button onclick="navigateTo('pricing')" class="px-6 py-3 bg-white text-primary font-semibold rounded-lg hover:bg-opacity-90">
+        <button onclick="navigateTo('pricing')" class="px-8 py-3 bg-white text-primary font-bold rounded-lg hover:bg-gray-100 text-lg shadow-md">
           Explore Growth Plan → $39/month
         </button>
       </div>
@@ -218,7 +234,7 @@
             </ul>
           </div>
           <div class="px-8 py-4 bg-gray-50">
-            <button onclick="navigateTo('evaluate')" class="w-full px-4 py-2 border-2 border-primary text-primary font-semibold rounded-lg hover:bg-primary hover:text-white">
+            <button onclick="navigateTo('evaluate')" class="w-full px-4 py-3 border-2 border-primary text-primary font-bold rounded-lg hover:bg-primary hover:text-white text-base">
               Get Started
             </button>
           </div>
@@ -252,7 +268,7 @@
             </ul>
           </div>
           <div class="px-8 py-4 bg-primary">
-            <button onclick="alert('Subscribe flow - will integrate with Stripe')" class="w-full px-4 py-2 bg-white text-primary font-semibold rounded-lg hover:bg-opacity-90">
+            <button onclick="alert('Subscribe flow - will integrate with Stripe')" class="w-full px-4 py-3 bg-white text-primary font-bold rounded-lg hover:bg-gray-100 text-base">
               Subscribe Now
             </button>
           </div>
@@ -283,7 +299,7 @@
             </ul>
           </div>
           <div class="px-8 py-4 bg-gray-50">
-            <button onclick="alert('Subscribe flow - will integrate with Stripe')" class="w-full px-4 py-2 border-2 border-primary text-primary font-semibold rounded-lg hover:bg-primary hover:text-white">
+            <button onclick="alert('Subscribe flow - will integrate with Stripe')" class="w-full px-4 py-3 border-2 border-primary text-primary font-bold rounded-lg hover:bg-primary hover:text-white text-base">
               Learn More
             </button>
           </div>
