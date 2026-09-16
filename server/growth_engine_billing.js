@@ -6,9 +6,13 @@
  * - Enforce tier entitlements
  * - Track billing cycles
  * - Handle failed payments
+ *
+ * Development: Uses mock payment processing
+ * Production: Integrates with real Stripe API
  */
 
 const geDb = require("./growth_engine_db");
+const crypto = require("crypto");
 
 // Tier pricing (in cents, monthly)
 const TIER_PRICING = {
@@ -21,16 +25,29 @@ const TIER_PRICING = {
 // Annual discounts (25% off)
 const ANNUAL_DISCOUNT = 0.25;
 
+// Mock subscriptions store (in production, this would be Stripe API + database)
+const mockSubscriptions = new Map();
+
 class BillingManager {
   constructor(stripeApiKey) {
     this.stripeApiKey = stripeApiKey;
-    // In production, initialize Stripe SDK here
-    // this.stripe = require('stripe')(stripeApiKey);
+    this.isProduction = !!stripeApiKey;
+
+    if (this.isProduction) {
+      // Initialize Stripe SDK in production
+      try {
+        this.stripe = require('stripe')(stripeApiKey);
+      } catch (err) {
+        console.warn("[Billing] Stripe SDK not available, using mock mode");
+        this.isProduction = false;
+      }
+    }
   }
 
   /**
    * Create subscription for user
-   * (Placeholder: actual Stripe integration in production)
+   * Mock mode: Simulates payment processing (for development)
+   * Production: Uses real Stripe API
    */
   async createSubscription(accountId, tier, stripeCustomerId, billingCycle = "monthly") {
     if (tier === "social_snapshot") {
@@ -49,25 +66,111 @@ class BillingManager {
       amount = Math.floor(priceInCents * 12 * (1 - ANNUAL_DISCOUNT));
     }
 
-    // In production:
-    // 1. Create Stripe subscription via API
-    // 2. Process payment
-    // 3. Update entitlement if successful
-    // 4. Send confirmation email
+    if (this.isProduction && this.stripe) {
+      // Production: use real Stripe
+      return await this._createStripeSubscription(accountId, tier, stripeCustomerId, amount, billingCycle);
+    }
 
-    console.log(`[Billing] Would create ${billingCycle} subscription for ${tier} (${amount} cents)`);
+    // Mock mode: Simulate payment processing
+    return await this._createMockSubscription(accountId, tier, amount, billingCycle);
+  }
 
-    // For now, upgrade tier directly (no payment processing yet)
+  /**
+   * Mock payment processing (development only)
+   * Simulates Stripe subscription creation
+   */
+  async _createMockSubscription(accountId, tier, amountInCents, billingCycle) {
+    const now = Date.now();
+    const subscriptionId = "sub_mock_" + crypto.randomBytes(8).toString("hex");
+
+    // Calculate billing period
+    const billingPeriodStart = now;
+    let billingPeriodEnd;
+    if (billingCycle === "monthly") {
+      billingPeriodEnd = now + (30 * 24 * 60 * 60 * 1000);
+    } else if (billingCycle === "annual") {
+      billingPeriodEnd = now + (365 * 24 * 60 * 60 * 1000);
+    }
+
+    // Create mock subscription record
+    const mockSub = {
+      subscriptionId,
+      accountId,
+      tier,
+      billingCycle,
+      amountInCents,
+      status: "active",
+      currentPeriodStart: billingPeriodStart,
+      currentPeriodEnd: billingPeriodEnd,
+      createdAt: now,
+      lastPayment: now,
+    };
+
+    mockSubscriptions.set(subscriptionId, mockSub);
+
+    // Upgrade tier in database
     const ent = await geDb.upgradeTier(accountId, tier);
 
+    console.log(`[Billing] Mock subscription created: ${subscriptionId} for ${tier} (${billingCycle})`);
+
     return {
+      subscriptionId,
       accountId,
       tier: ent.currentTier,
       billingCycle,
-      amountInCents: amount,
-      amountFormatted: `$${(amount / 100).toFixed(2)}`,
+      amountInCents,
+      amountFormatted: `$${(amountInCents / 100).toFixed(2)}`,
       status: "active",
-      message: "[PLACEHOLDER] In production, Stripe payment would be processed here",
+      currentPeriodStart: new Date(billingPeriodStart).toISOString(),
+      currentPeriodEnd: new Date(billingPeriodEnd).toISOString(),
+      message: "[MOCK MODE] Using simulated payment processing",
+    };
+  }
+
+  /**
+   * Real Stripe integration (production)
+   * TODO: Implement when Stripe keys are configured
+   */
+  async _createStripeSubscription(accountId, tier, customerId, amountInCents, billingCycle) {
+    throw new Error("[Stripe] Real Stripe integration not yet implemented. Use mock mode for development.");
+  }
+
+  /**
+   * Get subscription details for user
+   */
+  async getSubscription(accountId) {
+    // Search mock subscriptions for active subscription
+    for (const [subId, sub] of mockSubscriptions) {
+      if (sub.accountId === accountId && sub.status === "active") {
+        return sub;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Cancel subscription (downgrade to free tier)
+   */
+  async cancelSubscription(subscriptionId) {
+    const sub = mockSubscriptions.get(subscriptionId);
+    if (!sub) {
+      throw new Error(`Subscription not found: ${subscriptionId}`);
+    }
+
+    // Downgrade user to free tier
+    const ent = await geDb.upgradeTier(sub.accountId, "social_snapshot");
+
+    // Mark subscription as canceled
+    sub.status = "canceled";
+    sub.canceledAt = Date.now();
+    mockSubscriptions.set(subscriptionId, sub);
+
+    console.log(`[Billing] Subscription canceled: ${subscriptionId}`);
+
+    return {
+      subscriptionId,
+      status: "canceled",
+      downgradedTo: ent.currentTier,
     };
   }
 

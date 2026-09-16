@@ -1,6 +1,7 @@
 const { decrypt } = require("./crypto");
 const db = require("./db");
 const { analyzeTwitterAccount } = require("./twitter_fetcher");
+const { analyzeInstagramAccount } = require("./instagram_fetcher");
 
 // Persona prompts for each tier
 const PERSONA_PROMPTS = {
@@ -105,8 +106,19 @@ async function getRealPostData(handle, platform, category) {
       throw new Error(`Could not fetch Twitter data for @${handle}: ${err.message}`);
     }
   }
-  // Add Instagram, TikTok, etc. here later
-  throw new Error(`Platform ${platform} not yet supported. Start with Twitter/X.`);
+
+  if (platform === "instagram" || platform === "ig") {
+    try {
+      const instagramData = await analyzeInstagramAccount(handle);
+      return formatInstagramDataForAnalysis(instagramData);
+    } catch (err) {
+      console.error("[Growth Engine] Instagram fetch failed:", err.message);
+      throw new Error(`Could not fetch Instagram data for @${handle}: ${err.message}`);
+    }
+  }
+
+  // Add TikTok, LinkedIn, etc. here
+  throw new Error(`Platform '${platform}' not yet supported. Available: 'twitter' (x), 'instagram' (ig).`);
 }
 
 function formatTwitterDataForAnalysis(twitterData) {
@@ -125,6 +137,25 @@ function formatTwitterDataForAnalysis(twitterData) {
       retweets: t.public_metrics.retweet_count,
       replies: t.public_metrics.reply_count,
       text_preview: t.text.substring(0, 100),
+    })),
+  };
+}
+
+function formatInstagramDataForAnalysis(instagramData) {
+  // Convert Instagram API response into analysis-friendly format
+  return {
+    handle: instagramData.handle,
+    platform: "instagram",
+    follower_count: instagramData.follower_count,
+    post_count: instagramData.post_count,
+    metrics: instagramData.analysis,
+    recent_activity: instagramData.recent_posts.slice(0, 10).map((p) => ({
+      date: p.timestamp.split("T")[0],
+      engagement: (p.like_count || 0) + (p.comments_count || 0),
+      likes: p.like_count || 0,
+      comments: p.comments_count || 0,
+      media_type: p.media_type,
+      caption_preview: p.caption ? p.caption.substring(0, 100) : "",
     })),
   };
 }
