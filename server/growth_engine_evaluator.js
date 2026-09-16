@@ -247,6 +247,34 @@ async function callTogetherNonStreaming(togetherKey, system, userMessage) {
   return data.choices[0].message.content;
 }
 
+async function callOpenAINonStreaming(openaiKey, system, userMessage) {
+  if (!openaiKey) throw new Error("OpenAI API key not configured");
+
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${openaiKey}`,
+    },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      max_tokens: 2048,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: userMessage },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`OpenAI API error ${response.status}: ${detail.slice(0, 200)}`);
+  }
+
+  const data = await response.json();
+  return data.choices[0].message.content;
+}
+
 function interpolateTemplate(template, vars) {
   let result = template;
   Object.entries(vars).forEach(([key, value]) => {
@@ -284,9 +312,9 @@ async function callWithQuadFallback(primaryCall, secondaryCall, tertiaryCall, qu
         console.log(`[Growth Engine] ${label}: trying tertiary LLM (Groq)...`);
         return await tertiaryCall();
       } catch (err3) {
-        console.log(`[Growth Engine] ${label} (tertiary) failed, trying quaternary (Together)...`, err3.message);
+        console.log(`[Growth Engine] ${label} (tertiary) failed, trying quaternary (OpenAI)...`, err3.message);
         try {
-          console.log(`[Growth Engine] ${label}: trying quaternary LLM (Together)...`);
+          console.log(`[Growth Engine] ${label}: trying quaternary LLM (OpenAI)...`);
           return await quaternaryCall();
         } catch (err4) {
           console.log(`[Growth Engine] ${label} (quaternary) also failed - all LLMs exhausted`, err4.message);
@@ -299,8 +327,9 @@ async function callWithQuadFallback(primaryCall, secondaryCall, tertiaryCall, qu
 
 async function evaluateTier0(accountId, inputParams) {
   const { claudeKey, claudeWorkspaceId, geminiKey, groqKey } = getDecryptedKeys(accountId);
-  if (!claudeKey && !geminiKey && !groqKey) {
-    throw new Error("No LLM API keys configured (Claude, Gemini, Groq)");
+  const openaiKey = process.env.OPENAI_API_KEY;
+  if (!claudeKey && !geminiKey && !groqKey && !openaiKey) {
+    throw new Error("No LLM API keys configured (Claude, Gemini, Groq, or OpenAI)");
   }
 
   const { handle, platform, category } = inputParams;
@@ -332,20 +361,22 @@ async function evaluateTier0(accountId, inputParams) {
   const prompt1 = interpolateTemplate(PERSONA_PROMPTS.tier0.growthScanner, templateVars);
   const prompt2 = interpolateTemplate(PERSONA_PROMPTS.tier0.gapAuditor, templateVars);
 
-  console.log("[Growth Engine] Starting evaluation with 3-way fallback: Claude > Gemini > Groq");
+  console.log("[Growth Engine] Starting evaluation. Fallback chain: Claude → Gemini → Groq → OpenAI");
   const [personaAResponse, personaBResponse] = await Promise.all([
-    // Persona A: Growth Scanner (Claude > Gemini > Groq)
-    callWithTripleFallback(
+    // Persona A: Growth Scanner
+    callWithQuadFallback(
       () => callClaudeNonStreaming(claudeKey, claudeWorkspaceId, "You are an expert social media strategist.", prompt1),
       () => callGeminiNonStreaming(geminiKey, "You are an expert social media strategist.", prompt1),
       () => callGroqNonStreaming(groqKey, "You are an expert social media strategist.", prompt1),
+      () => callOpenAINonStreaming(openaiKey, "You are an expert social media strategist.", prompt1),
       "Growth Scanner"
     ),
-    // Persona B: Gap Auditor (Claude > Gemini > Groq)
-    callWithTripleFallback(
+    // Persona B: Gap Auditor
+    callWithQuadFallback(
       () => callClaudeNonStreaming(claudeKey, claudeWorkspaceId, "You are a data-driven social media analyst.", prompt2),
       () => callGeminiNonStreaming(geminiKey, "You are a data-driven social media analyst.", prompt2),
       () => callGroqNonStreaming(groqKey, "You are a data-driven social media analyst.", prompt2),
+      () => callOpenAINonStreaming(openaiKey, "You are a data-driven social media analyst.", prompt2),
       "Gap Auditor"
     ),
   ]);
@@ -359,11 +390,12 @@ async function evaluateTier0(accountId, inputParams) {
 
   const mergePrompt = interpolateTemplate(PERSONA_PROMPTS.tier0.merge, mergeTemplateVars);
 
-  // Merge: Claude > Gemini > Groq
-  const mergedReport = await callWithTripleFallback(
+  // Merge: Claude → Gemini → Groq → OpenAI
+  const mergedReport = await callWithQuadFallback(
     () => callClaudeNonStreaming(claudeKey, claudeWorkspaceId, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt),
     () => callGeminiNonStreaming(geminiKey, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt),
     () => callGroqNonStreaming(groqKey, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt),
+    () => callOpenAINonStreaming(openaiKey, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt),
     "Merge"
   );
 
