@@ -43,10 +43,9 @@ router.post("/evaluate/social-snapshot", async (req, res) => {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    const jobId = uid();
-
     // Create job in database
-    await geDb.createJob(jobId, "social_snapshot", { handle, platform, category, email }, accountId);
+    const jobResult = await geDb.createJob(accountId, "social_snapshot", { handle, platform, category, email });
+    const jobId = jobResult.jobId;
 
     // Process asynchronously (fire-and-forget)
     jobQueue.processJob(jobId, accountId, "social_snapshot", { handle, platform, category, email })
