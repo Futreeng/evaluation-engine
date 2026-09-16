@@ -165,14 +165,109 @@ Example: `@elonmusk_twitter_2026-09-16.md`
 
 ---
 
+## Error Codes & Responses
+
+All errors return a standardized JSON format:
+```json
+{
+  "error": "Human-readable message",
+  "code": "ERROR_CODE",
+  "status": 400,
+  "timestamp": "2026-09-16T12:00:00Z"
+}
+```
+
+**Auth Errors:**
+| Code | Status | Meaning |
+|------|--------|---------|
+| `INVALID_EMAIL` | 400 | Email is missing, invalid format, or too long |
+| `INVALID_PASSWORD` | 400 | Password is missing, too short (<6 chars), or too long |
+| `INVALID_COMPANY_NAME` | 400 | Company name is not a string or too long |
+| `EMAIL_EXISTS` | 409 | Email already registered (use login instead) |
+| `AUTH_FAILED` | 401 | Email/password combination is incorrect |
+| `MISSING_TOKEN` | 401 | Authorization header missing token |
+| `INVALID_TOKEN` | 401 | Token is invalid or expired (re-login needed) |
+
+**Evaluation Errors:**
+| Code | Status | Meaning |
+|------|--------|---------|
+| `INVALID_HANDLE` | 400 | Handle is missing or too long |
+| `INVALID_PLATFORM` | 400 | Platform not one of: twitter, x, instagram, ig |
+| `INVALID_CATEGORY` | 400 | Category is missing or too long |
+| `JOB_QUEUE_ERROR` | 500 | Backend job processing failed |
+
+**Subscription Errors:**
+| Code | Status | Meaning |
+|------|--------|---------|
+| `INVALID_TIER` | 400 | Tier not one of: social_snapshot, growth_plan, business_evaluator, agency |
+| `INVALID_BILLING_CYCLE` | 400 | Billing cycle must be 'monthly' or 'annual' |
+| `SUBSCRIPTION_ERROR` | 500 | Stripe or subscription processing failed |
+
+**How to Handle:**
+```javascript
+// Example error handling in frontend
+try {
+  const response = await fetch('/api/growth-engine/v1/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email, password })
+  });
+  const data = await response.json();
+  
+  if (!response.ok) {
+    // Standardized error
+    if (data.code === 'EMAIL_EXISTS') {
+      // Show: "Email already registered. Try logging in instead."
+    } else if (data.code === 'AUTH_FAILED') {
+      // Show: "Email or password incorrect. Try again."
+    } else {
+      // Show: data.error
+    }
+  }
+} catch (err) {
+  // Network error (not API error)
+}
+```
+
+---
+
+## Health Check
+
+Check backend status at: `GET /health`
+
+Returns:
+```json
+{
+  "status": "ok",
+  "db": "ok",
+  "apis": {
+    "claude": "configured",
+    "gemini": "configured",
+    "groq": "configured",
+    "openai": "missing",
+    "twitter": "configured",
+    "instagram": "missing"
+  }
+}
+```
+
+Use this to debug when evaluations aren't working.
+
+---
+
 ## Troubleshooting
 
 | Problem | Cause | Fix |
 |---------|-------|-----|
-| "Twitter handle not found" | Handle doesn't exist or private account | Try public account |
-| All LLMs fail with 429 | Rate limited on all providers | Wait 10 min, try again |
-| No report generating | Job stuck in "running" | Check server logs |
-| Frontend can't reach backend | CORS or port issue | Add `?api=http://localhost:3005` to URL |
+| 400 `INVALID_EMAIL` | Email format wrong | Use valid email like user@example.com |
+| 400 `INVALID_PASSWORD` | Password too short | Use at least 6 characters |
+| 409 `EMAIL_EXISTS` | Already signed up | Use login endpoint instead |
+| 401 `INVALID_TOKEN` | Token expired (7 days) | Re-login to get new token |
+| 401 `MISSING_TOKEN` | Forgot Authorization header | Add: `Authorization: Bearer {token}` |
+| 400 `INVALID_PLATFORM` | Platform typo | Use: "twitter", "x", "instagram", or "ig" |
+| 500 `JOB_QUEUE_ERROR` | Server error | Check server logs, verify LLM API keys |
+| Twitter handle not found | Account doesn't exist/private | Try a public account |
+| Evaluation stuck on "running" | LLM processing taking time | Wait 30-60 sec, check health endpoint |
+| Frontend can't reach backend | CORS or wrong port | Add `?api=http://localhost:3005` to URL |
 
 ---
 

@@ -5,6 +5,12 @@ const { evaluateProfile } = require("../growth_engine_evaluator");
 const BillingManager = require("../growth_engine_billing");
 const JobQueue = require("../growth_engine_job_queue");
 const { signup, login, verifyJWT } = require("../auth");
+const {
+  sendError,
+  validateAuthRequest,
+  validateEvaluationRequest,
+  validateSubscriptionRequest,
+} = require("../middleware");
 
 const router = express.Router();
 let jobQueue = new JobQueue();
@@ -24,36 +30,72 @@ const billingManager = new BillingManager(process.env.STRIPE_API_KEY);
 // Middleware: JWT authentication for protected endpoints
 const authMiddleware = async (req, res, next) => {
   const token = req.headers.authorization?.split(" ")[1];
-  if (!token) return res.status(401).json({ error: "Missing authorization token" });
+  if (!token) return sendError(res, 401, "MISSING_TOKEN", "Missing authorization token");
 
   const user = await verifyJWT(token);
-  if (!user) return res.status(401).json({ error: "Invalid token" });
+  if (!user) return sendError(res, 401, "INVALID_TOKEN", "Invalid or expired token");
 
   req.user = user;
   next();
 };
 
+// ===================== HEALTH CHECK =====================
+
+// GET /health
+router.get("/health", async (req, res) => {
+  const health = {
+    status: "ok",
+    timestamp: new Date().toISOString(),
+    apis: {},
+    db: "ok",
+  };
+
+  // Check database
+  try {
+    await geDb.getEntitlement("test-health-check");
+    health.db = "ok";
+  } catch (err) {
+    health.db = "error: " + err.message;
+    health.status = "degraded";
+  }
+
+  // Check LLM availability (just list what's configured)
+  health.apis.claude = process.env.CLAUDE_API_KEY ? "configured" : "missing";
+  health.apis.gemini = process.env.GEMINI_API_KEY ? "configured" : "missing";
+  health.apis.groq = process.env.GROQ_API_KEY ? "configured" : "missing";
+  health.apis.openai = process.env.OPENAI_API_KEY ? "configured" : "missing";
+
+  // Check social media APIs
+  health.apis.twitter = process.env.TWITTER_BEARER_TOKEN ? "configured" : "missing";
+  health.apis.instagram = process.env.INSTAGRAM_ACCESS_TOKEN ? "configured" : "missing";
+
+  res.json(health);
+});
+
 // ===================== AUTH ENDPOINTS =====================
 
 // POST /auth/signup
-router.post("/auth/signup", async (req, res) => {
+router.post("/auth/signup", validateAuthRequest, async (req, res) => {
   try {
     const { email, password, company_name } = req.body;
     const result = await signup(email, password, company_name);
     res.json(result);
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    if (err.message.includes("already registered")) {
+      return sendError(res, 409, "EMAIL_EXISTS", err.message);
+    }
+    sendError(res, 400, "SIGNUP_FAILED", err.message);
   }
 });
 
 // POST /auth/login
-router.post("/auth/login", async (req, res) => {
+router.post("/auth/login", validateAuthRequest, async (req, res) => {
   try {
     const { email, password } = req.body;
     const result = await login(email, password);
     res.json(result);
   } catch (err) {
-    res.status(401).json({ error: err.message });
+    sendError(res, 401, "AUTH_FAILED", err.message);
   }
 });
 
@@ -120,14 +162,10 @@ router.get("/account/reports", authMiddleware, async (req, res) => {
 });
 
 // Queue evaluation (protected by authMiddleware)
-router.post("/evaluate/social-snapshot", authMiddleware, async (req, res) => {
+router.post("/evaluate/social-snapshot", authMiddleware, validateEvaluationRequest, async (req, res) => {
   try {
     const { handle, platform, category, email } = req.body;
     const accountId = req.user.id;
-
-    if (!handle || !platform || !category || !email) {
-      return res.status(400).json({ error: "Missing required fields" });
-    }
 
     // Create job in database
     const jobResult = await geDb.createJob(accountId, "social_snapshot", { handle, platform, category, email });
@@ -140,7 +178,7 @@ router.post("/evaluate/social-snapshot", authMiddleware, async (req, res) => {
     res.json({ job_id: jobId, status: "queued" });
   } catch (err) {
     console.error("[Growth Engine] Queue error:", err);
-    res.status(500).json({ error: err.message });
+    sendError(res, 500, "JOB_QUEUE_ERROR", err.message);
   }
 });
 
@@ -184,7 +222,7 @@ router.get("/billing/pricing", async (req, res) => {
 });
 
 // Subscribe to tier
-router.post("/billing/subscribe", authMiddleware, async (req, res) => {
+router.post("/billing/subscribe", authMiddleware, validateSubscriptionRequest, async (req, res) => {
   try {
     const { tier, billingCycle } = req.body;
     const accountId = req.user.id;
@@ -198,7 +236,7 @@ router.post("/billing/subscribe", authMiddleware, async (req, res) => {
 
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendError(res, 500, "SUBSCRIPTION_ERROR", err.message);
   }
 });
 
