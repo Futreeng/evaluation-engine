@@ -7,6 +7,17 @@ const JobQueue = require("../growth_engine_job_queue");
 
 const router = express.Router();
 let jobQueue = new JobQueue();
+
+// Start job queue when routes are loaded
+(async () => {
+  try {
+    await jobQueue.start();
+    console.log("[Growth Engine] Job queue started");
+  } catch (err) {
+    console.error("[Growth Engine] Failed to start job queue:", err);
+  }
+})();
+
 const billingManager = new BillingManager(process.env.STRIPE_API_KEY);
 
 // Middleware: JWT authentication for all endpoints
@@ -33,12 +44,13 @@ router.post("/evaluate/social-snapshot", async (req, res) => {
     }
 
     const jobId = uid();
-    await jobQueue.queue({
-      id: jobId,
-      type: "evaluate",
-      tier: "social_snapshot",
-      input: { handle, platform, category, email, accountId },
-    });
+
+    // Create job in database
+    await geDb.createJob(jobId, "social_snapshot", { handle, platform, category, email }, accountId);
+
+    // Process asynchronously (fire-and-forget)
+    jobQueue.processJob(jobId, accountId, "social_snapshot", { handle, platform, category, email })
+      .catch(err => console.error(`[Growth Engine] Async job ${jobId} error:`, err));
 
     res.json({ job_id: jobId, status: "queued" });
   } catch (err) {
