@@ -48,7 +48,7 @@ GAP_AUDITOR_OUTPUT: {{PERSONA_B_RESPONSE}}
 Produce a report in exactly this shape (this is a FREE tier report):
 
 ---
-**FUTUREENG GROWTH SNAPSHOT — {{HANDLE}}**
+**futureEng GROWTH SNAPSHOT — {{HANDLE}}**
 
 **YOUR POSITION:**
 Open with a 1-2 sentence narrative about what's actually working. Extract the TOP_STRENGTH from Growth Scanner and describe it in business terms: "You're winning at [specific strength]. This is above 75% of accounts in your category." Never say a number without context. Translate the OVERALL_SCORE into plain language: "You're performing better than X% of similar accounts" or "You're tracking at category-average momentum."
