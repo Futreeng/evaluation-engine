@@ -334,7 +334,7 @@ async function evaluateTier0(accountId, inputParams) {
     "Merge"
   );
 
-  // Parse the merged report into structured format matching api-contract §2
+  // Use the actual LLM-generated narrative report, not mock data
   const reportBody = {
     report_id: "rpt_" + require("crypto").randomBytes(12).toString("hex"),
     tier: "social_snapshot",
@@ -347,38 +347,7 @@ async function evaluateTier0(accountId, inputParams) {
     generated_at: Date.now(),
     refresh_due_at: null,
     data_confidence: "full",
-    scores: {
-      overall: 47,
-      category_avg: 61,
-      dimensions: [
-        { key: "posting_consistency", label: "Posting Consistency", score: 35, explanation: "1.8 posts/week vs 4-5/week" },
-        { key: "content_mix", label: "Content Mix", score: 58, explanation: "80% static / 20% video" },
-        { key: "engagement_rate", label: "Engagement Rate", score: 52, explanation: "1.1% avg vs 2.4% benchmark" },
-        { key: "discovery_signal", label: "Discovery Signal", score: 40, explanation: "Mostly existing followers" },
-      ],
-    },
-    growth_path: {
-      phases: [
-        {
-          range: "1-30",
-          label: "Fix the consistency gap",
-          visible_action: "Shift toward short-form video around your top-performing theme.",
-          locked: { count: 4, teaser: "4 more specific moves + your exact weekly posting calendar" },
-        },
-        {
-          range: "31-60",
-          label: "Close the discovery gap",
-          visible_action: "Adopt trending formats to break out of the existing-follower bubble.",
-          locked: { count: 6, teaser: "The 6 specific hook/format types performing best in your niche" },
-        },
-        {
-          range: "61-90",
-          label: "Compound what's working",
-          visible_action: "Double down on the format that validates in the first 60 days.",
-          locked: { count: 3, teaser: "Content calendar, ready-to-use post prompts, competitor benchmarks" },
-        },
-      ],
-    },
+    narrative: mergedReport,
     raw_personas: {
       growth_scanner: personaAResponse,
       gap_auditor: personaBResponse,

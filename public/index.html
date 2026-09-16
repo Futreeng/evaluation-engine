@@ -427,33 +427,28 @@
 
     function displayReport(report) {
       document.getElementById('reportBusiness').textContent = `@${report.business.handle} • ${report.business.platform}`;
-      document.getElementById('overallScore').textContent = report.scores.overall;
-      document.getElementById('categoryAvg').textContent = report.scores.category_avg;
 
-      const scoresHtml = report.scores.dimensions.map(dim => `
-        <div class="bg-white rounded-lg shadow p-6 card-hover">
-          <div class="flex items-center justify-between">
-            <h4 class="font-semibold text-neutral-dark">${dim.label}</h4>
-            <div class="score-badge score-fair">${dim.score}</div>
-          </div>
-          <p class="text-sm text-gray-600 mt-2">${dim.explanation}</p>
-        </div>
-      `).join('');
+      // Display the client-friendly narrative report
+      const narrative = report.narrative || 'Report generated successfully';
 
-      document.getElementById('scoresContainer').innerHTML = scoresHtml;
+      // Format narrative as readable HTML (convert markdown-style formatting)
+      const formattedNarrative = narrative
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/🔒/g, '🔒')
+        .replace(/\n\n/g, '</p><p>')
+        .replace(/\n/g, '<br>');
 
-      const growthHtml = report.growth_path.phases.map(phase => `
-        <div class="border-l-4 border-primary pl-6">
-          <h4 class="font-bold text-neutral-dark mb-2">Days ${phase.range}</h4>
-          <p class="text-gray-700 mb-3">${phase.visible_action}</p>
-          <div class="flex items-center gap-2 text-sm text-gray-600">
-            <span>🔒</span>
-            <span>${phase.locked.teaser}</span>
+      // Create report content container
+      const reportContent = `
+        <div class="bg-white rounded-lg shadow-lg p-8 card-hover">
+          <div class="prose prose-sm max-w-none">
+            <p>${formattedNarrative}</p>
           </div>
         </div>
-      `).join('');
+      `;
 
-      document.getElementById('growthPathContainer').innerHTML = growthHtml;
+      document.getElementById('scoresContainer').innerHTML = reportContent;
+      document.getElementById('growthPathContainer').innerHTML = '';
 
       navigateTo('report');
     }
