@@ -305,8 +305,18 @@ async function evaluateTier0(accountId, inputParams) {
   const { handle, platform, category } = inputParams;
 
   // Fetch real social media data
-  const realData = await getRealPostData(handle, platform, category);
-  const postSummary = JSON.stringify(realData, null, 2);
+  let postSummary;
+  try {
+    const realData = await getRealPostData(handle, platform, category);
+    postSummary = JSON.stringify(realData, null, 2);
+  } catch (err) {
+    console.warn("[Growth Engine] Real data fetch failed:", err.message);
+    postSummary = JSON.stringify({
+      handle,
+      platform,
+      note: `Could not fetch real data: ${err.message}. Analyze based on platform best practices.`,
+    });
+  }
   const benchmarks = CATEGORY_BENCHMARKS[category] || CATEGORY_BENCHMARKS.fitness;
 
   const templateVars = {
