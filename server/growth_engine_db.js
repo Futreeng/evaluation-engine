@@ -29,6 +29,18 @@ async function initDb() {
 function initSchema() {
   if (!db) throw new Error("Database not initialized");
 
+  // Users table: customer accounts
+  db.run(`
+    CREATE TABLE IF NOT EXISTS users (
+      user_id TEXT PRIMARY KEY,
+      email TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      company_name TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `);
+
   // Jobs table: tracks async evaluation jobs
   db.run(`
     CREATE TABLE IF NOT EXISTS growth_engine_jobs (
