@@ -1,12 +1,24 @@
 # 🎯 Haron — Start Here
 
-Backend is ready. Here's what you need to know before building the UI.
+Backend is ready. **IMPORTANT: Schedule a Discord call with me ASAP to set up your environment properly** so we can build in parallel.
 
 ---
 
-## ⚠️ Critical: LLM API Keys
+## 🎯 IMMEDIATE: Discord Call
 
-**You need to add your own API keys to `.env` for testing.** We don't have Claude/Gemini credits yet.
+We need to sync up to:
+1. ✅ Get your Groq API key added to your local `.env`
+2. ✅ Verify the full evaluation flow works (queue → poll → retrieve → display)
+3. ✅ Align on which UI components to build first
+4. ✅ Set up parallel development workflow
+
+**Without this call, you'll hit blockers.** This takes 15 mins and unblocks everything.
+
+---
+
+## ⚠️ Environment Setup (Do This Before/After Call)
+
+**You need your own API keys for testing.** We don't have Claude/Gemini credits yet.
 
 **Best option: Use Groq (FREE)**
 ```bash
@@ -58,10 +70,12 @@ Backend is ready. Here's what you need to know before building the UI.
 - [ ] "Upgrade tier" button → `POST /billing/subscribe`
 
 ### Phase 4: Evaluation Flow (Uses real API + requires LLM key!)
-- [ ] Submit form: `POST /evaluate/social-snapshot` (requires token + valid LLM key)
-- [ ] Poll loop: `GET /job/:jobId` every 2 seconds
-- [ ] When complete: `GET /reports/:reportId`
-- [ ] Display markdown report
+- [ ] Submit form: `POST /evaluate/social-snapshot` (works without token for now)
+- [ ] Poll loop: `GET /job/:jobId` every 2 seconds (watch for `status: "complete"`)
+- [ ] When complete: `GET /reports/:reportId` → returns `{ reportId, reportBody: {...} }`
+- [ ] **Display report**: Parse `reportBody` and render as markdown/HTML
+  - Note: Backend returns structured report object, NOT plain markdown
+  - See TEAM_GUIDE.md for exact response format
 
 ### Phase 5: Polish
 - [ ] Error handling (show error messages from API)
@@ -168,5 +182,25 @@ Use React Router or similar to manage auth state (token in localStorage).
 
 ---
 
-**Ready to start?** Pick one page and build it. The API is stable and waiting. 🚀
+---
+
+## ✅ Current Status
+
+**Backend:** Evaluation flow works end-to-end! 🎉
+- ✅ Form submission queues job
+- ✅ Job processing works (Groq LLM generating reports)
+- ✅ Reports saved to database
+- ✅ `/reports/:reportId` returns complete report object
+
+**Frontend:** Evaluation form + polling works, but report display needs work
+- ✅ Form submits to backend
+- ✅ Polling works
+- ❌ Report parsing error: frontend looking for wrong field name
+- **Next:** Update report display logic to handle actual response format
+
+**Why the error?** The backend returns a structured report object, but your code was looking for an `overall` field that doesn't exist. Easy fix once you see the actual response format in the Network tab.
+
+---
+
+**Discord call first, then pick one page and build it. The API is stable and waiting. 🚀**
 

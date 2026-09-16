@@ -108,10 +108,32 @@ curl http://localhost:3005/api/growth-engine/v1/health
 - `GET /job/:jobId` — Poll status (no auth needed, job lookup is public)
   - Returns: `{ status, stage, error, resultPayload }`
 - `GET /reports/:reportId` — Fetch report (no auth needed, report lookup is public)
-  - Returns: full report object
+  - Returns: `{ reportId, accountId, tier, business: { handle, platform, category }, generatedAt, reportBody }`
+  - `reportBody` is a JSON object (NOT plain text) with the narrative report
 
-**Report format:**
-Generated reports are **narrative markdown**, saved to `/reports` folder. Example:
+**Report Response Format (Example):**
+```json
+{
+  "reportId": "rpt_abc123",
+  "accountId": "demo-account",
+  "tier": "social_snapshot",
+  "business": {
+    "handle": "twitter",
+    "platform": "x",
+    "category": "tech"
+  },
+  "generatedAt": 1726504444000,
+  "reportBody": {
+    "narrative": "You're winning at [strength]...",
+    "strengths": "...",
+    "opportunities": "...",
+    "actionPlan": "..."
+  }
+}
+```
+
+**Report Display:**
+Generated reports are **narrative text**, displayed as markdown. Access via `reportBody` from the API response (NOT from `/reports` folder). Example narrative:
 ```
 # Social Media Audit Report
 
