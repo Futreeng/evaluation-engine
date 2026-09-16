@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>futureEng Growth Engine - Social Media Audit & Strategy</title>
+  <title>Futreeng Growth Engine - Social Media Audit & Strategy</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     :root {
@@ -46,22 +46,6 @@
     .score-good { background: #d1fae5; color: var(--secondary); }
     .score-fair { background: #fef3c7; color: var(--accent); }
     .score-poor { background: #fee2e2; color: #ef4444; }
-
-    button {
-      cursor: pointer;
-      border: none;
-      font-weight: 600;
-      transition: all 0.2s;
-    }
-
-    button:hover {
-      opacity: 0.9;
-      transform: scale(1.02);
-    }
-
-    button:active {
-      transform: scale(0.98);
-    }
   </style>
 </head>
 <body class="bg-neutral-light">
@@ -72,21 +56,21 @@
         <div class="w-8 h-8 brand-gradient rounded-lg flex items-center justify-center">
           <span class="text-white font-bold">F</span>
         </div>
-        <h1 class="text-xl font-bold text-neutral-dark">futureEng Growth Engine</h1>
+        <h1 class="text-xl font-bold text-neutral-dark">Futreeng Growth Engine</h1>
       </div>
       <div class="flex items-center gap-4">
         <button onclick="navigateTo('pricing')" class="text-sm text-gray-600 hover:text-neutral-dark">Pricing</button>
-        <button onclick="navigateTo('auth')" style="background-color: #2563eb; color: white;" class="px-4 py-2 rounded-lg text-sm hover:opacity-90">Sign In</button>
+        <button onclick="navigateTo('auth')" class="px-4 py-2 bg-primary text-white rounded-lg text-sm hover:bg-primary-dark">Sign In</button>
       </div>
     </div>
   </nav>
 
   <!-- Hero Section -->
-  <section id="hero" style="background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%); color: white;" class="py-20 px-6">
+  <section id="hero" class="brand-gradient text-white py-20 px-6">
     <div class="max-w-4xl mx-auto text-center">
       <h2 class="text-5xl font-bold mb-6">Grow Your Social Presence</h2>
       <p class="text-xl mb-8 opacity-90">Get a personalized audit of your social media, discover your biggest opportunities, and unlock a data-driven growth strategy.</p>
-      <button onclick="navigateTo('evaluate')" style="color: #2563eb;" class="px-8 py-4 bg-white font-bold rounded-lg hover:bg-gray-100 text-lg shadow-lg">
+      <button onclick="navigateTo('evaluate')" class="px-8 py-3 bg-white text-primary font-semibold rounded-lg hover:bg-opacity-90">
         Get Your Free Audit
       </button>
     </div>
@@ -136,7 +120,7 @@
             <input type="email" id="email" placeholder="you@example.com" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary" required>
           </div>
 
-          <button type="submit" style="background-color: #2563eb; color: white;" class="w-full px-6 py-3 font-bold rounded-lg text-lg shadow-md hover:opacity-90">
+          <button type="submit" class="w-full px-6 py-3 bg-primary text-white font-semibold rounded-lg hover:bg-primary-dark">
             Generate My Free Audit
           </button>
         </form>
@@ -150,7 +134,7 @@
       <div class="bg-white rounded-lg shadow-lg p-12 text-center">
         <div class="mb-6">
           <div class="inline-flex items-center justify-center w-16 h-16 bg-primary bg-opacity-10 rounded-full">
-            <div style="border-color: #2563eb;" class="animate-spin w-8 h-8 border-4 border-t-transparent rounded-full"></div>
+            <div class="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full"></div>
           </div>
         </div>
         <h3 class="text-2xl font-bold text-neutral-dark mb-2">Analyzing Your Profile</h3>
@@ -193,10 +177,10 @@
       </div>
 
       <!-- Upsell Card -->
-      <div style="background: linear-gradient(to right, #2563eb, #1e40af); color: white;" class="rounded-lg shadow-lg p-8 card-hover">
+      <div class="bg-gradient-to-r from-primary to-primary-dark text-white rounded-lg shadow-lg p-8 card-hover">
         <h3 class="text-2xl font-bold mb-4">Ready to Accelerate Your Growth?</h3>
         <p class="mb-6 opacity-90">Unlock your personalized 90-day content calendar, competitor analysis, and ready-to-use prompts for content generation.</p>
-        <button onclick="navigateTo('pricing')" style="color: #2563eb;" class="px-8 py-3 bg-white font-bold rounded-lg hover:bg-gray-100 text-lg shadow-md">
+        <button onclick="navigateTo('pricing')" class="px-6 py-3 bg-white text-primary font-semibold rounded-lg hover:bg-opacity-90">
           Explore Growth Plan → $39/month
         </button>
       </div>
@@ -216,7 +200,7 @@
         <div class="bg-white rounded-lg shadow-lg overflow-hidden card-hover">
           <div class="p-8">
             <h3 class="text-2xl font-bold text-neutral-dark mb-2">Social Snapshot</h3>
-            <p style="color: #2563eb;" class="text-4xl font-bold mb-6">Free</p>
+            <p class="text-4xl font-bold text-primary mb-6">Free</p>
             <p class="text-gray-600 mb-8">Get started with a personalized audit.</p>
             <ul class="space-y-3 text-sm text-gray-700">
               <li class="flex items-center gap-2">
@@ -234,7 +218,7 @@
             </ul>
           </div>
           <div class="px-8 py-4 bg-gray-50">
-            <button onclick="navigateTo('evaluate')" style="color: #2563eb; border-color: #2563eb;" class="w-full px-4 py-3 border-2 font-bold rounded-lg hover:text-white text-base" onmouseover="this.style.backgroundColor='#2563eb'" onmouseout="this.style.backgroundColor='transparent'">
+            <button onclick="navigateTo('evaluate')" class="w-full px-4 py-2 border-2 border-primary text-primary font-semibold rounded-lg hover:bg-primary hover:text-white">
               Get Started
             </button>
           </div>
@@ -244,10 +228,10 @@
         <div class="bg-white rounded-lg shadow-lg overflow-hidden card-hover ring-2 ring-primary">
           <div class="p-8">
             <div class="mb-4">
-              <span style="background-color: #2563eb; color: white;" class="inline-block px-3 py-1 text-xs font-semibold rounded-full">Most Popular</span>
+              <span class="inline-block px-3 py-1 bg-primary text-white text-xs font-semibold rounded-full">Most Popular</span>
             </div>
             <h3 class="text-2xl font-bold text-neutral-dark mb-2">Growth Plan</h3>
-            <p style="color: #2563eb;" class="text-4xl font-bold mb-2">$39<span style="color: #4b5563;" class="text-lg">/mo</span></p>
+            <p class="text-4xl font-bold text-primary mb-2">$39<span class="text-lg text-gray-600">/mo</span></p>
             <p class="text-gray-600 mb-8">or $29/mo billed annually</p>
             <ul class="space-y-3 text-sm text-gray-700">
               <li class="flex items-center gap-2">
@@ -268,7 +252,7 @@
             </ul>
           </div>
           <div class="px-8 py-4 bg-primary">
-            <button onclick="alert('Subscribe flow - will integrate with Stripe')" style="color: #2563eb;" class="w-full px-4 py-3 bg-white font-bold rounded-lg hover:bg-gray-100 text-base">
+            <button onclick="alert('Subscribe flow - will integrate with Stripe')" class="w-full px-4 py-2 bg-white text-primary font-semibold rounded-lg hover:bg-opacity-90">
               Subscribe Now
             </button>
           </div>
@@ -278,7 +262,7 @@
         <div class="bg-white rounded-lg shadow-lg overflow-hidden card-hover">
           <div class="p-8">
             <h3 class="text-2xl font-bold text-neutral-dark mb-2">Business Evaluator</h3>
-            <p style="color: #2563eb;" class="text-4xl font-bold mb-2">$99<span style="color: #4b5563;" class="text-lg">/mo</span></p>
+            <p class="text-4xl font-bold text-primary mb-2">$99<span class="text-lg text-gray-600">/mo</span></p>
             <p class="text-gray-600 mb-8">or $74/mo billed annually</p>
             <ul class="space-y-3 text-sm text-gray-700">
               <li class="flex items-center gap-2">
@@ -299,7 +283,7 @@
             </ul>
           </div>
           <div class="px-8 py-4 bg-gray-50">
-            <button onclick="alert('Subscribe flow - will integrate with Stripe')" style="color: #2563eb; border-color: #2563eb;" class="w-full px-4 py-3 border-2 font-bold rounded-lg hover:text-white text-base" onmouseover="this.style.backgroundColor='#2563eb'" onmouseout="this.style.backgroundColor='transparent'">
+            <button onclick="alert('Subscribe flow - will integrate with Stripe')" class="w-full px-4 py-2 border-2 border-primary text-primary font-semibold rounded-lg hover:bg-primary hover:text-white">
               Learn More
             </button>
           </div>
@@ -311,7 +295,7 @@
   <!-- Features Section -->
   <section class="py-16 px-6">
     <div class="max-w-4xl mx-auto">
-      <h2 class="text-3xl font-bold text-neutral-dark mb-12 text-center">Why futureEng Works</h2>
+      <h2 class="text-3xl font-bold text-neutral-dark mb-12 text-center">Why Futreeng Works</h2>
       <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
         <div class="text-center">
           <div class="inline-flex items-center justify-center w-12 h-12 bg-primary bg-opacity-10 rounded-lg mb-4">
@@ -345,7 +329,7 @@
     <div class="max-w-6xl mx-auto">
       <div class="grid grid-cols-1 md:grid-cols-4 gap-8 mb-8">
         <div>
-          <h4 class="font-bold mb-4">futureEng</h4>
+          <h4 class="font-bold mb-4">Futreeng</h4>
           <p class="text-sm text-gray-400">Small business growth, powered by AI.</p>
         </div>
         <div>
@@ -373,28 +357,18 @@
         </div>
       </div>
       <div class="border-t border-gray-700 pt-8 text-center text-sm text-gray-400">
-        <p>&copy; 2026 futureEng LLC. All rights reserved.</p>
+        <p>&copy; 2026 Futreeng LLC. All rights reserved.</p>
       </div>
     </div>
   </footer>
 
   <script>
-    // Read API endpoint from: query param > localStorage > environment > default local
-    const urlParams = new URLSearchParams(window.location.search);
-    const apiBase = urlParams.get('api') ||
-                    localStorage.getItem('GROWTH_ENGINE_API_BASE') ||
-                    window.__API_BASE__ ||
-                    (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_API_BASE) ||
-                    'http://localhost:3005/api/growth-engine/v1';
+    // Read API endpoint from window config or environment
+    const API_BASE = window.__API_BASE__ ||
+                     (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_API_BASE) ||
+                     '/api/growth-engine/v1';
 
-    // Save to localStorage if provided via query param
-    if (urlParams.get('api')) {
-      localStorage.setItem('GROWTH_ENGINE_API_BASE', apiBase);
-    }
-
-    const API_BASE = apiBase;
     console.log('Growth Engine API endpoint:', API_BASE);
-    console.log('Tip: Change endpoint via ?api=YOUR_URL (e.g., ?api=http://localhost:3005/api/growth-engine/v1)');
 
     function navigateTo(section) {
       document.querySelectorAll('section').forEach(s => s.classList.add('hidden'));
@@ -463,7 +437,7 @@
       document.getElementById('scoresContainer').innerHTML = scoresHtml;
 
       const growthHtml = report.growth_path.phases.map(phase => `
-        <div style="border-left-color: #2563eb;" class="border-l-4 pl-6">
+        <div class="border-l-4 border-primary pl-6">
           <h4 class="font-bold text-neutral-dark mb-2">Days ${phase.range}</h4>
           <p class="text-gray-700 mb-3">${phase.visible_action}</p>
           <div class="flex items-center gap-2 text-sm text-gray-600">
