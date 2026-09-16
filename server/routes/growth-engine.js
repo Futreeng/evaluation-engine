@@ -161,11 +161,12 @@ router.get("/account/reports", authMiddleware, async (req, res) => {
   }
 });
 
-// Queue evaluation (protected by authMiddleware)
-router.post("/evaluate/social-snapshot", authMiddleware, validateEvaluationRequest, async (req, res) => {
+// Queue evaluation (TEMP: no auth for frontend testing; add authMiddleware back once Haron builds login)
+router.post("/evaluate/social-snapshot", validateEvaluationRequest, async (req, res) => {
   try {
     const { handle, platform, category, email } = req.body;
-    const accountId = req.user.id;
+    // TEMP: Use demo account for testing; will be req.user.id once auth is enforced
+    const accountId = req.user?.id || "demo-account";
 
     // Create job in database
     const jobResult = await geDb.createJob(accountId, "social_snapshot", { handle, platform, category, email });
