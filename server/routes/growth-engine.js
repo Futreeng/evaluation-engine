@@ -4,6 +4,7 @@ const geDb = require("../growth_engine_db");
 const { evaluateProfile } = require("../growth_engine_evaluator");
 const BillingManager = require("../growth_engine_billing");
 const JobQueue = require("../growth_engine_job_queue");
+const { signup, login, verifyJWT } = require("../auth");
 
 const router = express.Router();
 let jobQueue = new JobQueue();
@@ -20,24 +21,109 @@ let jobQueue = new JobQueue();
 
 const billingManager = new BillingManager(process.env.STRIPE_API_KEY);
 
-// Middleware: JWT authentication for all endpoints
-const authMiddleware = (req, res, next) => {
+// Middleware: JWT authentication for protected endpoints
+const authMiddleware = async (req, res, next) => {
   const token = req.headers.authorization?.split(" ")[1];
   if (!token) return res.status(401).json({ error: "Missing authorization token" });
-  try {
-    const jwt = require("jsonwebtoken");
-    req.user = jwt.verify(token, process.env.JWT_SECRET);
-    next();
-  } catch (err) {
-    res.status(401).json({ error: "Invalid token" });
-  }
+
+  const user = await verifyJWT(token);
+  if (!user) return res.status(401).json({ error: "Invalid token" });
+
+  req.user = user;
+  next();
 };
 
-// Queue evaluation (no auth for demo, but add authMiddleware for production)
-router.post("/evaluate/social-snapshot", async (req, res) => {
+// ===================== AUTH ENDPOINTS =====================
+
+// POST /auth/signup
+router.post("/auth/signup", async (req, res) => {
+  try {
+    const { email, password, company_name } = req.body;
+    const result = await signup(email, password, company_name);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// POST /auth/login
+router.post("/auth/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const result = await login(email, password);
+    res.json(result);
+  } catch (err) {
+    res.status(401).json({ error: err.message });
+  }
+});
+
+// GET /auth/me
+router.get("/auth/me", authMiddleware, async (req, res) => {
+  try {
+    const user = await geDb.getUserById(req.user.id);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    res.json({
+      user_id: user.userId,
+      email: user.email,
+      company_name: user.companyName,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ===================== ACCOUNT ENDPOINTS =====================
+
+// GET /account/profile
+router.get("/account/profile", authMiddleware, async (req, res) => {
+  try {
+    const user = await geDb.getUserById(req.user.id);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    res.json({
+      user_id: user.userId,
+      email: user.email,
+      company_name: user.companyName,
+      created_at: user.createdAt,
+      updated_at: user.updatedAt,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /account/subscription-status
+router.get("/account/subscription-status", authMiddleware, async (req, res) => {
+  try {
+    const ent = await geDb.getOrCreateEntitlement(req.user.id);
+    res.json({
+      user_id: req.user.id,
+      current_tier: ent.currentTier,
+      tier_start_date: ent.tierStartDate,
+      billing_period_start: ent.billingPeriodStart,
+      billing_period_end: ent.billingPeriodEnd,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /account/reports
+router.get("/account/reports", authMiddleware, async (req, res) => {
+  try {
+    const reports = await geDb.listReportsByAccount(req.user.id);
+    res.json({ reports });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Queue evaluation (protected by authMiddleware)
+router.post("/evaluate/social-snapshot", authMiddleware, async (req, res) => {
   try {
     const { handle, platform, category, email } = req.body;
-    const accountId = req.user?.id || "demo-account";
+    const accountId = req.user.id;
 
     if (!handle || !platform || !category || !email) {
       return res.status(400).json({ error: "Missing required fields" });
@@ -88,30 +174,8 @@ router.get("/reports/:reportId", async (req, res) => {
   }
 });
 
-// List user reports
-router.get("/reports", authMiddleware, async (req, res) => {
-  try {
-    const accountId = req.user?.id || "demo-account";
-    const reports = await geDb.getUserReports(accountId);
-    res.json({ reports });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Check entitlements
-router.get("/entitlements", authMiddleware, async (req, res) => {
-  try {
-    const accountId = req.user?.id || "demo-account";
-    const ent = await geDb.getOrCreateEntitlement(accountId);
-    res.json({ account_id: accountId, current_tier: ent.currentTier });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // Get pricing
-router.get("/billing/pricing", authMiddleware, async (req, res) => {
+router.get("/billing/pricing", async (req, res) => {
   try {
     res.json(billingManager.getPricing());
   } catch (err) {
@@ -123,7 +187,7 @@ router.get("/billing/pricing", authMiddleware, async (req, res) => {
 router.post("/billing/subscribe", authMiddleware, async (req, res) => {
   try {
     const { tier, billingCycle } = req.body;
-    const accountId = req.user?.id || "demo-account";
+    const accountId = req.user.id;
 
     const result = await billingManager.createSubscription(
       accountId,
@@ -142,7 +206,7 @@ router.post("/billing/subscribe", authMiddleware, async (req, res) => {
 router.post("/billing/check-access", authMiddleware, async (req, res) => {
   try {
     const { requiredTier } = req.body;
-    const accountId = req.user?.id || "demo-account";
+    const accountId = req.user.id;
 
     const access = await billingManager.checkEntitlement(accountId, requiredTier);
     if (!access.hasAccess) {
@@ -156,7 +220,7 @@ router.post("/billing/check-access", authMiddleware, async (req, res) => {
 });
 
 // Estimate cost
-router.get("/billing/estimate", authMiddleware, async (req, res) => {
+router.get("/billing/estimate", async (req, res) => {
   try {
     const { tier, billingCycle, clientCount } = req.query;
     const cost = billingManager.estimateCost(
@@ -181,8 +245,8 @@ router.post("/billing/webhook", async (req, res) => {
   }
 });
 
-// Queue stats
-router.get("/admin/queue-stats", authMiddleware, async (req, res) => {
+// Queue stats (admin endpoint)
+router.get("/admin/queue-stats", async (req, res) => {
   try {
     const stats = jobQueue.getStats();
     res.json(stats);

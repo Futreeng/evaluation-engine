@@ -444,6 +444,87 @@ async function getTierHistory(accountId) {
   }));
 }
 
+// ===================== USER OPERATIONS =====================
+
+async function createUser(email, passwordHash, companyName) {
+  if (!db) throw new Error("Database not initialized");
+
+  const userId = "user_" + uid();
+  const now = Date.now();
+
+  db.run(
+    `INSERT INTO users (user_id, email, password_hash, company_name, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [userId, email, passwordHash, companyName || null, now, now]
+  );
+
+  saveDb();
+  return { userId, email, companyName, createdAt: now };
+}
+
+async function getUserByEmail(email) {
+  if (!db) throw new Error("Database not initialized");
+
+  const result = db.exec(
+    `SELECT * FROM users WHERE email = ?`,
+    [email]
+  );
+
+  if (!result || result.length === 0 || result[0].values.length === 0) {
+    return null;
+  }
+
+  const row = result[0].values[0];
+  const columns = result[0].columns;
+
+  return {
+    userId: row[columns.indexOf("user_id")],
+    email: row[columns.indexOf("email")],
+    passwordHash: row[columns.indexOf("password_hash")],
+    companyName: row[columns.indexOf("company_name")],
+    createdAt: row[columns.indexOf("created_at")],
+    updatedAt: row[columns.indexOf("updated_at")],
+  };
+}
+
+async function getUserById(userId) {
+  if (!db) throw new Error("Database not initialized");
+
+  const result = db.exec(
+    `SELECT * FROM users WHERE user_id = ?`,
+    [userId]
+  );
+
+  if (!result || result.length === 0 || result[0].values.length === 0) {
+    return null;
+  }
+
+  const row = result[0].values[0];
+  const columns = result[0].columns;
+
+  return {
+    userId: row[columns.indexOf("user_id")],
+    email: row[columns.indexOf("email")],
+    passwordHash: row[columns.indexOf("password_hash")],
+    companyName: row[columns.indexOf("company_name")],
+    createdAt: row[columns.indexOf("created_at")],
+    updatedAt: row[columns.indexOf("updated_at")],
+  };
+}
+
+async function updateUserPassword(userId, passwordHash) {
+  if (!db) throw new Error("Database not initialized");
+
+  const now = Date.now();
+  db.run(
+    `UPDATE users SET password_hash = ?, updated_at = ? WHERE user_id = ?`,
+    [passwordHash, now, userId]
+  );
+
+  saveDb();
+  return getUserById(userId);
+}
+
 module.exports = {
   initDb,
   // Jobs
@@ -461,4 +542,9 @@ module.exports = {
   getEntitlement,
   upgradeTier,
   getTierHistory,
+  // Users
+  createUser,
+  getUserByEmail,
+  getUserById,
+  updateUserPassword,
 };
