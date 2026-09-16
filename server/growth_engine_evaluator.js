@@ -221,16 +221,20 @@ async function callWithFallback(primaryCall, fallbackCall, label) {
 // 3-way fallback: try all three LLMs in sequence
 async function callWithTripleFallback(primaryCall, secondaryCall, tertiaryCall, label) {
   try {
+    console.log(`[Growth Engine] ${label}: trying primary LLM...`);
     return await primaryCall();
   } catch (err1) {
     console.log(`[Growth Engine] ${label} (primary) failed, trying secondary...`, err1.message);
     try {
+      console.log(`[Growth Engine] ${label}: trying secondary LLM...`);
       return await secondaryCall();
     } catch (err2) {
       console.log(`[Growth Engine] ${label} (secondary) failed, trying tertiary...`, err2.message);
       try {
+        console.log(`[Growth Engine] ${label}: trying tertiary LLM...`);
         return await tertiaryCall();
       } catch (err3) {
+        console.log(`[Growth Engine] ${label} (tertiary) also failed - all LLMs exhausted`, err3.message);
         throw new Error(`${label} failed: ${err1.message}; secondary: ${err2.message}; tertiary: ${err3.message}`);
       }
     }
@@ -259,6 +263,7 @@ async function evaluateTier0(accountId, inputParams) {
   const prompt1 = interpolateTemplate(PERSONA_PROMPTS.tier0.growthScanner, templateVars);
   const prompt2 = interpolateTemplate(PERSONA_PROMPTS.tier0.gapAuditor, templateVars);
 
+  console.log("[Growth Engine] Starting evaluation with 3-way fallback: Claude > Gemini > Groq");
   const [personaAResponse, personaBResponse] = await Promise.all([
     // Persona A: Growth Scanner (Claude > Gemini > Groq)
     callWithTripleFallback(
