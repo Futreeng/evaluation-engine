@@ -218,6 +218,25 @@ async function callWithFallback(primaryCall, fallbackCall, label) {
   }
 }
 
+// 3-way fallback: try all three LLMs in sequence
+async function callWithTripleFallback(primaryCall, secondaryCall, tertiaryCall, label) {
+  try {
+    return await primaryCall();
+  } catch (err1) {
+    console.log(`[Growth Engine] ${label} (primary) failed, trying secondary...`, err1.message);
+    try {
+      return await secondaryCall();
+    } catch (err2) {
+      console.log(`[Growth Engine] ${label} (secondary) failed, trying tertiary...`, err2.message);
+      try {
+        return await tertiaryCall();
+      } catch (err3) {
+        throw new Error(`${label} failed: ${err1.message}; secondary: ${err2.message}; tertiary: ${err3.message}`);
+      }
+    }
+  }
+}
+
 async function evaluateTier0(accountId, inputParams) {
   const { claudeKey, claudeWorkspaceId, geminiKey, groqKey } = getDecryptedKeys(accountId);
   if (!claudeKey && !geminiKey && !groqKey) {
@@ -242,41 +261,19 @@ async function evaluateTier0(accountId, inputParams) {
 
   const [personaAResponse, personaBResponse] = await Promise.all([
     // Persona A: Growth Scanner (Claude > Gemini > Groq)
-    (async () => {
-      if (claudeKey) {
-        return await callWithFallback(
-          () => callClaudeNonStreaming(claudeKey, claudeWorkspaceId, "You are an expert social media strategist.", prompt1),
-          () => geminiKey ? callGeminiNonStreaming(geminiKey, "You are an expert social media strategist.", prompt1) : callGroqNonStreaming(groqKey, "You are an expert social media strategist.", prompt1),
-          "Growth Scanner with Claude"
-        );
-      } else if (geminiKey) {
-        return await callWithFallback(
-          () => callGeminiNonStreaming(geminiKey, "You are an expert social media strategist.", prompt1),
-          () => callGroqNonStreaming(groqKey, "You are an expert social media strategist.", prompt1),
-          "Growth Scanner with Gemini"
-        );
-      } else {
-        return await callGroqNonStreaming(groqKey, "You are an expert social media strategist.", prompt1);
-      }
-    })(),
-    // Persona B: Gap Auditor (Gemini > Claude > Groq)
-    (async () => {
-      if (geminiKey) {
-        return await callWithFallback(
-          () => callGeminiNonStreaming(geminiKey, "You are a data-driven social media analyst.", prompt2),
-          () => claudeKey ? callClaudeNonStreaming(claudeKey, claudeWorkspaceId, "You are a data-driven social media analyst.", prompt2) : callGroqNonStreaming(groqKey, "You are a data-driven social media analyst.", prompt2),
-          "Gap Auditor with Gemini"
-        );
-      } else if (claudeKey) {
-        return await callWithFallback(
-          () => callClaudeNonStreaming(claudeKey, claudeWorkspaceId, "You are a data-driven social media analyst.", prompt2),
-          () => callGroqNonStreaming(groqKey, "You are a data-driven social media analyst.", prompt2),
-          "Gap Auditor with Claude"
-        );
-      } else {
-        return await callGroqNonStreaming(groqKey, "You are a data-driven social media analyst.", prompt2);
-      }
-    })(),
+    callWithTripleFallback(
+      () => callClaudeNonStreaming(claudeKey, claudeWorkspaceId, "You are an expert social media strategist.", prompt1),
+      () => callGeminiNonStreaming(geminiKey, "You are an expert social media strategist.", prompt1),
+      () => callGroqNonStreaming(groqKey, "You are an expert social media strategist.", prompt1),
+      "Growth Scanner"
+    ),
+    // Persona B: Gap Auditor (Claude > Gemini > Groq)
+    callWithTripleFallback(
+      () => callClaudeNonStreaming(claudeKey, claudeWorkspaceId, "You are a data-driven social media analyst.", prompt2),
+      () => callGeminiNonStreaming(geminiKey, "You are a data-driven social media analyst.", prompt2),
+      () => callGroqNonStreaming(groqKey, "You are a data-driven social media analyst.", prompt2),
+      "Gap Auditor"
+    ),
   ]);
 
   // Merge step
@@ -287,23 +284,14 @@ async function evaluateTier0(accountId, inputParams) {
   };
 
   const mergePrompt = interpolateTemplate(PERSONA_PROMPTS.tier0.merge, mergeTemplateVars);
-  let mergedReport;
 
-  if (claudeKey) {
-    mergedReport = await callWithFallback(
-      () => callClaudeNonStreaming(claudeKey, claudeWorkspaceId, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt),
-      () => geminiKey ? callGeminiNonStreaming(geminiKey, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt) : callGroqNonStreaming(groqKey, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt),
-      "Merge with Claude"
-    );
-  } else if (geminiKey) {
-    mergedReport = await callWithFallback(
-      () => callGeminiNonStreaming(geminiKey, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt),
-      () => callGroqNonStreaming(groqKey, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt),
-      "Merge with Gemini"
-    );
-  } else {
-    mergedReport = await callGroqNonStreaming(groqKey, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt);
-  }
+  // Merge: Claude > Gemini > Groq
+  const mergedReport = await callWithTripleFallback(
+    () => callClaudeNonStreaming(claudeKey, claudeWorkspaceId, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt),
+    () => callGeminiNonStreaming(geminiKey, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt),
+    () => callGroqNonStreaming(groqKey, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt),
+    "Merge"
+  );
 
   // Parse the merged report into structured format matching api-contract §2
   const reportBody = {
