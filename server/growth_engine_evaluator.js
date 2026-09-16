@@ -220,11 +220,13 @@ async function callGroqNonStreaming(groqKey, systemInstruction, userMessage) {
 }
 
 async function callTogetherNonStreaming(togetherKey, system, userMessage) {
+  if (!togetherKey) throw new Error("Together API key not configured");
+
   const response = await fetch("https://api.together.xyz/v1/chat/completions", {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${togetherKey}`,
+      "Authorization": `Bearer ${togetherKey}`,
     },
     body: JSON.stringify({
       model: "meta-llama/Llama-3-70b-chat-hf",
@@ -297,9 +299,8 @@ async function callWithQuadFallback(primaryCall, secondaryCall, tertiaryCall, qu
 
 async function evaluateTier0(accountId, inputParams) {
   const { claudeKey, claudeWorkspaceId, geminiKey, groqKey } = getDecryptedKeys(accountId);
-  const togetherKey = process.env.TOGETHER_API_KEY;
-  if (!claudeKey && !geminiKey && !groqKey && !togetherKey) {
-    throw new Error("No LLM API keys configured (Claude, Gemini, Groq, or Together)");
+  if (!claudeKey && !geminiKey && !groqKey) {
+    throw new Error("No LLM API keys configured (Claude, Gemini, Groq)");
   }
 
   const { handle, platform, category } = inputParams;
@@ -331,22 +332,20 @@ async function evaluateTier0(accountId, inputParams) {
   const prompt1 = interpolateTemplate(PERSONA_PROMPTS.tier0.growthScanner, templateVars);
   const prompt2 = interpolateTemplate(PERSONA_PROMPTS.tier0.gapAuditor, templateVars);
 
-  console.log("[Growth Engine] Starting evaluation with 4-way fallback: Claude > Gemini > Groq > Together");
+  console.log("[Growth Engine] Starting evaluation with 3-way fallback: Claude > Gemini > Groq");
   const [personaAResponse, personaBResponse] = await Promise.all([
-    // Persona A: Growth Scanner (Claude > Gemini > Groq > Together)
-    callWithQuadFallback(
+    // Persona A: Growth Scanner (Claude > Gemini > Groq)
+    callWithTripleFallback(
       () => callClaudeNonStreaming(claudeKey, claudeWorkspaceId, "You are an expert social media strategist.", prompt1),
       () => callGeminiNonStreaming(geminiKey, "You are an expert social media strategist.", prompt1),
       () => callGroqNonStreaming(groqKey, "You are an expert social media strategist.", prompt1),
-      () => callTogetherNonStreaming(togetherKey, "You are an expert social media strategist.", prompt1),
       "Growth Scanner"
     ),
-    // Persona B: Gap Auditor (Claude > Gemini > Groq > Together)
-    callWithQuadFallback(
+    // Persona B: Gap Auditor (Claude > Gemini > Groq)
+    callWithTripleFallback(
       () => callClaudeNonStreaming(claudeKey, claudeWorkspaceId, "You are a data-driven social media analyst.", prompt2),
       () => callGeminiNonStreaming(geminiKey, "You are a data-driven social media analyst.", prompt2),
       () => callGroqNonStreaming(groqKey, "You are a data-driven social media analyst.", prompt2),
-      () => callTogetherNonStreaming(togetherKey, "You are a data-driven social media analyst.", prompt2),
       "Gap Auditor"
     ),
   ]);
@@ -360,12 +359,11 @@ async function evaluateTier0(accountId, inputParams) {
 
   const mergePrompt = interpolateTemplate(PERSONA_PROMPTS.tier0.merge, mergeTemplateVars);
 
-  // Merge: Claude > Gemini > Groq > Together
-  const mergedReport = await callWithQuadFallback(
+  // Merge: Claude > Gemini > Groq
+  const mergedReport = await callWithTripleFallback(
     () => callClaudeNonStreaming(claudeKey, claudeWorkspaceId, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt),
     () => callGeminiNonStreaming(geminiKey, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt),
     () => callGroqNonStreaming(groqKey, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt),
-    () => callTogetherNonStreaming(togetherKey, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt),
     "Merge"
   );
 
