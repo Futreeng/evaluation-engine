@@ -38,10 +38,33 @@ Runs on `http://localhost:3005`
 
 **API Base URL:** Read from `?api=` query param, fallback to localStorage
 
-**Key endpoints:**
-- `POST /evaluate/social-snapshot` — Queue evaluation
-- `GET /job/:jobId` — Poll status (returns `{ status, stage, error, resultPayload }`)
-- `GET /reports/:reportId` — Fetch report
+**Auth endpoints (NEW):**
+- `POST /auth/signup` — Register new account
+  - Body: `{ email, password, company_name }`
+  - Returns: `{ token, user: { user_id, email, company_name } }`
+- `POST /auth/login` — Login
+  - Body: `{ email, password }`
+  - Returns: `{ token, user: { user_id, email, company_name } }`
+- `GET /auth/me` — Get current user (requires token)
+  - Header: `Authorization: Bearer {token}`
+  - Returns: `{ user_id, email, company_name }`
+
+**Account endpoints (NEW):**
+- `GET /account/profile` — Get user profile (requires token)
+  - Returns: `{ user_id, email, company_name, created_at, updated_at }`
+- `GET /account/subscription-status` — Check tier (requires token)
+  - Returns: `{ user_id, current_tier, tier_start_date, billing_period_start, billing_period_end }`
+- `GET /account/reports` — List user's reports (requires token)
+  - Returns: `{ reports: [...] }`
+
+**Protected evaluation endpoints:**
+- `POST /evaluate/social-snapshot` — Queue evaluation (requires token)
+  - Body: `{ handle, platform, category, email }`
+  - Returns: `{ job_id, status }`
+- `GET /job/:jobId` — Poll status (no auth needed, job lookup is public)
+  - Returns: `{ status, stage, error, resultPayload }`
+- `GET /reports/:reportId` — Fetch report (no auth needed, report lookup is public)
+  - Returns: full report object
 
 **Report format:**
 Generated reports are **narrative markdown**, saved to `/reports` folder. Example:
@@ -68,6 +91,13 @@ Your 30-60-90 Action Sequence:
 - `running` → evaluation in progress (stage: `evaluating`)
 - `complete` → done; check `resultPayload.narrative`
 - `failed` → error in `error` field
+
+**JWT Token Flow:**
+1. User signs up/logs in: `POST /auth/signup` or `POST /auth/login`
+2. Store returned `token` in `localStorage.setItem('token', token)`
+3. For all protected endpoints, add header: `Authorization: Bearer ${token}`
+4. Tokens expire in 7 days; user must re-login when expired
+5. Handle 401 response → redirect to login page
 
 ---
 
@@ -99,9 +129,11 @@ If all fail → error message shows which LLM failed last
 Located: `server/data/growth_engine.db`
 
 **Tables:**
-- `growth_engine_jobs` — async job tracking
-- `growth_engine_reports` — generated reports
-- `entitlements` — subscription tiers (not yet implemented)
+- `users` — customer accounts (email, password_hash, company_name, created_at, updated_at)
+- `growth_engine_jobs` — async job tracking (account_id, status, input_params, result_payload)
+- `growth_engine_reports` — generated reports (account_id, business_handle, report_body)
+- `entitlements` — subscription tiers (account_id, current_tier: 'social_snapshot'|'growth_plan'|'business_evaluator'|'enterprise')
+- `tier_history` — tier change audit log
 
 **To inspect:**
 ```bash
@@ -129,7 +161,7 @@ Example: `@elonmusk_twitter_2026-09-16.md`
 1. **Twitter only for now** — Instagram/TikTok/LinkedIn can be added (copy `twitter_fetcher.js`)
 2. **Free tier quota limits** — Gemini + Claude have free account limits; Groq is most reliable
 3. **Mock category benchmarks** — Using sample fitness/food benchmarks; should be real industry data
-4. **No auth** — Demo mode; add JWT auth for production
+4. **No payment integration** — Subscription tiers tracked in database, but Stripe not wired up yet
 
 ---
 
@@ -146,17 +178,20 @@ Example: `@elonmusk_twitter_2026-09-16.md`
 
 ## What's Next
 
-**Backend priorities:**
-1. Add Instagram fetcher (reuse Twitter pattern)
-2. Add real industry benchmarks (replace mock data)
-3. Implement subscription tier checking
-4. Add Stripe integration for billing
+**Backend priorities (coming):**
+1. ✅ Auth/accounts system (DONE)
+2. Add Instagram fetcher (reuse Twitter pattern)
+3. Add real industry benchmarks (replace mock data)
+4. Integrate Stripe for billing (payment processing)
+5. Add subscription tier enforcement (limit free tier evaluations)
 
-**Frontend priorities:**
-1. Display narrative report with formatting
-2. Add handle history / saved audits
-3. Add social sharing for reports
-4. Show LLM model used in final report
+**Frontend priorities (for Haron):**
+1. 🔄 Build signup/login pages
+2. 🔄 Build dashboard (show user's reports & tier status)
+3. Build evaluation form (connected to real API)
+4. Display narrative report with formatting
+5. Add handle history / saved audits
+6. Add social sharing for reports
 
 ---
 
