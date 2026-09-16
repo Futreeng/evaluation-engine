@@ -20,7 +20,8 @@
     "express-session": "^1.19.0",
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
-    "sql.js": "^1.14.2"
+    "sql.js": "^1.14.2",
+    "uuid": "^14.0.2"
   },
   "overrides": {
     "qs": "6.16.0"

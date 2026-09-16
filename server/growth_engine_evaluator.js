@@ -134,7 +134,9 @@ async function callClaudeNonStreaming(claudeKey, claudeWorkspaceId, system, user
 }
 
 async function callGeminiNonStreaming(geminiKey, systemInstruction, userMessage) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(geminiKey)}`;
+  // v1 endpoint with gemini-2.5-flash (supports all required features)
+  const url = `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(geminiKey)}`;
+  console.log("[Growth Engine] Calling Gemini with URL:", url.split('?')[0]);
 
   const body = {
     contents: [{ parts: [{ text: userMessage }] }],
