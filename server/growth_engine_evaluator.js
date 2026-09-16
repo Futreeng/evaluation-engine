@@ -179,7 +179,7 @@ async function callGroqNonStreaming(groqKey, systemInstruction, userMessage) {
       "authorization": `Bearer ${groqKey}`,
     },
     body: JSON.stringify({
-      model: "llama3-8b-8192",
+      model: "groq/compound",
       messages: [
         { role: "system", content: systemInstruction },
         { role: "user", content: userMessage },
