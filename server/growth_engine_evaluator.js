@@ -40,22 +40,34 @@ Also output OVERALL_SCORE: a single 0-100 figure (average or weighted average of
 
 Every score must reference a real number or observation from the input — never output a round, unsupported score. If a dimension can't be measured from the given input, say so and note what data would be needed instead of fabricating a number.`,
 
-    merge: `You are merging two independent audits of the same social media account into one customer-facing report. You have:
+    merge: `You are creating an executive summary report for a social media business owner. Make it feel like a strategic conversation, not a scorecard. You have:
 
 GROWTH_SCANNER_OUTPUT: {{PERSONA_A_RESPONSE}}
 GAP_AUDITOR_OUTPUT: {{PERSONA_B_RESPONSE}}
 
-Produce a report in exactly this shape (this is a FREE tier report — see the rules below on specificity):
+Produce a report in exactly this shape (this is a FREE tier report):
 
-1. Header: "FUTREENG SOCIAL SNAPSHOT — {{HANDLE}}"
-2. OVERALL_SCORE vs CATEGORY_AVG, then the four dimension scores each with their one-line explanation, pulled directly from the Gap Auditor output.
-3. "YOUR 30-60-90 GROWTH PATH (preview)" — three phases (Days 1-30, 31-60, 61-90). For each phase:
-   a. ONE visible action, phrased at the level of "shift toward X" or "adopt Y approach" — a real, useful, category-level direction the reader could start on today. Base this on the Growth Scanner's BIGGEST_LEVER and the Gap Auditor's lowest-scoring dimensions, sequenced so the biggest gap is addressed first.
-   b. A locked-recommendation line starting with "🔒" that NAMES a specific, countable thing that exists in the paid tier but does NOT reveal its content — e.g. "4 more specific moves + your exact weekly posting calendar," never a vague "unlock more insights."
+---
+**FUTUREENG GROWTH SNAPSHOT — {{HANDLE}}**
 
-CRITICAL RULE: this is the free tier. Do not include specific post ideas, hooks, captions, hashtags, exact posting times, or a calendar — those are Growth Plan (paid) content. Every visible recommendation must stop at the "what category of action" level. If you are unsure whether something is specific enough to be paid content, err toward locking it.
+**YOUR POSITION:**
+Open with a 1-2 sentence narrative about what's actually working. Extract the TOP_STRENGTH from Growth Scanner and describe it in business terms: "You're winning at [specific strength]. This is above 75% of accounts in your category." Never say a number without context. Translate the OVERALL_SCORE into plain language: "You're performing better than X% of similar accounts" or "You're tracking at category-average momentum."
 
-Close with: "12 more recommendations unlock in your full Growth Plan →"`
+**THE SINGLE BIGGEST OPPORTUNITY:**
+Take the BIGGEST_LEVER from Growth Scanner and reframe it as a concrete business outcome, not a tactic. Example: instead of "increase posting frequency," say "Closing the gap between your posting rhythm and high-performer accounts in your category would likely unlock 30-50% more audience reach." Make it tangible. Explain WHY this matters for their business in their category (fitness, food, design, etc.).
+
+**YOUR 30-60-90 ACTION SEQUENCE:**
+Frame this as a clear priority order, not phases. Each is ONE visible action they can start THIS WEEK:
+   1. [Days 1-30 action]: Phrased as "Start doing X differently..." — a shift they control immediately.
+   2. [Days 31-60 action]: The logical next step that builds on #1.
+   3. [Days 61-90 action]: The compound effect they're building toward.
+
+After each action, add a 🔒 locked insight, phrased like: "🔒 Your Growth Plan includes the specific posting template + weekly execution checklist for this phase."
+
+**WHAT COMES NEXT:**
+Close with: "Your full Growth Plan includes [3-4 specific deliverable types, no numbers] + your personalized 13-week calendar → [upgrade link]"
+
+CRITICAL: This is free-tier. No specific hooks, captions, posting times, exact numbers of posts, or calendar. Every recommendation stops at the category-level action. Make it feel like a strategic insight, not a tactical playbook.`
   },
 };
 
