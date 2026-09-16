@@ -1,5 +1,6 @@
 const { decrypt } = require("./crypto");
 const db = require("./db");
+const { analyzeTwitterAccount } = require("./twitter_fetcher");
 
 // Persona prompts for each tier
 const PERSONA_PROMPTS = {
@@ -93,18 +94,39 @@ const CATEGORY_BENCHMARKS = {
   },
 };
 
-// Mock post data for demo (in production, this would come from social media APIs)
-function getMockPostData(handle, platform, category) {
-  return [
-    { date: "2026-09-10", format: "reel", engagement: 450, reach: 8200 },
-    { date: "2026-09-08", format: "carousel", engagement: 280, reach: 5100 },
-    { date: "2026-09-06", format: "static", engagement: 120, reach: 2800 },
-    { date: "2026-09-05", format: "reel", engagement: 520, reach: 9100 },
-    { date: "2026-09-02", format: "static", engagement: 95, reach: 1900 },
-    { date: "2026-08-31", format: "reel", engagement: 380, reach: 7200 },
-    { date: "2026-08-28", format: "carousel", engagement: 310, reach: 6100 },
-    { date: "2026-08-26", format: "static", engagement: 105, reach: 2100 },
-  ];
+// Fetch real social media data based on platform
+async function getRealPostData(handle, platform, category) {
+  if (platform === "x" || platform === "twitter") {
+    try {
+      const twitterData = await analyzeTwitterAccount(handle);
+      return formatTwitterDataForAnalysis(twitterData);
+    } catch (err) {
+      console.error("[Growth Engine] Twitter fetch failed:", err.message);
+      throw new Error(`Could not fetch Twitter data for @${handle}: ${err.message}`);
+    }
+  }
+  // Add Instagram, TikTok, etc. here later
+  throw new Error(`Platform ${platform} not yet supported. Start with Twitter/X.`);
+}
+
+function formatTwitterDataForAnalysis(twitterData) {
+  // Convert Twitter API response into analysis-friendly format
+  return {
+    handle: twitterData.handle,
+    platform: "twitter",
+    follower_count: twitterData.follower_count,
+    tweet_count: twitterData.tweet_count,
+    metrics: twitterData.analysis,
+    recent_activity: twitterData.recent_tweets.slice(0, 10).map((t) => ({
+      date: t.created_at.split("T")[0],
+      engagement: t.public_metrics.like_count + t.public_metrics.reply_count + t.public_metrics.retweet_count,
+      reach: t.public_metrics.impression_count || 0,
+      likes: t.public_metrics.like_count,
+      retweets: t.public_metrics.retweet_count,
+      replies: t.public_metrics.reply_count,
+      text_preview: t.text.substring(0, 100),
+    })),
+  };
 }
 
 function getDecryptedKeys(userId) {
@@ -281,7 +303,10 @@ async function evaluateTier0(accountId, inputParams) {
   }
 
   const { handle, platform, category } = inputParams;
-  const postSummary = JSON.stringify(getMockPostData(handle, platform, category), null, 2);
+
+  // Fetch real social media data
+  const realData = await getRealPostData(handle, platform, category);
+  const postSummary = JSON.stringify(realData, null, 2);
   const benchmarks = CATEGORY_BENCHMARKS[category] || CATEGORY_BENCHMARKS.fitness;
 
   const templateVars = {
