@@ -11,6 +11,7 @@
 const { Worker } = require("worker_threads");
 const path = require("path");
 const geDb = require("./growth_engine_db");
+const { saveReportAsMarkdown } = require("./report_saver");
 
 class JobQueue {
   constructor(numWorkers = 2) {
@@ -89,6 +90,17 @@ class JobQueue {
 
       // Create report record
       await geDb.createReport(accountId, tier, inputParams, reportBody);
+
+      // Save report as markdown file for reference
+      try {
+        saveReportAsMarkdown(
+          inputParams.handle,
+          inputParams.platform,
+          reportBody.narrative || JSON.stringify(reportBody, null, 2)
+        );
+      } catch (err) {
+        console.warn(`[JobQueue] Warning: Could not save report file:`, err.message);
+      }
 
       console.log(`[JobQueue] ✅ Job ${jobId} completed`);
     } catch (err) {
