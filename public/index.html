@@ -56,7 +56,7 @@
         <div class="w-8 h-8 brand-gradient rounded-lg flex items-center justify-center">
           <span class="text-white font-bold">F</span>
         </div>
-        <h1 class="text-xl font-bold text-neutral-dark">Futreeng Growth Engine</h1>
+        <h1 class="text-xl font-bold text-neutral-dark">futureEng Growth Engine</h1>
       </div>
       <div class="flex items-center gap-4">
         <button onclick="navigateTo('pricing')" class="text-sm text-gray-600 hover:text-neutral-dark">Pricing</button>
@@ -357,16 +357,22 @@
         </div>
       </div>
       <div class="border-t border-gray-700 pt-8 text-center text-sm text-gray-400">
-        <p>&copy; 2026 Futreeng LLC. All rights reserved.</p>
+        <p>&copy; 2026 futureEng LLC. All rights reserved.</p>
       </div>
     </div>
   </footer>
 
   <script>
-    // Read API endpoint from window config or environment
-    const API_BASE = window.__API_BASE__ ||
+    // Read API endpoint from query param, localStorage, or default
+    const params = new URLSearchParams(window.location.search);
+    const API_BASE = params.get('api') ||
+                     localStorage.getItem('API_BASE') ||
+                     window.__API_BASE__ ||
                      (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_API_BASE) ||
                      '/api/growth-engine/v1';
+
+    // Save to localStorage for future sessions
+    if (params.get('api')) localStorage.setItem('API_BASE', params.get('api'));
 
     console.log('Growth Engine API endpoint:', API_BASE);
 
