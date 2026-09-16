@@ -34,7 +34,51 @@ Runs on `http://localhost:3005`
 2. Update `getRealPostData()` in evaluator to call it
 3. Add platform option to frontend form
 
-### For Frontend (Haron)
+### For Frontend (Haron) — Development Setup
+
+**⚠️ IMPORTANT: LLM API Keys Required**
+
+The backend needs **at least ONE LLM API key** to generate reports. We don't have Claude/Gemini credits yet, so you'll need to set up your own for testing.
+
+**Cheapest options for development:**
+1. **Groq** (FREE, recommended for testing)
+   - Get key: https://console.groq.com/keys
+   - 100% free, no credit card, unlimited (rate limited)
+   - Use this for testing
+
+2. **Gemini** (FREE tier, limited)
+   - Get key: https://aistudio.google.com/app/apikey
+   - Free tier: 60 requests/minute
+   - Good for testing, but will hit limits
+
+3. **OpenAI** (Free trial credits)
+   - Get key: https://platform.openai.com/account/api-keys
+   - Free trial has ~$5 in credits (enough for 500+ evaluations)
+   - After trial, costs money
+
+4. **Claude** (Anthropic, paid)
+   - Costs money immediately
+   - Skip this for now
+
+**Setup steps:**
+```bash
+cd server
+cp .env.example .env
+# Edit .env and add at least one LLM key (use Groq for free testing)
+npm start
+```
+
+**Test it worked:**
+```bash
+curl http://localhost:3005/api/growth-engine/v1/health
+# Should show your LLM keys as "configured"
+```
+
+**Building the UI:**
+- You can build all UI flows without worrying about LLMs
+- When testing evaluation (queue → poll → retrieve), the backend will process it
+- If no LLM keys: evaluation hangs on "running" forever (no error, just waiting)
+- So: **add at least Groq API key to .env before testing evaluation flow**
 
 **API Base URL:** Read from `?api=` query param, fallback to localStorage
 
