@@ -33,6 +33,25 @@ app.set("trust proxy", 1);
 app.use(helmet({
   contentSecurityPolicy: false, // the frontend loads Tailwind/React/Babel from CDNs; see README before hardening this for production
 }));
+
+// Enable CORS for Growth Engine API (allow Vercel frontend to call localhost backend during development)
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  // Allow Vercel frontend and localhost
+  if (origin && (origin.includes('vercel.app') || origin.includes('localhost'))) {
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Access-Control-Allow-Credentials', 'true');
+  }
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 // Conversations accumulate history (every prior turn is replayed to the model),
 // so bodies grow well past a couple of megabytes in long sessions. 2mb was too
 // tight and produced opaque 413 HTML error pages mid-conversation.
