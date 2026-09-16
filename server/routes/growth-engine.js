@@ -59,8 +59,8 @@ router.post("/evaluate/social-snapshot", async (req, res) => {
   }
 });
 
-// Poll job status
-router.get("/job/:jobId", authMiddleware, async (req, res) => {
+// Poll job status (no auth for demo)
+router.get("/job/:jobId", async (req, res) => {
   try {
     const job = await geDb.getJob(req.params.jobId);
     if (!job) return res.status(404).json({ error: "Job not found" });
@@ -78,8 +78,8 @@ router.get("/job/:jobId", authMiddleware, async (req, res) => {
   }
 });
 
-// Get report
-router.get("/reports/:reportId", authMiddleware, async (req, res) => {
+// Get report (no auth for demo)
+router.get("/reports/:reportId", async (req, res) => {
   try {
     const report = await geDb.getReport(req.params.reportId);
     if (!report) return res.status(404).json({ error: "Report not found" });
