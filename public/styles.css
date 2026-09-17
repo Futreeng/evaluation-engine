@@ -99,13 +99,13 @@ button:disabled { cursor: default; opacity: .6; }
 .topbar .right a.plain:hover { color: var(--ink); text-decoration: none; }
 
 /* report header variant */
-.topbar.report { padding: 18px 40px; }
-.topbar.report .left { display: flex; align-items: center; gap: 18px; min-width: 0; flex: 1; flex-wrap: wrap; }
-.topbar.report .right { flex: none; }
-.topbar.report .vsep { height: 18px; width: 1px; background: var(--b1); }
-.topbar.report .handle { font-size: 15px; color: var(--ink); font-weight: 600; }
-.topbar.report .ctx { font-family: var(--mono); font-size: 12px; color: var(--dim); letter-spacing: .08em; }
-.topbar.report .brandname { font-family: var(--serif); font-size: 22px; color: var(--ink); text-decoration: none; }
+.topbar.reportbar { padding: 18px 40px; }
+.topbar.reportbar .left { display: flex; align-items: center; gap: 18px; min-width: 0; flex: 1; flex-wrap: wrap; }
+.topbar.reportbar .right { flex: none; }
+.topbar.reportbar .vsep { height: 18px; width: 1px; background: var(--b1); }
+.topbar.reportbar .handle { font-size: 15px; color: var(--ink); font-weight: 600; }
+.topbar.reportbar .ctx { font-family: var(--mono); font-size: 12px; color: var(--dim); letter-spacing: .08em; }
+.topbar.reportbar .brandname { font-family: var(--serif); font-size: 22px; color: var(--ink); text-decoration: none; }
 
 /* ---------- buttons ---------- */
 .btn {
@@ -410,10 +410,10 @@ button:disabled { cursor: default; opacity: .6; }
   .brand .name { font-size: 21px; }
   .brand .tag { font-size: 9px; letter-spacing: .2em; }
   .topbar .right .btn { display: none; }
-  .topbar.report { padding: 14px 16px; }
-  .topbar.report .left { gap: 8px; }
-  .topbar.report .vsep, .topbar.report .handle { display: none; }
-  .topbar.report .ctx { width: 100%; font-size: 11px; margin-top: 4px; }
+  .topbar.reportbar { padding: 14px 16px; }
+  .topbar.reportbar .left { gap: 8px; }
+  .topbar.reportbar .vsep, .topbar.reportbar .handle { display: none; }
+  .topbar.reportbar .ctx { width: 100%; font-size: 11px; margin-top: 4px; }
   .hero-band-wrap { padding: 16px 16px 0; }
   .hero-band { padding: 18px; border-radius: 12px; gap: 16px; }
   .hero-band h2 { font-size: 32px; line-height: 1.06; margin-top: 10px; }
@@ -487,3 +487,20 @@ button:disabled { cursor: default; opacity: .6; }
   .signin input { height: 50px; }
   .center-msg { padding: 48px 16px; }
 }
+
+/* ---------- narrative report (backend free tier returns markdown) ---------- */
+.narrative .prose { max-width: 720px; font-size: 16px; line-height: 1.65; color: var(--text); }
+.narrative .prose h2, .narrative .prose h3, .narrative .prose h4 { font-family: var(--serif); font-weight: 400; color: var(--ink); margin: 28px 0 8px; line-height: 1.2; }
+.narrative .prose h2 { font-size: 26px; } .narrative .prose h3 { font-size: 22px; } .narrative .prose h4 { font-size: 18px; }
+.narrative .prose p { margin: 0 0 14px; }
+.narrative .prose b { color: var(--ink); font-weight: 600; }
+.narrative .prose ul, .narrative .prose ol { margin: 0 0 14px; padding-left: 22px; }
+.narrative .prose li { margin: 0 0 6px; }
+.narrative .prose li::marker { color: var(--accent); }
+.narrative .prose hr { border: 0; border-top: 1px solid var(--b1); margin: 24px 0; }
+.narrative .prose code { font-family: var(--mono); font-size: 14px; color: var(--ink); background: var(--s2); padding: 1px 5px; border-radius: 3px; }
+
+/* platforms not yet scored by the backend */
+.chip.soon { color: var(--dim); border-style: dashed; }
+.chip.soon small { font-family: var(--mono); font-size: 9px; letter-spacing: .1em; text-transform: uppercase; margin-left: 6px; color: var(--gold); }
+.chip.soon.on { background: var(--s2); color: var(--ink); }

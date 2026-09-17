@@ -10,8 +10,11 @@
 
   // ------------------------------------------------------------ data
   const PLATFORMS = [
-    ['instagram', 'Instagram'], ['tiktok', 'TikTok'], ['x', 'X'], ['facebook', 'Facebook'], ['linkedin', 'LinkedIn']
+    ['instagram', 'Instagram'], ['tiktok', 'TikTok'], ['youtube', 'YouTube'], ['x', 'X'], ['facebook', 'Facebook'], ['linkedin', 'LinkedIn']
   ];
+  // Mock supports every platform; the real backend only what config lists.
+  const SUPPORTED = CFG.useMock ? PLATFORMS.map(p => p[0]) : (CFG.supportedPlatforms || PLATFORMS.map(p => p[0]));
+  const supported = k => SUPPORTED.includes(k);
   const CATEGORIES = [
     ['boutique_fitness', 'Boutique Fitness'], ['fitness', 'Fitness'], ['food_beverage', 'Food & Beverage'],
     ['retail', 'Retail'], ['professional_services', 'Professional Services']
@@ -42,6 +45,28 @@
   const go = hash => { location.hash = hash; };
   const grade = s => s < 50 ? ['Weak', 'weak'] : s < 70 ? ['Fair', 'fair'] : ['Strong', 'strong'];
 
+  // Tiny markdown → HTML for the backend's narrative report (headings, bold, lists, paragraphs).
+  function md(src) {
+    const lines = String(src).replace(/\r/g, '').split('\n');
+    const out = []; let list = null; let para = [];
+    const inline = t => esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\*(.+?)\*/g, '<i>$1</i>').replace(/`(.+?)`/g, '<code>$1</code>');
+    const flushP = () => { if (para.length) { out.push('<p>' + inline(para.join(' ')) + '</p>'); para = []; } };
+    const flushL = () => { if (list) { out.push('</' + list + '>'); list = null; } };
+    for (const ln of lines) {
+      const t = ln.trim();
+      if (!t) { flushP(); flushL(); continue; }
+      let m;
+      if ((m = /^(#{1,6})\s+(.*)$/.exec(t))) { flushP(); flushL(); const lvl = Math.min(4, m[1].length + 1); out.push(`<h${lvl}>${inline(m[2])}</h${lvl}>`); continue; }
+      if (/^(-{3,}|\*{3,})$/.test(t)) { flushP(); flushL(); out.push('<hr>'); continue; }
+      if ((m = /^[-*•]\s+(.*)$/.exec(t))) { flushP(); if (list !== 'ul') { flushL(); list = 'ul'; out.push('<ul>'); } out.push('<li>' + inline(m[1]) + '</li>'); continue; }
+      if ((m = /^\d+[.)]\s+(.*)$/.exec(t))) { flushP(); if (list !== 'ol') { flushL(); list = 'ol'; out.push('<ol>'); } out.push('<li>' + inline(m[1]) + '</li>'); continue; }
+      if (list) flushL();
+      para.push(t);
+    }
+    flushP(); flushL();
+    return out.join('');
+  }
+
   let toastTimer;
   function toast(msg) {
     let el = document.querySelector('.toast');
@@ -53,12 +78,13 @@
   // ------------------------------------------------------------ api
   class ApiError extends Error { constructor(status, body) { super(body?.error || ('HTTP ' + status)); this.status = status; this.body = body; } }
   async function api(path, init = {}, opts = {}) {
-    const url = path.startsWith('/api/') ? path : API + path;
+    const url = path.startsWith('/api/') || path.startsWith('http') ? path : API + path;
     const headers = { 'Content-Type': 'application/json', ...(init.headers || {}) };
     const t = token(); if (t) headers.Authorization = 'Bearer ' + t;
     const doFetch = CFG.useMock && window.scalecraftMockFetch ? window.scalecraftMockFetch : fetch;
     const res = await doFetch(url, { ...init, headers });
     let body = null; try { body = await res.json(); } catch { }
+    if (body && body.error && !body.message) body.message = body.error;
     if (res.status === 401 && !opts.allow401) {
       setToken(null);
       sset('sc_next', location.hash || '#/');
@@ -74,7 +100,7 @@
     if (kind === 'report') {
       $header.innerHTML = h`
         <div class="gradbar"></div>
-        <div class="topbar report">
+        <div class="topbar reportbar">
           <div class="left">
             <a class="brandname" href="#/">Scalecraft</a>
             <div class="vsep"></div>
@@ -112,7 +138,7 @@
     renderHeader('landing');
     const last = sget('sc_form', {});
     const prefill = CFG.useMock && !last.handle ? 'sunrisefitnessbk' : (last.handle || '');
-    const platform = last.platform || 'instagram';
+    const platform = supported(last.platform) ? last.platform : 'instagram';
     const category = last.category || 'boutique_fitness';
     $view.innerHTML = h`
       <div class="wrap">
@@ -160,7 +186,7 @@
               <div class="field">
                 <div class="label">Platform</div>
                 <div class="chips" role="radiogroup">
-                  ${raw(PLATFORMS.map(([k, n]) => h`<button type="button" class="chip ${k === platform ? 'on' : ''}" data-platform="${k}" role="radio" aria-checked="${k === platform}">${n}</button>`).join(''))}
+                  ${raw(PLATFORMS.map(([k, n]) => h`<button type="button" class="chip ${k === platform ? 'on' : ''} ${supported(k) ? '' : 'soon'}" data-platform="${k}" role="radio" aria-checked="${k === platform}" title="${supported(k) ? '' : 'Coming soon'}">${n}${supported(k) ? '' : raw('<small>soon</small>')}</button>`).join(''))}
                 </div>
               </div>
               <div class="field">
@@ -199,6 +225,7 @@
       };
       const problems = [];
       if (!/^[A-Za-z0-9._-]{1,60}$/.test(payload.handle)) problems.push('a handle (letters, numbers, dots or underscores)');
+      if (!supported(payload.platform)) { err.textContent = platName(payload.platform) + " isn't scored yet — Instagram and X are live today."; err.hidden = false; return; }
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.email)) problems.push('an email we can send the report to');
       if (problems.length) { err.textContent = 'We need ' + problems.join(' and ') + '.'; err.hidden = false; return; }
       err.hidden = true;
@@ -302,20 +329,35 @@
       }
       if (status === 'failed') {
         const ref = job.ref || jobId.slice(-7).toUpperCase();
+        const errText = String(job.error || '');
+        // Classify so the advice matches the cause: a private/missing profile is the
+        // owner's to fix; a data-source or scoring outage is ours.
+        const kind = /private|not found|no public|does not exist|404/i.test(errText) ? 'profile'
+          : /api key|configured|LLM|token|rate limit|quota|not yet supported|could not fetch/i.test(errText) ? 'ours'
+          : 'unknown';
+        const lead = kind === 'profile'
+          ? errText || `${platName(meta.platform)} returned the profile as private, so there are no public posts for us to score. Nothing was charged and nothing was saved.`
+          : kind === 'ours'
+            ? 'Our scoring service couldn’t complete this run. Nothing was charged and nothing was saved.'
+            : errText || 'The evaluation stopped before it could finish. Nothing was charged and nothing was saved.';
+        const boxLabel = kind === 'ours' ? 'What happens now' : 'Two ways forward';
+        const boxText = kind === 'ours'
+          ? 'This one is on our side, not yours. Retry in a few minutes — the same handle and link will work once the service is back. If it keeps happening, reply to the report email and we’ll run it by hand.'
+          : 'Switch the account to public for ten minutes and retry — or run the evaluation on a different handle. If the profile is public and this keeps happening, it’s on our side; the same link will work later.';
         $view.innerHTML = h`
           <div class="wrap"><div class="eval single"><div class="failwrap">
             <div class="pill failed"><span class="dot"></span>Stopped</div>
-            <h2>We couldn't read @${handle}.</h2>
-            <div class="lead">${job.error || 'The evaluation stopped before it could finish. Nothing was charged and nothing was saved.'}</div>
+            <h2>${kind === 'ours' ? `We couldn't finish @${handle}.` : `We couldn't read @${handle}.`}</h2>
+            <div class="lead">${lead}</div>
             <div class="failbox">
-              <div class="label">Two ways forward</div>
-              <p>Switch the account to public for ten minutes and retry — or run the evaluation on a different handle. If the profile is public and this keeps happening, it's on our side; the same link will work later.</p>
+              <div class="label">${boxLabel}</div>
+              <p>${boxText}</p>
             </div>
             <div class="actions">
               <button class="btn md" data-action="retry">Retry evaluation</button>
               <button class="btn md ghost" data-action="another">Use another handle</button>
             </div>
-            <div class="ref">REF ${ref} · ${fmtTime()}</div>
+            <div class="ref">REF ${ref} · ${fmtTime()}${kind === 'ours' && errText ? raw(h` · <span title="${errText}">${errText.length > 60 ? errText.slice(0, 57) + '…' : errText}</span>`) : ''}</div>
           </div></div></div>`;
         $view.querySelector('[data-action=retry]').addEventListener('click', e => submitEvaluation(meta, e.currentTarget));
         $view.querySelector('[data-action=another]').addEventListener('click', () => { sset('sc_scroll', 'form'); go('#/'); });
@@ -332,9 +374,9 @@
         pollHandle = setTimeout(tick, POLL * 2); return; // transient — keep polling, slower
       }
       if (job.status === 'complete') {
-        const report = job.resultPayload || job.result || null;
-        const id = report?.report_id || job.report_id;
-        if (report && id) sset('sc_report_' + id, report);
+        const rawReport = job.resultPayload || job.result || null;
+        const id = rawReport?.report_id || rawReport?.reportId || job.report_id;
+        if (rawReport && id) sset('sc_report_' + id, normalizeReport(rawReport, id));
         if (id) { go('#/report/' + encodeURIComponent(id)); return; }
         $view.innerHTML = h`<div class="center-msg"><h2>Finished, but no report came back.</h2><a href="#/">Try again</a></div>`;
         return;
@@ -371,16 +413,56 @@
     };
   }
 
+  // The backend's free-tier report is a narrative (markdown) plus the raw persona
+  // outputs; scores live inside that text. Pull what we can into the scored shape
+  // the report page renders, and keep the narrative for the sections we can't fill.
+  const DIM_KEYS = [
+    ['POSTING_CONSISTENCY', 'Posting Consistency'], ['CONTENT_MIX', 'Content Mix'],
+    ['ENGAGEMENT_RATE', 'Engagement Rate'], ['ENGAGEMENT_QUALITY', 'Engagement Quality'],
+    ['DISCOVERY_SIGNAL', 'Discovery Signal'], ['PROFILE_CLARITY', 'Profile Clarity']
+  ];
+  function num(re, text) { const m = re.exec(text || ''); return m ? clamp(m[1], 0, 100) : null; }
+  function normalizeReport(raw, reportId) {
+    const wrapped = raw && raw.reportBody && typeof raw.reportBody === 'object';
+    const body = wrapped ? raw.reportBody : (raw || {});
+    const r = { ...body };
+    r.report_id = body.report_id || raw?.reportId || reportId;
+    r.tier = body.tier || raw?.tier;
+    r.business = body.business || raw?.business || {};
+    r.created_at = body.created_at || body.generated_at || raw?.generatedAt || Date.now();
+    r.narrative = typeof body.narrative === 'string' ? body.narrative : (typeof body === 'string' ? body : null);
+    if (!r.scores || r.scores.overall == null) {
+      const gap = body.raw_personas?.gap_auditor || '';
+      const text = gap + '\n' + (r.narrative || '');
+      const overall = num(/OVERALL[_ ]SCORE\s*(?:\([^)]*\))?[^0-9]{0,40}(\d{1,3})/i, text);
+      const avg = num(/CATEGORY[_ ]AVG(?:ERAGE)?\s*(?:\([^)]*\))?[^0-9]{0,40}(\d{1,3})/i, text);
+      const dims = [];
+      for (const [key, label] of DIM_KEYS) {
+        // e.g. "2. CONTENT_MIX (0-100): 52 — nine of 14 posts are schedules."
+        const re = new RegExp(key.replace('_', '[_ ]') + '\\s*(?:\\([^)]*\\))?[^0-9\\n]{0,40}(\\d{1,3})(?:\\s*\\/\\s*100)?\\s*[:—–-]?\\s*([^\\n]*)', 'i');
+        const m = re.exec(gap);
+        if (m) dims.push({ label, score: clamp(m[1], 0, 100), explanation: (m[2] || '').replace(/^[\s:—–-]+/, '').trim() });
+      }
+      if (overall != null || dims.length) r.scores = { overall: overall ?? (dims.length ? Math.round(dims.reduce((a, d) => a + d.score, 0) / dims.length) : null), category_avg: avg, dimensions: dims, parsed: true };
+    }
+    return r;
+  }
+
   async function viewReport(reportId) {
     let report = sget('sc_report_' + reportId, null);
     if (!report) {
       renderHeader('landing');
       $view.innerHTML = h`<div class="center-msg">Loading your report…</div>`;
-      try { report = await api('/reports/' + encodeURIComponent(reportId)); sset('sc_report_' + reportId, report); }
+      try { report = normalizeReport(await api('/reports/' + encodeURIComponent(reportId)), reportId); sset('sc_report_' + reportId, report); }
       catch (e) {
         if (e.status === 401) return;
         $view.innerHTML = h`<div class="center-msg"><h2>We couldn't find that report.</h2><a href="#/">Score a profile</a></div>`; return;
       }
+    }
+    const hasScores = report.scores && report.scores.overall != null;
+    if (!hasScores && !report.narrative) {
+      renderHeader('landing');
+      $view.innerHTML = h`<div class="center-msg"><h2>This report came back empty.</h2><a href="#/">Score a profile</a></div>`; return;
     }
     const s = report.scores || {};
     const biz = report.business || {};
@@ -399,9 +481,10 @@
 
     renderHeader('report', { handle: biz.handle || '', ctx: [platName(biz.platform), cat, fmtDate(report.created_at)].filter(Boolean).join(' · ').toUpperCase() });
 
+    const narrativeHtml = report.narrative ? md(report.narrative) : '';
     $view.innerHTML = h`
       <div class="wrap"><div class="report">
-        <section class="scorepanel">
+        ${hasScores ? raw(h`<section class="scorepanel">
           <div>
             <div class="eyebrow">Overall score</div>
             <div class="big"><div class="n">${overall}</div><div class="d">/100</div></div>
@@ -415,10 +498,10 @@
               ${top != null ? raw(h`<div><div class="row"><span class="l">Top quartile in your category</span><span class="n">${top}</span></div><div class="bar top"><div style="width:${top}%"></div></div></div>`) : ''}
             </div>
           </div>
-        </section>
+        </section>`) : ''}
 
-        <section>
-          <h2 class="sec-h">Four dimensions</h2>
+        ${(s.dimensions || []).length ? raw(h`<section>
+          <h2 class="sec-h">${(s.dimensions || []).length === 4 ? 'Four dimensions' : 'Dimensions'}</h2>
           <p class="sec-s">Each graded on the same 0–100 scale.${(s.dimensions || []).some(d => d.category_avg != null) ? ' The marker on every bar is your category average.' : ''}</p>
           <div class="dims">${raw((s.dimensions || []).map(d => {
             const sc = clamp(d.score, 0, 100); const [gl, gc] = grade(sc);
@@ -430,7 +513,12 @@
               <div class="why">${d.explanation || ''}</div>
             </article>`;
           }).join(''))}</div>
-        </section>
+        </section>`) : ''}
+
+        ${narrativeHtml ? raw(h`<section class="narrative">
+          <h2 class="sec-h">${hasScores ? 'The full read' : 'Your report'}</h2>
+          <div class="prose">${raw(narrativeHtml)}</div>
+        </section>`) : ''}
 
         ${phases.length ? raw(h`<section>
           <div class="path-head">
@@ -479,9 +567,9 @@
       const t = (p.tiers || []).find(x => x.tier === (up.target_tier || 'growth_plan'));
       if (t && t.monthlyPrice != null) {
         price = t.monthlyPrice;
-        const disc = p.annual_discount ?? 0.25;
+        const dm = /(\d+)\s*%/.exec(p.discount?.annual || ''); const disc = p.annual_discount ?? (dm ? Number(dm[1]) / 100 : 0.25);
         $view.querySelector('#upPrice').innerHTML = h`$${price}<span>/mo</span>`;
-        $view.querySelector('#upAlt').textContent = `or $${Math.round(price * 12 * (1 - disc))}/yr — ${Math.round(disc * 100)}% off`;
+        $view.querySelector('#upAlt').textContent = `or $${t.annualPrice != null ? t.annualPrice : Math.round(price * 12 * (1 - disc))}/yr — ${Math.round(disc * 100)}% off`;
       }
     }).catch(() => { });
   }
@@ -493,14 +581,15 @@
     let pricing, ent = null;
     try { pricing = await api('/billing/pricing', {}, { allow401: true }); }
     catch (e) { $view.innerHTML = h`<div class="center-msg"><h2>Pricing is unavailable right now.</h2>${e.message}</div>`; return; }
-    if (token()) { try { ent = await api('/entitlements', {}, { allow401: true }); } catch { } }
-    const disc = pricing.annual_discount ?? 0.25;
+    if (token()) { try { ent = await api('/account/subscription-status', {}, { allow401: true }); } catch { try { ent = await api('/entitlements', {}, { allow401: true }); } catch { } } }
+    const discMatch = /(\d+)\s*%/.exec(pricing.discount?.annual || '');
+    const disc = pricing.annual_discount ?? (discMatch ? Number(discMatch[1]) / 100 : 0.25);
     let billing = sget('sc_billing', 'monthly');
     const intent = sget('sc_intent_tier', null);
 
     const render = () => {
       const annual = billing === 'annual';
-      const yr = m => Math.round(m * 12 * (1 - disc));
+      const yr = t => t.annualPrice != null ? t.annualPrice : Math.round(t.monthlyPrice * 12 * (1 - disc));
       $view.innerHTML = h`
         <div class="wrap"><div class="pricing">
           <div class="intro">
@@ -513,17 +602,18 @@
           </div>
           <div class="tiers">${raw((pricing.tiers || []).map(t => {
             const free = !t.monthlyPrice;
+            const popular = t.popular ?? t.tier === 'growth_plan';
             const current = ent && ent.current_tier === t.tier;
-            const price = free ? 'Free' : '$' + (annual ? yr(t.monthlyPrice) : t.monthlyPrice);
+            const price = free ? 'Free' : '$' + (annual ? yr(t) : t.monthlyPrice);
             const per = free ? '' : annual ? '/yr' : '/mo';
-            const note = free ? (t.note || 'No card, ever') : annual ? `Billed yearly — ${Math.round(disc * 100)}% off` : `$${yr(t.monthlyPrice)}/yr saves ${Math.round(disc * 100)}%`;
-            const cta = current ? 'Current plan' : t.cta || (free ? 'Score a profile' : 'Start ' + t.name);
+            const note = free ? (t.note || 'No card, ever') : t.note && t.tier === 'agency' ? t.note : annual ? `Billed yearly — ${Math.round(disc * 100)}% off` : `$${yr(t)}/yr saves ${Math.round(disc * 100)}%`;
+            const cta = current ? 'Current plan' : t.cta || (free ? 'Score a profile' : 'Start ' + t.name.split(' /')[0]);
             return h`<article class="tier" data-tier="${t.tier}">
-              <div class="th"><div class="n">${t.name}</div>${t.popular ? raw('<div class="popular">Most popular</div>') : current ? raw('<div class="current">Current plan</div>') : ''}</div>
+              <div class="th"><div class="n">${t.name}</div>${popular ? raw('<div class="popular">Most popular</div>') : current ? raw('<div class="current">Current plan</div>') : ''}</div>
               <div><div class="price"><div class="p">${price}</div><div class="per">${per}</div></div><div class="note">${note}</div></div>
-              ${t.who ? raw(h`<div class="who">${t.who}</div>`) : ''}
+              ${(t.who || t.description) ? raw(h`<div class="who">${t.who || t.description}</div>`) : ''}
               <div class="feats">${raw((t.features || []).map(f => h`<div>${f}</div>`).join(''))}</div>
-              <button type="button" class="btn md ${t.popular ? '' : 'ghost strong'}" data-subscribe="${t.tier}" data-free="${free}" ${current ? 'disabled' : ''}>${cta}</button>
+              <button type="button" class="btn md ${popular ? '' : 'ghost strong'}" data-subscribe="${t.tier}" data-free="${free}" ${current ? 'disabled' : ''}>${cta}</button>
             </article>`;
           }).join(''))}</div>
           <div class="foot">All tiers keep your report history. Cancel in two clicks — no call, no retention offer.</div>
@@ -532,12 +622,13 @@
       $view.querySelectorAll('[data-billing]').forEach(b => b.addEventListener('click', () => { billing = b.dataset.billing; sset('sc_billing', billing); render(); }));
       $view.querySelectorAll('[data-subscribe]').forEach(b => b.addEventListener('click', async () => {
         if (b.dataset.free === 'true') { sset('sc_scroll', 'form'); go('#/'); return; }
+        if (!token()) { sset('sc_next', '#/pricing'); sset('sc_intent_tier', b.dataset.subscribe); go('#/signin'); return; }
         b.disabled = true; const label = b.textContent; b.textContent = 'Starting…';
         try {
           await api('/billing/subscribe', { method: 'POST', body: JSON.stringify({ tier: b.dataset.subscribe, billingCycle: billing }) });
           sessionStorage.removeItem('sc_intent_tier');
           // Re-read entitlements from the backend — the tier is never set client-side.
-          try { ent = await api('/entitlements'); } catch { }
+          try { ent = await api('/account/subscription-status'); } catch { try { ent = await api('/entitlements'); } catch { } }
           toast('You’re on ' + ((pricing.tiers.find(t => t.tier === b.dataset.subscribe) || {}).name || 'the new plan') + '.');
           render();
         } catch (e) {
@@ -579,7 +670,7 @@
       err.hidden = true;
       const btn = form.querySelector('button[type=submit]'); btn.disabled = true; btn.textContent = 'Signing in…';
       try {
-        const res = await api(CFG.authLoginPath || '/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }, { allow401: true });
+        const res = await api('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }, { allow401: true });
         const t = res.token || res.access_token || res.jwt;
         if (!t) throw new Error('No token in response');
         setToken(t);

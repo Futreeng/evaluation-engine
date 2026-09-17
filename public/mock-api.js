@@ -111,7 +111,7 @@
   }
 
   const PRICING = {
-    annual_discount: 0.25,
+    discount: { annual: '25% off', note: 'Annual billing includes 25% discount' },
     tiers: [
       {
         tier: 'social_snapshot', name: 'Social Snapshot', monthlyPrice: 0, note: 'No card, ever',
@@ -120,16 +120,22 @@
         cta: 'Score a profile'
       },
       {
-        tier: 'growth_plan', name: 'Growth Plan', monthlyPrice: 39, popular: true,
+        tier: 'growth_plan', name: 'Growth Plan', monthlyPrice: 39, annualPrice: 351, popular: true,
         who: 'For the owner doing their own social and tired of guessing what to post.',
         features: ['Unlimited audits', 'Full 90-day calendar, week by week', 'Content prompts written from your own posts', 'Competitor analysis — 5 nearby accounts', 'Weekly refresh as your numbers move'],
         cta: 'Start Growth Plan'
       },
       {
-        tier: 'business_evaluator', name: 'Business Evaluator', monthlyPrice: 99,
+        tier: 'business_evaluator', name: 'Business Evaluator', monthlyPrice: 99, annualPrice: 891,
         who: 'For owners who want the plan to answer to the P&L, not just the feed.',
         features: ['Everything in Growth Plan', 'Margin-aware recommendations', 'Action plan checklist with owners and dates', 'Business reconciliation — posts against revenue', 'Bi-weekly refresh'],
         cta: 'Start Business Evaluator'
+      },
+      {
+        tier: 'agency', name: 'Agency / Done-For-You', monthlyPrice: 249, note: 'Base price + $25/client/month',
+        who: 'For studios and agencies running social for several clients at once.',
+        features: ['Everything in Business Evaluator', 'Manage unlimited clients', 'White-label reports', 'API access', 'Bulk content generation', 'Custom integrations'],
+        cta: 'Talk to us'
       }
     ]
   };
@@ -188,7 +194,7 @@
 
     if (method === 'POST' && path === '/evaluate/social-snapshot') {
       const handle = String(body.handle || '').replace(/^@/, '').trim();
-      if (!handle || !body.platform || !body.category || !body.email) return json(400, { error: 'handle, platform, category and email are required' });
+      if (!handle || !body.platform || !body.category || !body.email) return json(400, { error: 'handle, platform, category and email are required', code: 'INVALID_HANDLE' });
       const id = 'job_' + Math.random().toString(36).slice(2, 10);
       jobs.set(id, {
         id, handle, platform: body.platform, category: body.category, email: body.email,
@@ -203,10 +209,11 @@
     }
     if (method === 'GET' && (m = path.match(/^\/reports\/([^/?]+)/))) {
       const r = reports.get(m[1]);
-      return r ? json(200, r) : json(404, { error: 'Report not found' });
+      return r ? json(200, { reportId: r.report_id, accountId: 'usr_mock', tier: r.tier, business: r.business, generatedAt: Date.parse(r.created_at), reportBody: r }) : json(404, { error: 'Report not found' });
     }
     if (method === 'GET' && path === '/reports') return json(200, { reports: [...reports.values()] });
     if (method === 'GET' && path === '/entitlements') return json(200, entitlement);
+    if (method === 'GET' && path === '/health') return json(200, { status: 'ok', mock: true });
     if (method === 'GET' && path === '/billing/pricing') return json(200, PRICING);
     if (method === 'POST' && path === '/billing/subscribe') {
       const tier = PRICING.tiers.find(t => t.tier === body.tier);
@@ -219,11 +226,14 @@
       const ok = order.indexOf(entitlement.current_tier) >= order.indexOf(body.requiredTier);
       return ok ? json(200, { access: true }) : json(402, { error: 'Upgrade required', required_tier: body.requiredTier });
     }
-    // Auth (Convergence-style; outside apiBase)
-    if (method === 'POST' && url === (cfg.authLoginPath || '/api/auth/login')) {
-      if (!body.email || !body.password) return json(400, { error: 'Email and password required' });
-      return json(200, { token: 'mock.' + btoa(body.email) + '.' + Date.now() });
+    // Auth — same shape as routes/growth-engine.js
+    if (method === 'POST' && (path === '/auth/login' || path === '/auth/signup')) {
+      if (!body.email || !body.password) return json(400, { error: 'Email and password required', code: 'INVALID_EMAIL' });
+      if (path === '/auth/login' && body.password === 'wrong') return json(401, { error: 'Invalid email or password', code: 'AUTH_FAILED' });
+      return json(200, { token: 'mock.' + btoa(body.email) + '.' + Date.now(), user: { user_id: 'usr_mock', email: body.email, company_name: body.company_name || null } });
     }
+    if (method === 'GET' && path === '/auth/me') return json(200, { user_id: 'usr_mock', email: 'maya@sunrisefitness.co' });
+    if (method === 'GET' && path === '/account/subscription-status') return json(200, { user_id: 'usr_mock', current_tier: entitlement.current_tier });
     return json(404, { error: 'No mock route for ' + method + ' ' + path });
   };
 })();
