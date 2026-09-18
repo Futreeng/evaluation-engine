@@ -1,3 +1,7 @@
 .vercel
 .env*
 reports/
+
+# runtime state — never commit
+server/data/
+server.log

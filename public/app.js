@@ -251,6 +251,13 @@
       go('#/evaluating/' + encodeURIComponent(res.job_id));
     } catch (e) {
       if (e.status === 401) return; // redirected to sign-in; form values are kept in sessionStorage
+      if (e.status === 402 && e.body?.code === 'FREE_LIMIT_REACHED') {
+        // Free snapshot already used for this email: the paid tier is the way to run another.
+        sset('sc_intent_tier', e.body.upgrade_tier || 'growth_plan');
+        sset('sc_limit_msg', e.body.message || e.message);
+        go(token() ? '#/pricing' : '#/signin');
+        return;
+      }
       toast(e.message || "Couldn't start the evaluation. Try again in a moment.");
       if (btn) { btn.disabled = false; btn.innerHTML = btn.dataset.label; }
     }
@@ -652,6 +659,7 @@
       $view.innerHTML = h`
         <div class="wrap"><div class="pricing">
           <div class="intro">
+            ${sget('sc_limit_msg', null) ? raw(h`<div class="notice">${sget('sc_limit_msg', '')}</div>`) : ''}
             <h1>Pay when the plan is worth doing.</h1>
             <p>The score is always free. Paid tiers are for owners who want the whole ninety days written out and kept current.</p>
             <div class="toggle" role="tablist">
@@ -686,6 +694,7 @@
         try {
           await api('/billing/subscribe', { method: 'POST', body: JSON.stringify({ tier: b.dataset.subscribe, billingCycle: billing }) });
           sessionStorage.removeItem('sc_intent_tier');
+          sessionStorage.removeItem('sc_limit_msg');
           // Re-read entitlements from the backend — the tier is never set client-side.
           try { ent = await api('/account/subscription-status'); } catch { try { ent = await api('/entitlements'); } catch { } }
           const planName = (pricing.tiers.find(t => t.tier === b.dataset.subscribe) || {}).name || 'the new plan';
@@ -711,9 +720,11 @@
   function viewSignin() {
     renderHeader('signin');
     const next = sget('sc_next', '#/');
+    const limitMsg = sget('sc_limit_msg', null);
     $view.innerHTML = h`
       <div class="signin"><div class="box">
         <div class="brandname">Scalecraft</div>
+        ${limitMsg ? raw(h`<div class="notice">${limitMsg}</div>`) : ''}
         <form class="card" id="signinForm" novalidate>
           <h2>Sign in</h2>
           <div class="field"><div class="label">Email</div><input type="email" name="email" autocomplete="email" placeholder="maya@sunrisefitness.co" value="${sget('sc_form', {}).email || ''}"></div>
@@ -741,7 +752,7 @@
         if (!t) throw new Error('No token in response');
         setToken(t);
         sessionStorage.removeItem('sc_next');
-        go(next && next !== '#/signin' ? next : '#/');
+        go(next && next !== '#/signin' ? next : (sget('sc_limit_msg', null) ? '#/pricing' : '#/'));
       } catch (e2) {
         err.textContent = e2.status === 401 ? "That email and password don't match." : (e2.message || 'Sign-in failed.');
         err.hidden = false; btn.disabled = false; btn.textContent = 'Sign in';

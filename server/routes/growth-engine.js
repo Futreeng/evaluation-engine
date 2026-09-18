@@ -193,6 +193,22 @@ router.post("/evaluate/social-snapshot", optionalAuth, validateEvaluationRequest
     const accountId = req.user?.id || "demo-account";
     const tier = await evaluationTierFor(accountId);
 
+    // The free Social Snapshot is one per email. Paid accounts are unlimited.
+    if (tier === "social_snapshot") {
+      const limit = Number(process.env.FREE_SNAPSHOTS_PER_EMAIL || 1);
+      const used = await geDb.countFreeSnapshotsByEmail(email);
+      if (used >= limit) {
+        return res.status(402).json({
+          error: "You've used your free evaluation for this email. Sign in and start a Growth Plan for unlimited audits.",
+          code: "FREE_LIMIT_REACHED",
+          status: 402,
+          used,
+          limit,
+          upgrade_tier: "growth_plan",
+        });
+      }
+    }
+
     // Create job in database
     const jobResult = await geDb.createJob(accountId, tier, { handle, platform, category, email });
     const jobId = jobResult.jobId;

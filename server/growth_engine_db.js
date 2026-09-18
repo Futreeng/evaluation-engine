@@ -156,6 +156,20 @@ async function createJob(accountId, tier, inputParams) {
   return { jobId, status: "queued", createdAt: now };
 }
 
+// Free-tier quota: completed or in-flight snapshot jobs for an email
+// (input_params is JSON; the LIKE keeps this index-free but cheap enough
+// for the table sizes involved).
+async function countFreeSnapshotsByEmail(email) {
+  if (!db) throw new Error("Database not initialized");
+  const needle = `%"email":${JSON.stringify(String(email).trim().toLowerCase())}%`;
+  const result = db.exec(
+    `SELECT COUNT(*) FROM growth_engine_jobs
+     WHERE tier = 'social_snapshot' AND status != 'failed' AND lower(input_params) LIKE ?`,
+    [needle]
+  );
+  return result.length ? Number(result[0].values[0][0]) : 0;
+}
+
 async function getJob(jobId) {
   if (!db) throw new Error("Database not initialized");
 
@@ -526,6 +540,7 @@ async function updateUserPassword(userId, passwordHash) {
 }
 
 module.exports = {
+  countFreeSnapshotsByEmail,
   initDb,
   // Jobs
   createJob,

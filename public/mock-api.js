@@ -195,8 +195,11 @@
     if (method === 'POST' && path === '/evaluate/social-snapshot') {
       const handle = String(body.handle || '').replace(/^@/, '').trim();
       if (!handle || !body.platform || !body.category || !body.email) return json(400, { error: 'handle, platform, category and email are required', code: 'INVALID_HANDLE' });
+      const paid = entitlement.current_tier !== 'social_snapshot' && (init.headers || {}).Authorization;
+      const priorFree = [...jobs.values()].filter(j => !j.paid && !j.fail && j.email.toLowerCase() === String(body.email).toLowerCase()).length;
+      if (!paid && priorFree >= 1) return json(402, { error: "You've used your free evaluation for this email. Sign in and start a Growth Plan for unlimited audits.", code: 'FREE_LIMIT_REACHED', used: priorFree, limit: 1, upgrade_tier: 'growth_plan' });
       const id = 'job_' + Math.random().toString(36).slice(2, 10);
-      jobs.set(id, {
+      jobs.set(id, { paid: !!paid,
         id, handle, platform: body.platform, category: body.category, email: body.email,
         started: Date.now(), fail: handle.toLowerCase().includes(FAIL_KEY),
         ref: (Math.random().toString(16).slice(2, 4) + '-' + Math.floor(1000 + Math.random() * 9000)).toUpperCase()
