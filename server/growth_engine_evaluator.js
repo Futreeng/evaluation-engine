@@ -469,14 +469,10 @@ async function runSnapshot(accountId, inputParams) {
     computed = scoreProfile(realData, category); // null for fetchers without the metric shape (Twitter)
   } catch (err) {
     console.warn("[Growth Engine] Real data fetch failed:", err.message);
-    // A private, missing or malformed profile is not something to write a
-    // report around — fail the job so the UI can say so honestly.
-    if (/private|not found|not a valid|no public posts|not yet supported/i.test(err.message)) throw err;
-    postSummary = JSON.stringify({
-      handle,
-      platform,
-      note: `Could not fetch real data: ${err.message}. Analyze based on platform best practices.`,
-    });
+    // No data, no report. A private/missing profile is the owner's to fix; a
+    // network or provider failure is ours — either way the UI says so honestly
+    // instead of a "best practices" report that scores nothing real.
+    throw err;
   }
   const benchmarks = CATEGORY_BENCHMARKS[category] || CATEGORY_BENCHMARKS.fitness;
 

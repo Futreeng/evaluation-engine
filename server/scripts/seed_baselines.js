@@ -30,7 +30,7 @@ if (!category || !handles.length) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function scoreOne(handle) {
-  const email = `seed+${handle}@scalecraft.local`;
+  const email = `seed+${handle}+${Date.now()}@scalecraft.local`; // fresh each run: one free snapshot per email
   const res = await fetch(`${API}/evaluate/social-snapshot`, {
     method: "POST",
     headers: { "content-type": "application/json" },
