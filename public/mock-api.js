@@ -32,6 +32,7 @@
         category_top_quartile: 78,
         category_sample_size: 1284,
         summary: "Most of the gap is two things: how irregularly you post, and a bio that doesn't say where you are or what a first class costs.",
+        method: 'deterministic-v1',
         dimensions: [
           {
             label: 'Posting Consistency', score: 35, category_avg: 58,
@@ -43,7 +44,8 @@
           },
           {
             label: 'Engagement Quality', score: 58, category_avg: 60,
-            explanation: "Comments average 2.1 per post and roughly 70% come from the same six accounts — loyal, but not new. Saves and shares, the two signals that put you in front of people within a few miles of the studio, are low for your follower count."
+            explanation: "Comments average 2.1 per post and roughly 70% come from the same six accounts — loyal, but not new. Saves and shares, the two signals that put you in front of people within a few miles of the studio, are low for your follower count.",
+            evidence: "1.9% engagement rate vs 2.4% target; comments are 3.1% of interactions; video views per post ≈ 11% of followers"
           },
           {
             label: 'Profile Clarity', score: 44, category_avg: 64,

@@ -42,7 +42,7 @@ ENGAGEMENT_QUALITY: <given score> — explanation
 PROFILE_CLARITY: <given score> — explanation
 OVERALL_SCORE: <given overall> — one sentence naming the one or two dimensions that cost the most points.
 
-Write for the owner ("You posted 9 times…"). Reference the sub-scores when they explain the number (e.g. a 42-day gap zeroing the gap component). No markdown bold or headings.`,
+Write for the owner ("You posted 9 times…"), starting each explanation with a capital letter. Use the sub-scores to understand what cost the points and say it in plain words ("the 42-day gap alone cost you most of this score") — do not quote sub-score numbers or component names. No markdown bold or headings.`,
 
     merge: `You are writing the free Scalecraft Social Snapshot for a small-business owner. Plain-spoken, specific, no hype. You have two analyses of their account:
 
@@ -570,7 +570,7 @@ async function runSnapshot(accountId, inputParams) {
     const auditorExpl = {};
     for (const line of String(personaBResponse || "").split("\n")) {
       const m = /^\s*\**\s*([A-Z_ ]+?)\s*\**\s*:\s*\**\s*\d{1,3}\s*\**\s*[—–-]\s*(.+)$/.exec(line);
-      if (m) auditorExpl[m[1].toLowerCase().replace(/[^a-z]/g, "")] = m[2].trim();
+      if (m) { const t = m[2].trim(); auditorExpl[m[1].toLowerCase().replace(/[^a-z]/g, "")] = t.charAt(0).toUpperCase() + t.slice(1); }
     }
     const findExpl = (label) => {
       const key = label.toLowerCase().replace(/[^a-z]/g, "");
