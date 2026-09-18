@@ -333,6 +333,7 @@
               <div class="progress">
                 <div class="track">${pct != null ? raw(h`<div class="fill" style="width:${pct}%"></div>`) : raw('<div class="sweep"></div>')}</div>
                 <div class="row"><span>${step ? `STEP ${step} OF ${total}` : 'IN PROGRESS'}${pct != null ? ` · ${pct}%` : ''}</span><span>${elapsed}S ELAPSED</span></div>
+                ${elapsed > 75 ? raw(h`<div class="slow">Taking longer than usual — the scoring service is busy. We keep trying for a few minutes, and the report lands in your inbox either way.</div>`) : ''}
               </div>
               ${stats ? raw(h`<div class="statchips">
                 ${stats.posts_found != null ? raw(h`<div><div class="k">POSTS FOUND</div><div class="v">${stats.posts_found}</div></div>`) : ''}

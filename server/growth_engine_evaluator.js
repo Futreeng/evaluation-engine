@@ -272,29 +272,41 @@ async function callClaudeNonStreaming(claudeKey, claudeWorkspaceId, system, user
 }
 
 async function callGeminiNonStreaming(geminiKey, systemInstruction, userMessage) {
-  // v1 endpoint with gemini-3.5-flash (stable, less demand than 3.6)
-  const url = `https://generativelanguage.googleapis.com/v1/models/gemini-3.5-flash:generateContent?key=${encodeURIComponent(geminiKey)}`;
-
-  const body = {
-    contents: [{ parts: [{ text: userMessage }] }],
-    systemInstruction: { parts: [{ text: systemInstruction }] },
-  };
-
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(`Gemini API error ${response.status}: ${detail.slice(0, 200)}`);
+  if (!geminiKey) throw new Error("Gemini API key not configured");
+  // Free-tier Gemini sheds load with 503s on the busiest model; walk a short
+  // list and retry briefly rather than giving the call away to the next provider.
+  const models = [process.env.GEMINI_MODEL || "gemini-2.5-flash", "gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"];
+  let lastErr;
+  for (const model of models) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const url = `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${encodeURIComponent(geminiKey)}`;
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: userMessage }] }],
+          systemInstruction: { parts: [{ text: systemInstruction }] },
+          generationConfig: { maxOutputTokens: OUTPUT_TOKENS },
+        }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("") || "";
+        if (text.trim()) return text;
+        lastErr = new Error(`Gemini returned an empty completion (${model})`);
+        break;
+      }
+      const detail = await response.text();
+      lastErr = new Error(`Gemini API error ${response.status} (${model}): ${detail.slice(0, 200)}`);
+      if (response.status === 503 || response.status === 429) {
+        if (attempt === 0) { console.log(`[Growth Engine] Gemini ${response.status} on ${model}, retrying in 4s...`); await new Promise((r) => setTimeout(r, 4000)); continue; }
+        break; // next model
+      }
+      if (response.status === 404) break; // model id gone — next
+      throw lastErr; // auth/quota/other: don't burn time
+    }
   }
-
-  const data = await response.json();
-  const candidates = data.candidates || [];
-  if (candidates.length === 0) throw new Error("No candidates in Gemini response");
-  return candidates[0].content.parts[0].text;
+  throw lastErr;
 }
 
 async function callGroqNonStreaming(groqKey, systemInstruction, userMessage) {
@@ -329,8 +341,10 @@ async function callGroqNonStreaming(groqKey, systemInstruction, userMessage) {
       const detail = await response.text();
       lastErr = new Error(`Groq API error ${response.status} (${model}): ${detail.slice(0, 200)}`);
       if (response.status === 429) {
-        const m = /try again in ([\d.]+)(m?s)/i.exec(detail);
-        const waitMs = m ? Math.ceil(parseFloat(m[1]) * (m[2] === "ms" ? 1 : 1000)) + 500 : (attempt + 1) * 8000;
+        // Daily caps say "try again in 5m45s" — don't wait on those, move on.
+        const m = /try again in (?:(\d+)m)?([\d.]+)?(m?s)?/i.exec(detail);
+        const waitMs = m ? (Number(m[1] || 0) * 60000) + Math.ceil(parseFloat(m[2] || 0) * (m[3] === "ms" ? 1 : 1000)) + 500 : (attempt + 1) * 8000;
+        if (/per day|RPD|TPD/i.test(detail)) { console.log(`[Growth Engine] Groq daily cap on ${model}, skipping`); break; }
         if (waitMs <= 45000) {
           console.log(`[Growth Engine] Groq 429 on ${model}, waiting ${waitMs}ms...`);
           await new Promise((r) => setTimeout(r, waitMs));
