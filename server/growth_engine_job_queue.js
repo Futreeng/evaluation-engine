@@ -109,6 +109,27 @@ class JobQueue {
         console.warn("[Growth Engine] Baseline update failed:", err.message);
       }
 
+      // Score history: compare with this account's last report for the handle.
+      try {
+        if (accountId && accountId !== "demo-account" && reportBody.scores) {
+          const prior = await geDb.listScoreHistory(accountId, inputParams.handle, inputParams.platform);
+          const prev = prior[prior.length - 1];
+          if (prev) {
+            const dims = {};
+            for (const d of prev.dimensions || []) dims[d.label] = d.score;
+            reportBody.history = {
+              runs: prior.length + 1,
+              previous: { report_id: prev.report_id, generated_at: prev.generated_at, overall: prev.overall },
+              delta_overall: reportBody.scores.overall - prev.overall,
+              delta_dimensions: (reportBody.scores.dimensions || []).map((d) => ({ label: d.label, delta: dims[d.label] != null ? d.score - dims[d.label] : null })),
+              series: [...prior.map((r) => ({ generated_at: r.generated_at, overall: r.overall })), { generated_at: Date.now(), overall: reportBody.scores.overall }],
+            };
+          }
+        }
+      } catch (err) {
+        console.warn("[Growth Engine] History lookup failed:", err.message);
+      }
+
       const { reportId } = await geDb.createReport(accountId, tier, inputParams, reportBody);
       reportBody.report_id = reportId;
 

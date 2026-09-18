@@ -361,6 +361,34 @@ async function getReport(reportId) {
   };
 }
 
+// Merge fields into a stored report body (e.g. competitor comparison added later).
+async function patchReportBody(reportId, patch) {
+  if (!db) throw new Error("Database not initialized");
+  const report = await getReport(reportId);
+  if (!report) return null;
+  const body = { ...(report.reportBody || {}), ...patch };
+  db.run(`UPDATE growth_engine_reports SET report_body = ?, updated_at = ? WHERE report_id = ?`, [JSON.stringify(body), Date.now(), reportId]);
+  saveDb();
+  return { ...report, reportBody: body };
+}
+
+// Score history for one handle on one account, oldest first.
+async function listScoreHistory(accountId, handle, platform) {
+  if (!db) throw new Error("Database not initialized");
+  const result = db.exec(
+    `SELECT report_id, tier, generated_at, report_body FROM growth_engine_reports
+     WHERE account_id = ? AND lower(business_handle) = ? AND business_platform = ? ORDER BY generated_at ASC`,
+    [accountId, String(handle).toLowerCase(), platform]
+  );
+  if (!result.length) return [];
+  return result[0].values.map(([report_id, tier, generated_at, body]) => {
+    let sc = null; try { sc = JSON.parse(body).scores || null; } catch { /* skip */ }
+    return sc && Number.isFinite(sc.overall)
+      ? { report_id, tier, generated_at, overall: sc.overall, dimensions: (sc.dimensions || []).map((d) => ({ label: d.label, score: d.score })) }
+      : null;
+  }).filter(Boolean);
+}
+
 async function updateReportRefreshDue(reportId, refreshDueAt) {
   if (!db) throw new Error("Database not initialized");
 
@@ -609,6 +637,8 @@ module.exports = {
   countFreeSnapshotsByEmail,
   recordBaseline,
   getCategoryBaseline,
+  patchReportBody,
+  listScoreHistory,
   getBaselineSummary,
   initDb,
   // Jobs

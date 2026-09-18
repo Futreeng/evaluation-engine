@@ -3,7 +3,7 @@ const db = require("./db");
 const { analyzeTwitterAccount } = require("./twitter_fetcher");
 const { analyzeInstagramAccount } = require("./instagram_fetcher");
 const { analyzeInstagramAccountViaApify } = require("./instagram_apify_fetcher");
-const { scoreProfile } = require("./growth_engine_scoring");
+const { scoreProfile, rankPosts } = require("./growth_engine_scoring");
 
 // Persona prompts for each tier
 const PERSONA_PROMPTS = {
@@ -16,6 +16,7 @@ Input:
 Handle: {{HANDLE}} ({{PLATFORM}})
 Category: {{CATEGORY}}
 Recent activity: {{RECENT_POST_SUMMARY}}
+Best and worst recent posts vs the account's own average: {{POST_INSIGHTS}}
 
 Output, in this exact structure:
 1. TOP_STRENGTH: one sentence — the thing this account is doing better than most accounts in its category.
@@ -48,6 +49,7 @@ Write for the owner ("You posted 9 times…"), starting each explanation with a 
 
 GROWTH_SCANNER_OUTPUT: {{PERSONA_A_RESPONSE}}
 GAP_AUDITOR_OUTPUT: {{PERSONA_B_RESPONSE}}
+POST_INSIGHTS (their best and worst recent posts, ranked against their own average): {{POST_INSIGHTS}}
 
 Write the report in exactly this shape:
 
@@ -69,6 +71,9 @@ Three phases. Each phase has a short label and ONE fully specific first move the
    🔒 …
 Sequence the phases so the biggest gap is addressed first.
 
+**WHAT YOUR BEST POSTS HAVE IN COMMON**
+Two or three sentences from POST_INSIGHTS: name the top post by date and what it was, say what the top three share (format, subject, day, how the caption opens) and what the bottom three share. Concrete, not "engaging content".
+
 **WHAT THE FULL PLAN ADDS**
 One sentence: the remaining moves for all three phases, the week-by-week posting calendar, and content prompts written from their own posts.
 
@@ -76,33 +81,41 @@ Rules: the scores in GAP_AUDITOR_OUTPUT are final — copy them exactly into the
 
 Finally, after the report, output a machine-readable block on its own lines, exactly like this, with real values (no comments, valid JSON):
 \`\`\`json
-{"overall": 0, "dimensions": [{"label": "Posting Consistency", "score": 0, "explanation": ""}, {"label": "Content Mix", "score": 0, "explanation": ""}, {"label": "Engagement Quality", "score": 0, "explanation": ""}, {"label": "Profile Clarity", "score": 0, "explanation": ""}], "summary": "one sentence naming what drives most of the gap", "phases": [{"range": "1-30", "label": "", "visible_action": "", "detail": "", "locked": {"count": 4, "teaser": ""}}, {"range": "31-60", "label": "", "visible_action": "", "detail": "", "locked": {"count": 4, "teaser": ""}}, {"range": "61-90", "label": "", "visible_action": "", "detail": "", "locked": {"count": 4, "teaser": ""}}]}
+{"overall": 0, "dimensions": [{"label": "Posting Consistency", "score": 0, "explanation": ""}, {"label": "Content Mix", "score": 0, "explanation": ""}, {"label": "Engagement Quality", "score": 0, "explanation": ""}, {"label": "Profile Clarity", "score": 0, "explanation": ""}], "summary": "one sentence naming what drives most of the gap", "best_posts_note": "two sentences: what the top posts share and what the bottom posts share", "phases": [{"range": "1-30", "label": "", "visible_action": "", "detail": "", "locked": {"count": 4, "teaser": ""}}, {"range": "31-60", "label": "", "visible_action": "", "detail": "", "locked": {"count": 4, "teaser": ""}}, {"range": "61-90", "label": "", "visible_action": "", "detail": "", "locked": {"count": 4, "teaser": ""}}]}
 \`\`\``
   },
 };
 
 // Tier 1: everything the free report locked, written from the same data.
-const PLAN_WRITER_PROMPT = `You are the Plan Writer for Scalecraft. A small-business owner has paid for their Growth Plan. You have their public account data, category benchmarks, and the free snapshot (scores + the first move of each 30-day phase). Write the rest of the plan. Be specific to THIS account: use its real posting days, formats, gaps, bio wording, caption themes and numbers. No generic advice.
+const PLAN_MOVES_PROMPT = `You are the Plan Writer for Scalecraft. A small-business owner has paid for their Growth Plan. You have their public account data, category benchmarks, and the free snapshot (scores + the first move of each 30-day phase). Write the remaining moves. Be specific to THIS account: use its real posting days, formats, gaps, bio wording, caption themes, best/worst posts and numbers. Every move must cite a specific post, number, day or bio line from the data. No generic advice (no "run a giveaway", "engage with your audience").
 
 Handle: {{HANDLE}} ({{PLATFORM}})
 Category: {{CATEGORY}}
 Account data: {{RECENT_POST_SUMMARY}}
+Best and worst recent posts: {{POST_INSIGHTS}}
 Category benchmarks: {{CATEGORY_BENCHMARKS}}
 Snapshot (already shown to the owner): {{SNAPSHOT_JSON}}
 
-Produce ONLY a JSON object, no prose, no markdown fences, in exactly this shape:
+Produce ONLY a JSON object, no prose, no markdown fences:
 {"posting_days":["Mon","Wed","Sat"],"posting_time":"7:15am",
  "phases":[
-  {"range":"1-30","moves":[{"n":2,"title":"short title","action":"one imperative sentence the owner can do this week","why":"one or two sentences tied to the data"},{"n":3,...},{"n":4,...},{"n":5,...}]},
+  {"range":"1-30","moves":[{"n":2,"title":"under 6 words","action":"one imperative sentence the owner can do this week","why":"one sentence tied to a number, post or bio line from the data"},{"n":3,...},{"n":4,...},{"n":5,...}]},
   {"range":"31-60","moves":[{"n":6,...},{"n":7,...},{"n":8,...},{"n":9,...}]},
   {"range":"61-90","moves":[{"n":10,...},{"n":11,...},{"n":12,...},{"n":13,...}]}
- ],
- "calendar":[
-  {"week":1,"slots":[{"day":"Mon","format":"reel","angle":"what this post is about, under 12 words","prompt":"a caption/shooting brief the owner can follow, under 30 words"},{"day":"Wed",...},{"day":"Sat",...}]},
-  ... weeks 2 through 12, three slots each, on the same posting_days ...
  ]}
+posting_days must match the snapshot's first move if it names days. Moves must not repeat the snapshot's first moves. Valid JSON only.`;
 
-Rules: moves must not repeat the snapshot's first moves; move titles under 6 words; each phase's moves build on that phase's first move. Formats are one of reel, carousel, static, story. Weeks 1-4 serve phase 1, 5-8 phase 2, 9-12 phase 3. posting_days must match the snapshot's first move if it names days. Output valid JSON only.`;
+const PLAN_CALENDAR_PROMPT = `You are the Plan Writer for Scalecraft. Write a 12-week posting calendar for this account, built from its own best-performing formats and subjects.
+
+Handle: {{HANDLE}} ({{PLATFORM}})
+Category: {{CATEGORY}}
+Best and worst recent posts: {{POST_INSIGHTS}}
+Posting days: {{POSTING_DAYS}} at {{POSTING_TIME}}
+Phase plan (weeks 1-4 serve phase 1, 5-8 phase 2, 9-12 phase 3): {{PHASES_JSON}}
+
+Produce ONLY a JSON array of 12 weeks, no prose, no markdown fences:
+[{"week":1,"slots":[{"day":"Mon","format":"reel","angle":"what the post is about, under 10 words","prompt":"a shooting/caption brief the owner can follow, under 25 words"},{"day":"Wed",...},{"day":"Sat",...}]}, ... through week 12]
+One slot per posting day per week. Formats: reel, carousel, static, story. Vary subjects across weeks; reuse the account's proven formats. Valid JSON only.`;
 
 // Category benchmarks. These are working assumptions, not measured
 // averages — replace with real baselines once enough profiles are scored.
@@ -306,7 +319,12 @@ async function callGroqNonStreaming(groqKey, systemInstruction, userMessage) {
       });
       if (response.ok) {
         const data = await response.json();
-        return data.choices[0].message.content;
+        const content = data.choices?.[0]?.message?.content;
+        if (content && content.trim()) return content;
+        // Empty completion (budget spent on hidden reasoning) — try the next model.
+        lastErr = new Error(`Groq returned an empty completion (${model})`);
+        console.warn("[Growth Engine]", lastErr.message);
+        break;
       }
       const detail = await response.text();
       lastErr = new Error(`Groq API error ${response.status} (${model}): ${detail.slice(0, 200)}`);
@@ -463,10 +481,12 @@ async function runSnapshot(accountId, inputParams) {
   // Fetch real social media data
   let postSummary;
   let computed = null;
+  let postInsights = null;
   try {
     const realData = await getRealPostData(handle, platform, category);
     postSummary = JSON.stringify(realData); // compact: every token counts against free-tier TPM caps
     computed = scoreProfile(realData, category); // null for fetchers without the metric shape (Twitter)
+    postInsights = rankPosts(realData.recent_activity || realData.recent_posts);
   } catch (err) {
     console.warn("[Growth Engine] Real data fetch failed:", err.message);
     // No data, no report. A private/missing profile is the owner's to fix; a
@@ -482,6 +502,11 @@ async function runSnapshot(accountId, inputParams) {
     CATEGORY: category,
     RECENT_POST_SUMMARY: postSummary,
     CATEGORY_BENCHMARKS: JSON.stringify(benchmarks),
+    POST_INSIGHTS: postInsights
+      ? JSON.stringify({ avg_engagement: postInsights.avg_engagement, best_format: postInsights.patterns.best_format, best_day: postInsights.patterns.best_day,
+          top: postInsights.top.map((p) => ({ date: String(p.date).slice(0, 10), format: p.format, day: p.weekday, vs_avg: p.vs_avg, caption: p.caption })),
+          bottom: postInsights.bottom.map((p) => ({ date: String(p.date).slice(0, 10), format: p.format, day: p.weekday, vs_avg: p.vs_avg, caption: p.caption })) })
+      : "not available",
     COMPUTED_SCORES: computed
       ? JSON.stringify({ overall: computed.overall, dimensions: computed.dimensions.map((d) => ({ label: d.label, score: d.score, evidence: d.evidence, parts: d.parts })) })
       : "not available for this platform — score each dimension yourself from the data and say so",
@@ -602,6 +627,12 @@ async function runSnapshot(accountId, inputParams) {
         })),
       };
     }
+    if (postInsights) {
+      reportBody.post_insights = {
+        ...postInsights,
+        note: typeof structured?.best_posts_note === "string" ? structured.best_posts_note : null,
+      };
+    }
     reportBody.upsell = {
       cta_label: "Unlock your full Growth Plan",
       target_tier: "growth_plan",
@@ -628,21 +659,43 @@ async function evaluateTier1(accountId, inputParams) {
     dimensions: reportBody.scores?.dimensions ?? [],
     phases: (reportBody.growth_path?.phases ?? []).map((p) => ({ range: p.range, label: p.label, first_move: p.visible_action })),
   });
-  const planPrompt = interpolateTemplate(PLAN_WRITER_PROMPT, {
+  const baseVars = {
     HANDLE: handle, PLATFORM: platform, CATEGORY: category,
     RECENT_POST_SUMMARY: postSummary, CATEGORY_BENCHMARKS: JSON.stringify(benchmarks), SNAPSHOT_JSON: snapshotJson,
-  });
+    POST_INSIGHTS: reportBody.post_insights
+      ? JSON.stringify({ best_format: reportBody.post_insights.patterns?.best_format, best_day: reportBody.post_insights.patterns?.best_day,
+          top: reportBody.post_insights.top.map((p) => ({ date: String(p.date).slice(0, 10), format: p.format, vs_avg: p.vs_avg, caption: p.caption })),
+          bottom: reportBody.post_insights.bottom.map((p) => ({ date: String(p.date).slice(0, 10), format: p.format, vs_avg: p.vs_avg, caption: p.caption })) })
+      : "not available",
+  };
   const sys = "You write specific, data-grounded social media growth plans. Output JSON only.";
-  const planRaw = await withOutputTokens(4096, () => callWithQuadFallback(
-    () => callClaudeNonStreaming(claudeKey, claudeWorkspaceId, sys, planPrompt),
-    () => callGeminiNonStreaming(geminiKey, sys, planPrompt),
-    () => callGroqNonStreaming(groqKey, sys, planPrompt),
-    () => callOpenAINonStreaming(openaiKey, sys, planPrompt),
-    "Plan Writer"
-  ));
+  const askJson = async (prompt, label, budget) => {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const raw = await withOutputTokens(budget, () => callWithQuadFallback(
+        () => callClaudeNonStreaming(claudeKey, claudeWorkspaceId, sys, prompt),
+        () => callGeminiNonStreaming(geminiKey, sys, prompt),
+        () => callGroqNonStreaming(groqKey, sys, prompt),
+        () => callOpenAINonStreaming(openaiKey, sys, prompt),
+        attempt ? `${label} (retry)` : label
+      ));
+      const parsed = parseJsonLoose(raw);
+      if (parsed) return parsed;
+      console.warn(`[Growth Engine] ${label} output unusable${attempt ? "" : ", retrying once"}`);
+    }
+    return null;
+  };
 
-  const plan = parseJsonLoose(planRaw);
-  if (!plan) throw new Error("Plan Writer returned no usable plan");
+  // Two smaller calls instead of one big one: the combined plan ran past the
+  // output limits of the fallback models and came back truncated.
+  const moves = await askJson(interpolateTemplate(PLAN_MOVES_PROMPT, baseVars), "Plan Writer: moves", 3072);
+  if (!moves) throw new Error("Plan Writer returned no usable plan");
+  const calendarRaw = await askJson(interpolateTemplate(PLAN_CALENDAR_PROMPT, {
+    ...baseVars,
+    POSTING_DAYS: (moves.posting_days || []).join(", ") || "Mon, Wed, Fri",
+    POSTING_TIME: moves.posting_time || "morning",
+    PHASES_JSON: JSON.stringify((reportBody.growth_path?.phases ?? []).map((p, i) => ({ range: p.range, label: p.label, first_move: p.visible_action, moves: (moves.phases?.[i]?.moves || []).map((m) => m.title) }))),
+  }), "Plan Writer: calendar", 4096);
+  const plan = { ...moves, calendar: Array.isArray(calendarRaw) ? calendarRaw : (calendarRaw && Array.isArray(calendarRaw.calendar) ? calendarRaw.calendar : []) };
 
   const days = Array.isArray(plan.posting_days) ? plan.posting_days.map(String) : [];
   const weeks = (Array.isArray(plan.calendar) ? plan.calendar : []).slice(0, 12).map((w, i) => ({

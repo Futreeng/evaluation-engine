@@ -4,6 +4,7 @@ const geDb = require("../growth_engine_db");
 const { evaluateProfile } = require("../growth_engine_evaluator");
 const BillingManager = require("../growth_engine_billing");
 const JobQueue = require("../growth_engine_job_queue");
+const { compareCompetitors, MAX_COMPETITORS } = require("../growth_engine_competitors");
 const { signup, login, verifyJWT } = require("../auth");
 const {
   sendError,
@@ -249,6 +250,46 @@ router.get("/reports/:reportId", async (req, res) => {
     const report = await geDb.getReport(req.params.reportId);
     if (!report) return res.status(404).json({ error: "Report not found" });
     res.json(report);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Competitor comparison — Growth Plan and above. Scores up to five handles
+// with the same deterministic scorer and stores the result on the report.
+router.post("/reports/:reportId/competitors", authMiddleware, async (req, res) => {
+  try {
+    const report = await geDb.getReport(req.params.reportId);
+    if (!report) return sendError(res, 404, "REPORT_NOT_FOUND", "Report not found");
+    if (report.accountId !== req.user.id) return sendError(res, 403, "NOT_YOUR_REPORT", "This report belongs to another account");
+    const access = await billingManager.checkEntitlement(req.user.id, "growth_plan");
+    if (!access.hasAccess) return res.status(402).json({ error: "Competitor comparison is part of the Growth Plan.", code: "UPGRADE_REQUIRED", required_tier: "growth_plan", status: 402 });
+    const handles = Array.isArray(req.body.handles) ? req.body.handles : [];
+    if (!handles.length || handles.length > MAX_COMPETITORS) return sendError(res, 400, "INVALID_HANDLES", `Provide 1–${MAX_COMPETITORS} competitor handles`);
+    const comparison = await compareCompetitors({
+      handle: report.business.handle, platform: report.business.platform, category: report.business.category, handles,
+    });
+    // The owner's row should match the report they're looking at, not a re-pull.
+    const own = report.reportBody?.scores;
+    if (own && Number.isFinite(own.overall)) {
+      comparison.you.overall = own.overall;
+      comparison.you.dimensions = (own.dimensions || []).map((d) => ({ label: d.label, score: d.score }));
+      const scored = comparison.competitors.filter((c) => c.ok);
+      comparison.rank = { position: [own.overall, ...scored.map((c) => c.overall)].sort((a, b) => b - a).indexOf(own.overall) + 1, of: scored.length + 1 };
+    }
+    await geDb.patchReportBody(report.reportId, { competitors: comparison });
+    res.json(comparison);
+  } catch (err) {
+    sendError(res, 500, "COMPETITOR_ERROR", err.message);
+  }
+});
+
+// Score history for a handle (signed-in accounts only — anonymous runs aren't linked)
+router.get("/account/history", authMiddleware, async (req, res) => {
+  try {
+    const { handle, platform } = req.query;
+    if (!handle) return sendError(res, 400, "INVALID_HANDLE", "handle is required");
+    res.json({ handle, platform: platform || "instagram", history: await geDb.listScoreHistory(req.user.id, handle, platform || "instagram") });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

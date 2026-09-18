@@ -132,7 +132,7 @@
         </nav>
         <div class="right">
           ${token()
-            ? raw(h`<a class="plain" href="#" data-action="signout">Sign out</a>`)
+            ? raw(h`<a class="plain" href="#/reports">Reports</a><a class="plain" href="#" data-action="signout">Sign out</a>`)
             : raw(h`<a class="plain" href="#/signin">Sign in</a>`)}
           <a class="btn sm" href="#/" data-scroll="form">Score my profile <span class="arrow">→</span></a>
         </div>
@@ -495,6 +495,32 @@
     return r;
   }
 
+  function postCard(p, kind) {
+    const d = p.date ? new Date(p.date) : null;
+    return h`<div class="post ${kind}">
+      <div class="pm"><span class="fmt">${p.format}</span><span>${d ? d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : ''}${p.weekday ? ' · ' + p.weekday : ''}</span><span class="x ${p.vs_avg >= 1 ? 'g-strong' : 'g-weak'}">${p.vs_avg}× avg</span></div>
+      <div class="pc">${p.caption || '(no caption)'}</div>
+      <div class="pn">${Number(p.likes).toLocaleString()} likes · ${Number(p.comments).toLocaleString()} comments${p.views ? ` · ${Number(p.views).toLocaleString()} views` : ''}${p.url ? raw(h` · <a href="${p.url}" target="_blank" rel="noopener">open</a>`) : ''}</div>
+    </div>`;
+  }
+  function competitorTable(c) {
+    const rows = [{ ...c.you, you: true }, ...c.competitors];
+    return h`<div class="comprank">You rank <b>#${c.rank.position} of ${c.rank.of}</b></div>
+      <div class="comptable">${raw(rows.map(r => r.ok === false
+        ? h`<div class="crow err"><div class="ch">@${r.handle}</div><div class="cerr">${r.error}</div></div>`
+        : h`<div class="crow ${r.you ? 'you' : ''}">
+            <div class="ch">@${r.handle}${r.you ? raw(' <small>you</small>') : ''}${r.followers ? raw(h`<small>${Number(r.followers).toLocaleString()} followers</small>`) : ''}</div>
+            <div class="cs"><b>${r.overall}</b><div class="bar"><div style="width:${r.overall}%"></div></div></div>
+            <div class="cd">${raw((r.dimensions || []).map(d => h`<span title="${d.label}">${({ 'Posting Consistency': 'CONS', 'Content Mix': 'MIX', 'Engagement Quality': 'ENG', 'Profile Clarity': 'PROF' })[d.label] || d.label.slice(0, 4).toUpperCase()} ${d.score}</span>`).join(''))}</div>
+            <div class="cw">${r.you ? '' : (r.does_differently && r.does_differently.length ? raw(r.does_differently.map(t => h`<div>${t}</div>`).join('')) : raw('<div class="fine">Nothing they do better on these measures.</div>'))}</div>
+          </div>`).join(''))}</div>`;
+  }
+  function sparkline(vals) {
+    const w = 64, hgt = 18, n = vals.length; const lo = Math.min(...vals), hi = Math.max(...vals);
+    const pts = vals.map((v, i) => `${(i / (n - 1)) * w},${hgt - ((v - lo) / Math.max(1, hi - lo)) * (hgt - 2) - 1}`).join(' ');
+    return `<svg class="spark" viewBox="0 0 ${w} ${hgt}" width="${w}" height="${hgt}"><polyline fill="none" stroke="currentColor" stroke-width="1.5" points="${pts}"/></svg>`;
+  }
+
   async function viewReport(reportId) {
     let report = sget('sc_report_' + reportId, null);
     if (!report) {
@@ -528,6 +554,9 @@
     const paid = !!report.tier && report.tier !== 'social_snapshot';
     const cal = report.calendar || {};
     const calWeeks = Array.isArray(cal.weeks) ? cal.weeks : [];
+    const pi = report.post_insights || null;
+    const hist = report.history || null;
+    const comp = report.competitors || null;
 
     renderHeader('report', { handle: biz.handle || '', ctx: [platName(biz.platform), cat, fmtDate(report.created_at), paid ? 'GROWTH PLAN' : ''].filter(Boolean).join(' · ').toUpperCase() });
 
@@ -546,6 +575,7 @@
             <div class="eyebrow">Overall score</div>
             <div class="big"><div class="n">${overall}</div><div class="d">/100</div></div>
             ${chip ? raw(h`<div class="tagchip ${chip[1]}">${chip[0]}</div>`) : ''}
+            ${hist && hist.delta_overall != null ? raw(h`<div class="delta ${hist.delta_overall > 0 ? 'up' : hist.delta_overall < 0 ? 'down' : ''}">${hist.delta_overall > 0 ? '+' : ''}${hist.delta_overall} since ${fmtDate(hist.previous.generated_at)}${hist.series && hist.series.length > 2 ? raw(sparkline(hist.series.map(x => x.overall))) : ''}</div>`) : ''}
           </div>
           <div class="textcol">
             <div class="summary">${diff != null ? raw(h`You're <b>${Math.abs(diff)} points ${diff < 0 ? 'under' : diff > 0 ? 'over' : 'from'}</b> the ${cat} average. `) : ''}${s.summary || ''}</div>
@@ -567,12 +597,40 @@
             return h`<article class="dim">
               <div class="head"><div class="t">${d.label}</div><div class="sc"><div class="n g-${gc}">${sc}</div><div class="g g-${gc}">${gl}</div></div></div>
               <div class="bar"><div class="fill bg-${gc}" style="width:${sc}%"></div>${da != null ? raw(h`<div class="mark" style="left:${da}%"></div>`) : ''}</div>
-              <div class="avg">${da != null ? `${gl.toUpperCase()} · CATEGORY AVG ${da}` : gl.toUpperCase()}</div>
+              <div class="avg">${da != null ? `${gl.toUpperCase()} · CATEGORY AVG ${da}` : gl.toUpperCase()}${(() => { const dd = hist?.delta_dimensions?.find(x => x.label === d.label); return dd && dd.delta != null && dd.delta !== 0 ? raw(h` · <span class="${dd.delta > 0 ? 'g-strong' : 'g-weak'}">${dd.delta > 0 ? '+' : ''}${dd.delta}</span>`) : ''; })()}</div>
               <div class="why">${d.explanation || ''}</div>
             </article>`;
           }).join(''))}</div>
         </section>`) : ''}
 
+
+        ${pi && pi.top && pi.top.length ? raw(h`<section class="posts">
+          <h2 class="sec-h">Your best and worst posts</h2>
+          <p class="sec-s">Ranked against your own average of ${Number(pi.avg_engagement).toLocaleString()} likes + comments per post${pi.patterns?.best_format ? raw(h`. Your <b>${pi.patterns.best_format.format}s</b> average ${pi.patterns.best_format.vs_avg}× your typical post`) : ''}${pi.patterns?.best_day ? raw(h`; <b>${pi.patterns.best_day.day}</b> is your strongest day`) : ''}.</p>
+          ${pi.note ? raw(h`<div class="postnote">${pi.note}</div>`) : ''}
+          <div class="postcols">
+            <div><div class="label">Top performers</div>${raw(pi.top.map(p => postCard(p, 'top')).join(''))}</div>
+            <div><div class="label">Fell flat</div>${raw(pi.bottom.map(p => postCard(p, 'low')).join(''))}</div>
+          </div>
+        </section>`) : ''}
+
+        <section class="competitors" id="competitors">
+          <div class="path-head">
+            <div><h2 class="sec-h">Against your competitors</h2><p class="sec-s">${paid ? 'Up to five accounts your customers also follow, scored the same way — and what each does that you don’t.' : 'See how you rank against five accounts your customers also follow, and exactly what they do that you don’t.'}</p></div>
+            ${paid ? '' : raw('<div class="unlockchip">GROWTH PLAN</div>')}
+          </div>
+          ${paid ? raw(h`
+            <form class="compform" id="compForm">
+              <div class="field" style="flex:1"><div class="label">Competitor handles (comma-separated, up to 5)</div><input type="text" name="handles" placeholder="@barrysbootcamp, @rumbleboxing" value="${comp ? comp.competitors.map(c => c.handle).join(', ') : ''}"></div>
+              <button class="btn md" type="submit">${comp ? 'Re-run comparison' : 'Compare'}</button>
+            </form>
+            <div id="compResult">${comp ? raw(competitorTable(comp)) : ''}</div>`)
+          : raw(h`<div class="compteaser">
+              <div class="row"><span class="l">@${biz.handle || 'you'}</span><span class="n">${overall}</span></div>
+              ${raw(['', '', ''].map((_, i) => `<div class="row ghost"><span class="l"><span class="sk" style="width:${[120, 96, 140][i]}px"></span></span><span class="n"><span class="sk" style="width:22px"></span></span></div>`).join(''))}
+              <div class="fine">Add competitor handles after you unlock the plan.</div>
+            </div>`)}
+        </section>
 
         ${phases.length ? raw(h`<section>
           <div class="path-head">
@@ -640,6 +698,24 @@
       </div></div>`;
 
     $view.querySelector('[data-action=unlock]')?.addEventListener('click', e => { sset('sc_intent_tier', e.currentTarget.dataset.tier); go('#/pricing'); });
+    $view.querySelector('#compForm')?.addEventListener('submit', async e => {
+      e.preventDefault();
+      const f = e.currentTarget; const btn = f.querySelector('button'); const out = $view.querySelector('#compResult');
+      const handles = f.handles.value.split(/[,\s]+/).map(x => x.replace(/^@/, '').trim()).filter(Boolean).slice(0, 5);
+      if (!handles.length) { toast('Add at least one handle.'); return; }
+      btn.disabled = true; btn.textContent = `Scoring ${handles.length} account${handles.length === 1 ? '' : 's'}…`;
+      out.innerHTML = '<div class="fine">Reading each profile — about ten seconds per account.</div>';
+      try {
+        const res = await api('/reports/' + encodeURIComponent(report.report_id) + '/competitors', { method: 'POST', body: JSON.stringify({ handles }) });
+        report.competitors = res; sset('sc_report_' + report.report_id, report);
+        out.innerHTML = competitorTable(res);
+      } catch (e2) {
+        if (e2.status === 401) return;
+        if (e2.status === 402) { sset('sc_intent_tier', 'growth_plan'); go('#/pricing'); return; }
+        out.innerHTML = h`<div class="form-error">${e2.message}</div>`;
+      }
+      btn.disabled = false; btn.textContent = 'Re-run comparison';
+    });
 
     // Never trust a cached price — refresh it from billing.
     if (!paid) api('/billing/pricing', {}, { allow401: true }).then(p => {
@@ -773,6 +849,36 @@
     });
   }
 
+  // ------------------------------------------------------------ reports (history)
+  async function viewReports() {
+    renderHeader('reports');
+    if (!token()) { sset('sc_next', '#/reports'); go('#/signin'); return; }
+    $view.innerHTML = h`<div class="center-msg">Loading your reports…</div>`;
+    let list;
+    try { list = await api('/account/reports'); } catch (e) { if (e.status === 401) return; $view.innerHTML = h`<div class="center-msg"><h2>Couldn’t load reports.</h2>${e.message}</div>`; return; }
+    const reports = (list.reports || []).map(r => ({
+      id: r.reportId || r.report_id, tier: r.tier, at: r.generatedAt || r.generated_at,
+      handle: r.business?.handle, platform: r.business?.platform, category: r.business?.category,
+      overall: r.reportBody?.scores?.overall ?? null,
+    })).sort((a, b) => b.at - a.at);
+    const byHandle = {};
+    for (const r of reports) (byHandle[`${r.platform}:${r.handle}`] ||= []).push(r);
+    $view.innerHTML = h`<div class="wrap"><div class="reports">
+      <div class="path-head"><div><h2 class="sec-h">Your reports</h2><p class="sec-s">Every evaluation you’ve run while signed in. Scores are comparable run to run.</p></div>
+        <a class="btn md" href="#/" data-scroll="form">Score a profile <span class="arrow">→</span></a></div>
+      ${reports.length ? raw(Object.entries(byHandle).map(([k, rs]) => {
+        const series = [...rs].reverse().map(r => r.overall).filter(v => v != null);
+        const latest = rs[0], first = rs[rs.length - 1];
+        const delta = series.length > 1 ? latest.overall - first.overall : null;
+        return h`<div class="hgroup">
+          <div class="hhead"><div><span class="handle">@${latest.handle}</span> <span class="ctx">${platName(latest.platform)} · ${catName(latest.category)} · ${rs.length} run${rs.length === 1 ? '' : 's'}</span></div>
+            <div class="hscore">${latest.overall != null ? raw(h`<b>${latest.overall}</b>`) : ''}${delta != null ? raw(h`<span class="delta ${delta > 0 ? 'up' : delta < 0 ? 'down' : ''}">${delta > 0 ? '+' : ''}${delta} since first run</span>`) : ''}${series.length > 1 ? raw(sparkline(series)) : ''}</div></div>
+          <div class="hlist">${raw(rs.map(r => h`<a class="hrow" href="#/report/${r.id}"><span class="d">${fmtDate(r.at)}</span><span class="t">${r.tier === 'social_snapshot' ? 'Snapshot' : 'Growth Plan'}</span><span class="n">${r.overall ?? '—'}</span></a>`).join(''))}</div>
+        </div>`;
+      }).join('')) : raw(h`<div class="center-msg"><h2>No reports yet.</h2>Run an evaluation while signed in and it will show up here.</div>`)}
+    </div></div>`;
+  }
+
   // ------------------------------------------------------------ router
   function route() {
     stopPolling();
@@ -784,6 +890,7 @@
     if (parts[0] === 'evaluating' && parts[1]) return viewEvaluating(decodeURIComponent(parts[1]));
     if (parts[0] === 'report' && parts[1]) return viewReport(decodeURIComponent(parts[1]));
     if (parts[0] === 'pricing') return viewPricing();
+    if (parts[0] === 'reports') return viewReports();
     if (parts[0] === 'signin') return viewSignin();
     renderHeader('landing');
     $view.innerHTML = h`<div class="center-msg"><h2>Nothing here.</h2><a href="#/">Back to start</a></div>`;

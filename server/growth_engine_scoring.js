@@ -128,4 +128,57 @@ function scoreProfile(realData, category) {
   return { overall, dimensions: dims, targets: t, method: "deterministic-v1" };
 }
 
-module.exports = { scoreProfile, TARGETS };
+/**
+ * Best and worst posts, ranked by engagement relative to the account's own
+ * average (so a 12M-follower account and a 900-follower studio rank the same
+ * way). Also the format/day patterns behind them.
+ *
+ * @param posts  fetcher posts (recent_posts) or formatted recent_activity
+ */
+function rankPosts(posts, { top = 3, bottom = 3 } = {}) {
+  const rows = (posts || [])
+    .map((p) => {
+      const likes = num(p.like_count ?? p.likes);
+      const comments = num(p.comments_count ?? p.comments);
+      const views = num(p.video_view_count ?? p.video_views);
+      const date = p.timestamp || p.date || null;
+      const format = p.is_reel || String(p.media_type || "").toUpperCase() === "REEL" ? "reel"
+        : String(p.media_type || "").toUpperCase() === "VIDEO" ? "video"
+        : String(p.media_type || "").toUpperCase() === "CAROUSEL" ? "carousel" : "static";
+      return {
+        date, format,
+        weekday: date ? ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][new Date(date).getDay()] : null,
+        likes, comments, views,
+        engagement: likes + comments,
+        caption: String(p.caption ?? p.caption_preview ?? "").replace(/\s+/g, " ").trim().slice(0, 140),
+        url: p.permalink || p.url || null,
+        pinned: !!p.is_pinned,
+      };
+    })
+    .filter((r) => r.date);
+  if (rows.length < 2) return null;
+  const avg = rows.reduce((a, r) => a + r.engagement, 0) / rows.length;
+  for (const r of rows) r.vs_avg = avg > 0 ? +(r.engagement / avg).toFixed(2) : 1;
+  const sorted = [...rows].sort((a, b) => b.engagement - a.engagement);
+  const byFormat = {};
+  for (const r of rows) { (byFormat[r.format] ||= []).push(r.engagement); }
+  const format_avg = Object.fromEntries(Object.entries(byFormat).map(([k, v]) => [k, { posts: v.length, avg_engagement: Math.round(v.reduce((a, b) => a + b, 0) / v.length) }]));
+  const byDay = {};
+  for (const r of rows) { (byDay[r.weekday] ||= []).push(r.engagement); }
+  const day_avg = Object.fromEntries(Object.entries(byDay).map(([k, v]) => [k, Math.round(v.reduce((a, b) => a + b, 0) / v.length)]));
+  const bestFormat = Object.entries(format_avg).filter(([, v]) => v.posts >= 2).sort((a, b) => b[1].avg_engagement - a[1].avg_engagement)[0];
+  const bestDay = Object.entries(day_avg).sort((a, b) => b[1] - a[1])[0];
+  return {
+    sample: rows.length,
+    avg_engagement: Math.round(avg),
+    top: sorted.slice(0, top),
+    bottom: sorted.slice(-bottom).reverse(),
+    patterns: {
+      best_format: bestFormat ? { format: bestFormat[0], ...bestFormat[1], vs_avg: +(bestFormat[1].avg_engagement / avg).toFixed(2) } : null,
+      best_day: bestDay ? { day: bestDay[0], avg_engagement: bestDay[1] } : null,
+      format_avg, day_avg,
+    },
+  };
+}
+
+module.exports = { scoreProfile, rankPosts, TARGETS };
