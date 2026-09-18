@@ -102,6 +102,21 @@
         ]
       },
       business: { handle, platform, category, category_name: catName },
+      post_insights: {
+        sample: 12, avg_engagement: 96,
+        note: 'Your top three are all coach-on-camera reels posted before 8am on weekdays. The bottom three are class-schedule graphics posted on Fridays with no caption beyond the times.',
+        patterns: { best_format: { format: 'reel', posts: 4, avg_engagement: 168, vs_avg: 1.75 }, best_day: { day: 'Wed', avg_engagement: 151 } },
+        top: [
+          { date: '2026-09-03T11:40:00Z', format: 'reel', weekday: 'Wed', likes: 214, comments: 19, views: 3980, vs_avg: 2.43, caption: 'Coach Dana on the one hip-hinge cue that fixes most deadlifts. 20 seconds, no music.' },
+          { date: '2026-08-13T11:15:00Z', format: 'reel', weekday: 'Wed', likes: 171, comments: 12, views: 2860, vs_avg: 1.91, caption: 'What 6:15am looks like from the front desk. Same eight faces, every week.' },
+          { date: '2026-07-29T12:02:00Z', format: 'carousel', weekday: 'Tue', likes: 122, comments: 9, views: 0, vs_avg: 1.36, caption: 'Maya’s first pull-up, six months in. Swipe for the week-one video.' }
+        ],
+        bottom: [
+          { date: '2026-08-29T20:10:00Z', format: 'static', weekday: 'Fri', likes: 31, comments: 0, views: 0, vs_avg: 0.32, caption: 'This week’s schedule ⬇️ Mon 6:15 / 7:30 / 12:00 / 6:00 · Tue 6:15 / 7:30…' },
+          { date: '2026-08-08T19:45:00Z', format: 'static', weekday: 'Fri', likes: 36, comments: 1, views: 0, vs_avg: 0.39, caption: 'Schedule for the week of Aug 11. Book via the link in bio.' },
+          { date: '2026-07-18T21:00:00Z', format: 'static', weekday: 'Fri', likes: 44, comments: 2, views: 0, vs_avg: 0.48, caption: 'Labor Day hours: closed Monday. Regular schedule resumes Tuesday.' }
+        ]
+      },
       upsell: {
         cta_label: 'Unlock your full Growth Plan',
         target_tier: 'growth_plan',

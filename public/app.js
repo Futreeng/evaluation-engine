@@ -575,7 +575,7 @@
             <div class="eyebrow">Overall score</div>
             <div class="big"><div class="n">${overall}</div><div class="d">/100</div></div>
             ${chip ? raw(h`<div class="tagchip ${chip[1]}">${chip[0]}</div>`) : ''}
-            ${hist && hist.delta_overall != null ? raw(h`<div class="delta ${hist.delta_overall > 0 ? 'up' : hist.delta_overall < 0 ? 'down' : ''}">${hist.delta_overall > 0 ? '+' : ''}${hist.delta_overall} since ${fmtDate(hist.previous.generated_at)}${hist.series && hist.series.length > 2 ? raw(sparkline(hist.series.map(x => x.overall))) : ''}</div>`) : ''}
+            ${hist && hist.delta_overall != null ? raw(h`<div class="delta ${hist.delta_overall > 0 ? 'up' : hist.delta_overall < 0 ? 'down' : ''}">${hist.delta_overall === 0 ? 'unchanged' : (hist.delta_overall > 0 ? '+' : '') + hist.delta_overall} since ${fmtDate(hist.previous.generated_at)}${hist.series && hist.series.length > 2 ? raw(sparkline(hist.series.map(x => x.overall))) : ''}</div>`) : ''}
           </div>
           <div class="textcol">
             <div class="summary">${diff != null ? raw(h`You're <b>${Math.abs(diff)} points ${diff < 0 ? 'under' : diff > 0 ? 'over' : 'from'}</b> the ${cat} average. `) : ''}${s.summary || ''}</div>
@@ -872,7 +872,7 @@
         const delta = series.length > 1 ? latest.overall - first.overall : null;
         return h`<div class="hgroup">
           <div class="hhead"><div><span class="handle">@${latest.handle}</span> <span class="ctx">${platName(latest.platform)} · ${catName(latest.category)} · ${rs.length} run${rs.length === 1 ? '' : 's'}</span></div>
-            <div class="hscore">${latest.overall != null ? raw(h`<b>${latest.overall}</b>`) : ''}${delta != null ? raw(h`<span class="delta ${delta > 0 ? 'up' : delta < 0 ? 'down' : ''}">${delta > 0 ? '+' : ''}${delta} since first run</span>`) : ''}${series.length > 1 ? raw(sparkline(series)) : ''}</div></div>
+            <div class="hscore">${latest.overall != null ? raw(h`<b>${latest.overall}</b>`) : ''}${delta != null ? raw(h`<span class="delta ${delta > 0 ? 'up' : delta < 0 ? 'down' : ''}">${delta === 0 ? 'unchanged' : (delta > 0 ? '+' : '') + delta} since first run</span>`) : ''}${series.length > 1 ? raw(sparkline(series)) : ''}</div></div>
           <div class="hlist">${raw(rs.map(r => h`<a class="hrow" href="#/report/${r.id}"><span class="d">${fmtDate(r.at)}</span><span class="t">${r.tier === 'social_snapshot' ? 'Snapshot' : 'Growth Plan'}</span><span class="n">${r.overall ?? '—'}</span></a>`).join(''))}</div>
         </div>`;
       }).join('')) : raw(h`<div class="center-msg"><h2>No reports yet.</h2>Run an evaluation while signed in and it will show up here.</div>`)}
