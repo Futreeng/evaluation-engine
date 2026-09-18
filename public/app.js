@@ -406,14 +406,18 @@
       : Array.from({ length: 28 }, (_, k) => defaultSlots.includes(k % 7));
     const wk = [i * 4 + 1, i * 4 + 4];
     const count = locked.count ?? 4;
+    // Locked moves are numbered continuously across phases: phase 1 has
+    // MOVE 01 free + 02..(1+count) locked, phase 2 picks up from there.
+    const firstLocked = i * (1 + count) + 2;
     const items = Array.isArray(locked.items) && locked.items.length ? locked.items : Array.from({ length: Math.min(3, Math.max(1, count - 1)) }, (_, k) => ({
-      meta: `MOVE 0${i * 5 + k + 2} · LOCKED`, w1: ['94%', '88%', '97%'][k], w2: ['61%', '44%', '72%'][k]
+      meta: `MOVE ${String(firstLocked + k).padStart(2, '0')} · LOCKED`, w1: ['94%', '88%', '97%'][k], w2: ['61%', '44%', '72%'][k]
     }));
     return {
       days, label: p.label || `Phase ${i + 1}`,
       action: p.visible_action || p.action || '',
       detail: p.detail || '',
-      lockedHeader: locked.teaser || `${count} specific moves + your weeks ${wk[0]}–${wk[1]} calendar`,
+      // Use the model's teaser only if it names a count; the design promises one.
+      lockedHeader: /\d/.test(locked.teaser || '') ? locked.teaser : `${count} specific moves + your weeks ${wk[0]}–${wk[1]} calendar`,
       calendarLabel: locked.calendar_label || `WEEKS ${wk[0]}–${wk[1]} · ${calendar.filter(Boolean).length} POST SLOTS`,
       calendar, items, count
     };
@@ -499,7 +503,12 @@
 
     renderHeader('report', { handle: biz.handle || '', ctx: [platName(biz.platform), cat, fmtDate(report.created_at)].filter(Boolean).join(' · ').toUpperCase() });
 
-    const narrativeHtml = report.narrative ? md(report.narrative) : '';
+    let narrativeText = report.narrative || '';
+    if (phases.length) {
+      // The phase cards render the path; keep the prose from repeating it.
+      narrativeText = narrativeText.replace(/\n\**\s*YOUR 30[-–]60[-–]90[^\n]*\n[\s\S]*?(?=\n\**\s*WHAT THE FULL PLAN|\n\**\s*WHAT COMES NEXT|$)/i, '\n');
+    }
+    const narrativeHtml = narrativeText.trim() ? md(narrativeText) : '';
     $view.innerHTML = h`
       <div class="wrap"><div class="report">
         ${hasScores ? raw(h`<section class="scorepanel">
@@ -533,10 +542,6 @@
           }).join(''))}</div>
         </section>`) : ''}
 
-        ${narrativeHtml ? raw(h`<section class="narrative">
-          <h2 class="sec-h">${hasScores ? 'The full read' : 'Your report'}</h2>
-          <div class="prose">${raw(narrativeHtml)}</div>
-        </section>`) : ''}
 
         ${phases.length ? raw(h`<section>
           <div class="path-head">
@@ -561,6 +566,11 @@
               </div>
             </div>
           </article>`).join(''))}</div>
+        </section>`) : ''}
+
+        ${narrativeHtml ? raw(h`<section class="narrative">
+          <h2 class="sec-h">${hasScores ? 'The full read' : 'Your report'}</h2>
+          <div class="prose">${raw(narrativeHtml)}</div>
         </section>`) : ''}
 
         <section class="upsell">

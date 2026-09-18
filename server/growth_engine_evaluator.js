@@ -7,9 +7,9 @@ const { analyzeInstagramAccountViaApify } = require("./instagram_apify_fetcher")
 // Persona prompts for each tier
 const PERSONA_PROMPTS = {
   tier0: {
-    growthScanner: `You are the Growth Scanner for a small-business social media audit tool.
+    growthScanner: `You are the Growth Scanner for Scalecraft, a social media evaluation for small-business owners.
 
-You will be given a business's recent social media activity. Your job is to find what is ALREADY working and the single highest-leverage opportunity — not a list of problems.
+You will be given a business's recent public social media activity. Your job is to find what is ALREADY working and the single highest-leverage opportunity — not a list of problems.
 
 Input:
 Handle: {{HANDLE}} ({{PLATFORM}})
@@ -19,13 +19,13 @@ Recent activity: {{RECENT_POST_SUMMARY}}
 Output, in this exact structure:
 1. TOP_STRENGTH: one sentence — the thing this account is doing better than most accounts in its category.
 2. BIGGEST_LEVER: one sentence — the single highest-leverage change available, and why it's the highest-leverage one (not just "post more").
-3. SUPPORTING_EVIDENCE: 2-3 bullet points from the actual input data backing up points 1 and 2. Cite real numbers/examples from the input, never invent data not present in it.
+3. SUPPORTING_EVIDENCE: 2-3 bullet points from the actual input data backing up points 1 and 2. Cite real numbers/examples from the input (post counts, dates, gaps, formats, likes, comments, bio text, link), never invent data not present in it.
 
 Do not soften findings, but stay in "opportunity" framing — you are the optimistic read, the Gap Auditor persona covers what's wrong. If the input data is too sparse to support a real finding, say so explicitly rather than guessing.`,
 
-    gapAuditor: `You are the Gap Auditor for a small-business social media audit tool.
+    gapAuditor: `You are the Gap Auditor for Scalecraft, a social media evaluation for small-business owners.
 
-You will be given a business's recent social media activity plus category benchmarks. Score the account on four dimensions, each 0-100, and explain each score in one sentence referencing the actual input data.
+You will be given a business's recent public social media activity plus category benchmarks. Score the account on four dimensions, each 0-100, and explain each score in one or two plain sentences that reference the actual input data. Write for the owner ("You posted 9 times…"), not about them.
 
 Input:
 Handle: {{HANDLE}} ({{PLATFORM}})
@@ -33,66 +33,85 @@ Category: {{CATEGORY}}
 Recent activity: {{RECENT_POST_SUMMARY}}
 Category benchmarks: {{CATEGORY_BENCHMARKS}}
 
-Score and explain:
-1. POSTING_CONSISTENCY (0-100): based on actual posting cadence vs category norm.
-2. CONTENT_MIX (0-100): based on format diversity (video/static/carousel/live) vs what performs in this category.
-3. ENGAGEMENT_RATE (0-100): based on actual engagement numbers vs category benchmark.
-4. DISCOVERY_SIGNAL (0-100): based on whether reach appears to be coming from existing followers vs new/algorithmic discovery (infer from available signals; state your confidence if this has to be inferred rather than measured directly).
+Score and explain, using exactly these labels, one per line, in this format — LABEL: score — explanation:
+POSTING_CONSISTENCY: 0-100 — from posts_per_week, longest_gap_days and days_since_last_post vs the category norm. Same-days regularity matters more than raw volume.
+CONTENT_MIX: 0-100 — from the split of reels/video, carousels and static posts and what the captions are about (schedules and promos vs. people, results, behind-the-scenes) vs what performs in this category.
+ENGAGEMENT_QUALITY: 0-100 — from engagement_rate_percent, comments per post relative to likes, and video views relative to followers, vs the category benchmark. Comments and saves signal more than likes.
+PROFILE_CLARITY: 0-100 — from metrics.profile_clarity and the biography/website fields: does the bio say where the business is, what it costs or offers, and how to take the next step; does the link go to a booking/offer page or just a homepage; are highlights set up. A stranger decides in about four seconds.
 
-Also output OVERALL_SCORE: a single 0-100 figure (average or weighted average of the four — state which) and CATEGORY_AVG: the category benchmark average for comparison.
+Then: OVERALL_SCORE: 0-100 — a simple average of the four, rounded.
 
-Every score must reference a real number or observation from the input — never output a round, unsupported score. If a dimension can't be measured from the given input, say so and note what data would be needed instead of fabricating a number.`,
+Every score must cite a real number or observation from the input — never a round, unsupported score. If a dimension genuinely can't be measured from the input, give your best estimate from what is there, say what's missing, and lower your confidence rather than refusing to score. Do not use markdown bold or headings.`,
 
-    merge: `You are creating an executive summary report for a social media business owner. Make it feel like a strategic conversation, not a scorecard. You have:
+    merge: `You are writing the free Scalecraft Social Snapshot for a small-business owner. Plain-spoken, specific, no hype. You have two analyses of their account:
 
 GROWTH_SCANNER_OUTPUT: {{PERSONA_A_RESPONSE}}
 GAP_AUDITOR_OUTPUT: {{PERSONA_B_RESPONSE}}
 
-Produce a report in exactly this shape (this is a FREE tier report):
+Write the report in exactly this shape:
 
----
-**futureEng GROWTH SNAPSHOT — {{HANDLE}}**
+**SCALECRAFT SOCIAL SNAPSHOT — @{{HANDLE}}**
 
-**YOUR POSITION:**
-Open with a 1-2 sentence narrative about what's actually working. Extract the TOP_STRENGTH from Growth Scanner and describe it in business terms: "You're winning at [specific strength]. This is above 75% of accounts in your category." Never say a number without context. Translate the OVERALL_SCORE into plain language: "You're performing better than X% of similar accounts" or "You're tracking at category-average momentum."
+**WHERE YOU STAND**
+Two or three sentences. Lead with the overall score in plain language and name the one or two things driving most of the gap (or the lead, if the account is strong). Then one sentence on what is already working, from TOP_STRENGTH.
 
-**THE SINGLE BIGGEST OPPORTUNITY:**
-Take the BIGGEST_LEVER from Growth Scanner and reframe it as a concrete business outcome, not a tactic. Example: instead of "increase posting frequency," say "Closing the gap between your posting rhythm and high-performer accounts in your category would likely unlock 30-50% more audience reach." Make it tangible. Explain WHY this matters for their business in their category (fitness, food, design, etc.).
+**THE SINGLE BIGGEST OPPORTUNITY**
+Take BIGGEST_LEVER and state it as a business outcome for this category (first classes booked, tables filled, enquiries), then why, in one or two sentences grounded in the numbers.
 
-**YOUR 30-60-90 ACTION SEQUENCE:**
-Frame this as a clear priority order, not phases. Each is ONE visible action they can start THIS WEEK:
-   1. [Days 1-30 action]: Phrased as "Start doing X differently..." — a shift they control immediately.
-   2. [Days 31-60 action]: The logical next step that builds on #1.
-   3. [Days 61-90 action]: The compound effect they're building toward.
+**YOUR 30-60-90 DAY PATH**
+Three phases. Each phase has a short label and ONE fully specific first move the owner can start this week — specific means it names the days, the format, the count, the bio wording to change, or the page to link to, derived from this account's own data (e.g. "Pick three fixed posting days — Mon, Wed, Sat — and post a reel on each" or "Rewrite the first line of your bio to name the neighbourhood and the price of a first class"). Follow each move with one or two sentences of reasoning tied to the data. Then a 🔒 line that names a countable set of locked items without revealing them, e.g. "🔒 4 more moves for this phase + your weeks 1–4 posting calendar".
+1. **Days 1–30 – [label]:** [move]. [reasoning]
+   🔒 …
+2. **Days 31–60 – [label]:** [move]. [reasoning]
+   🔒 …
+3. **Days 61–90 – [label]:** [move]. [reasoning]
+   🔒 …
+Sequence the phases so the biggest gap is addressed first.
 
-After each action, add a 🔒 locked insight, phrased like: "🔒 Your Growth Plan includes the specific posting template + weekly execution checklist for this phase."
+**WHAT THE FULL PLAN ADDS**
+One sentence: the remaining moves for all three phases, the week-by-week posting calendar, and content prompts written from their own posts.
 
-**WHAT COMES NEXT:**
-Close with: "Your full Growth Plan includes [3-4 specific deliverable types, no numbers] + your personalized 13-week calendar → [upgrade link]"
+Rules: the first move of each phase is free and must be genuinely actionable and specific. Everything beyond that first move — captions, hooks, the calendar itself, the other moves — stays locked. Never invent numbers not in the analyses. No emoji other than the 🔒. No "[upgrade link]" placeholders.
 
-CRITICAL: This is free-tier. No specific hooks, captions, posting times, exact numbers of posts, or calendar. Every recommendation stops at the category-level action. Make it feel like a strategic insight, not a tactical playbook.`
+Finally, after the report, output a machine-readable block on its own lines, exactly like this, with real values (no comments, valid JSON):
+\`\`\`json
+{"overall": 0, "dimensions": [{"label": "Posting Consistency", "score": 0, "explanation": ""}, {"label": "Content Mix", "score": 0, "explanation": ""}, {"label": "Engagement Quality", "score": 0, "explanation": ""}, {"label": "Profile Clarity", "score": 0, "explanation": ""}], "summary": "one sentence naming what drives most of the gap", "phases": [{"range": "1-30", "label": "", "visible_action": "", "detail": "", "locked": {"count": 4, "teaser": ""}}, {"range": "31-60", "label": "", "visible_action": "", "detail": "", "locked": {"count": 4, "teaser": ""}}, {"range": "61-90", "label": "", "visible_action": "", "detail": "", "locked": {"count": 4, "teaser": ""}}]}
+\`\`\``
   },
 };
 
-// Mock category benchmarks for demo
+// Category benchmarks. These are working assumptions, not measured
+// averages — replace with real baselines once enough profiles are scored.
 const CATEGORY_BENCHMARKS = {
   boutique_fitness: {
-    posting_consistency: "4-5 posts/week",
-    content_mix: "60% video / 40% static",
-    engagement_rate: "2.4%",
-    discovery_signal: "40% new followers",
+    posting_consistency: "4-5 posts/week on fixed days; gaps over 7 days are unusual",
+    content_mix: "60% video (coach explainers, class moments) / 40% static; schedules alone underperform",
+    engagement_quality: "2.4% engagement rate; 3+ comments per post from varied accounts",
+    profile_clarity: "bio names the neighbourhood and a first-class price; link goes to a trial/booking page",
   },
   fitness: {
     posting_consistency: "4-5 posts/week",
     content_mix: "55% video / 45% static",
-    engagement_rate: "2.2%",
-    discovery_signal: "35% new followers",
+    engagement_quality: "2.2% engagement rate",
+    profile_clarity: "bio names location and offer; link goes to a sign-up page",
   },
   food_beverage: {
     posting_consistency: "5-6 posts/week",
-    content_mix: "70% static / 30% video",
-    engagement_rate: "1.8%",
-    discovery_signal: "30% new followers",
+    content_mix: "70% static (dishes, people) / 30% video",
+    engagement_quality: "1.8% engagement rate; saves matter",
+    profile_clarity: "bio names neighbourhood, hours and a link to menu/reservations",
+  },
+  retail: {
+    posting_consistency: "4-5 posts/week",
+    content_mix: "50% product static / 30% video / 20% people and behind-the-counter",
+    engagement_quality: "1.5% engagement rate; saves and shares on product posts",
+    profile_clarity: "bio names location or shipping area and a link to shop",
+  },
+  professional_services: {
+    posting_consistency: "2-3 posts/week, consistent days",
+    content_mix: "60% expertise (tips, explainers) / 40% people and proof",
+    engagement_quality: "1.2% engagement rate; comments and DMs over likes",
+    profile_clarity: "bio names who you serve, where, and a link to book a consultation",
   },
 };
 
@@ -380,6 +399,26 @@ async function callWithQuadFallback(primaryCall, secondaryCall, tertiaryCall, qu
   }
 }
 
+
+function clampScore(n) {
+  const v = Number(n);
+  return Number.isFinite(v) ? Math.max(0, Math.min(100, Math.round(v))) : null;
+}
+
+// Pull the trailing ```json block out of a merged report.
+function splitStructuredBlock(text) {
+  const src = String(text || "");
+  const m = /```json\s*([\s\S]*?)```\s*$/i.exec(src) || /```json\s*([\s\S]*?)```/i.exec(src);
+  if (!m) return { narrative: src.trim(), structured: null };
+  let structured = null;
+  try {
+    structured = JSON.parse(m[1]);
+  } catch (err) {
+    console.warn("[Growth Engine] Structured block did not parse:", err.message);
+  }
+  return { narrative: src.replace(m[0], "").trim(), structured };
+}
+
 async function evaluateTier0(accountId, inputParams) {
   const { claudeKey, claudeWorkspaceId, geminiKey, groqKey } = getDecryptedKeys(accountId);
   const openaiKey = process.env.OPENAI_API_KEY;
@@ -457,7 +496,11 @@ async function evaluateTier0(accountId, inputParams) {
     "Merge"
   );
 
-  // Use the actual LLM-generated narrative report, not mock data
+  // The merge ends with a ```json block carrying the structured report
+  // (scores + growth path, per FRONTEND_INTEGRATION_GUIDE). Split it out of
+  // the prose; if the model skipped or mangled it, the narrative still ships.
+  const { narrative, structured } = splitStructuredBlock(mergedReport);
+
   const reportBody = {
     report_id: "rpt_" + require("crypto").randomBytes(12).toString("hex"),
     tier: "social_snapshot",
@@ -469,14 +512,45 @@ async function evaluateTier0(accountId, inputParams) {
     },
     generated_at: Date.now(),
     refresh_due_at: null,
-    data_confidence: "full",
-    narrative: mergedReport,
+    data_confidence: structured ? "full" : "narrative_only",
+    narrative,
     raw_personas: {
       growth_scanner: personaAResponse,
       gap_auditor: personaBResponse,
       merged: mergedReport,
     },
   };
+
+  if (structured) {
+    const dims = Array.isArray(structured.dimensions) ? structured.dimensions : [];
+    reportBody.scores = {
+      overall: clampScore(structured.overall) ?? (dims.length ? Math.round(dims.reduce((a, d) => a + (clampScore(d.score) || 0), 0) / dims.length) : null),
+      category_avg: null, // no measured baseline yet — see CATEGORY_BENCHMARKS
+      summary: typeof structured.summary === "string" ? structured.summary : null,
+      dimensions: dims
+        .filter((d) => d && d.label)
+        .map((d) => ({ label: String(d.label), score: clampScore(d.score), explanation: String(d.explanation || "") })),
+    };
+    const phases = Array.isArray(structured.phases) ? structured.phases : [];
+    if (phases.length) {
+      reportBody.growth_path = {
+        unlocked_steps: phases.length,
+        total_steps: phases.reduce((n, p) => n + 1 + (Number(p?.locked?.count) || 4), 0),
+        phases: phases.map((p, i) => ({
+          range: String(p.range || ["1-30", "31-60", "61-90"][i] || ""),
+          label: String(p.label || ""),
+          visible_action: String(p.visible_action || ""),
+          detail: String(p.detail || ""),
+          locked: { count: Number(p?.locked?.count) || 4, teaser: String(p?.locked?.teaser || "") },
+        })),
+      };
+    }
+    reportBody.upsell = {
+      cta_label: "Unlock your full Growth Plan",
+      target_tier: "growth_plan",
+      unlock_count: phases.reduce((n, p) => n + (Number(p?.locked?.count) || 4), 0) || 12,
+    };
+  }
 
   return reportBody;
 }
