@@ -254,6 +254,23 @@ router.get("/reports/:reportId", async (req, res) => {
   }
 });
 
+// Category baseline status (public; powers the "N profiles scored" copy)
+router.get("/baselines", async (req, res) => {
+  try {
+    res.json(await geDb.getBaselineSummary());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+router.get("/baselines/:category", async (req, res) => {
+  try {
+    const base = await geDb.getCategoryBaseline(req.params.category);
+    res.json(base || { n: 0, min_n: 20, ready: false });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Get pricing
 router.get("/billing/pricing", async (req, res) => {
   try {

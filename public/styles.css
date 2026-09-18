@@ -541,3 +541,4 @@ button:disabled { cursor: default; opacity: .6; }
   .wslot { grid-template-columns: 64px 1fr; gap: 10px; }
 }
 .notice { font-size: 14px; line-height: 1.5; color: var(--ink); background: var(--red-bg); border: 1px solid var(--red-b); border-radius: 8px; padding: 12px 14px; margin: 0 0 18px; text-align: left; }
+.cmp .pending { font-family: var(--mono); font-size: 11px; letter-spacing: .04em; color: var(--dim); line-height: 1.5; }

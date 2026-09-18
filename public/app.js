@@ -151,7 +151,7 @@
         <div class="hero-band-wrap" id="how">
           <div class="hero-band">
             <div class="h">
-              <div class="eyebrow gold"><span class="sq"></span>1,284 Boutique Fitness profiles scored</div>
+              <div class="eyebrow gold" id="scoredEyebrow" ${CFG.useMock ? '' : 'hidden'}><span class="sq"></span><span id="scoredCount">1,284 Boutique Fitness profiles scored</span></div>
               <h2>Your feed, scored like a P&amp;L.</h2>
             </div>
             <div class="hero-cards">
@@ -179,7 +179,7 @@
               <div>Four graded dimensions with the actual reason for each grade.</div>
               <div>The first move of each 30-day phase, in full, free.</div>
             </div>
-            <div class="foot"><span>1,284 BOUTIQUE FITNESS PROFILES SCORED</span><span class="sl">/</span><span>NO POSTING ACCESS REQUIRED</span></div>
+            <div class="foot"><span id="scoredFoot" ${CFG.useMock ? '' : 'hidden'}>1,284 BOUTIQUE FITNESS PROFILES SCORED</span><span class="sl" id="scoredSep" ${CFG.useMock ? '' : 'hidden'}>/</span><span>NO POSTING ACCESS REQUIRED</span></div>
           </div>
           <div class="form-card" id="form">
             <h3>Score my profile</h3>
@@ -238,6 +238,18 @@
       sset('sc_form', payload);
       await submitEvaluation(payload, form.querySelector('button[type=submit]'));
     });
+
+    // Replace the sample count with what we've actually scored.
+    if (!CFG.useMock) api('/baselines', {}, { allow401: true }).then(b => {
+      const n = Number(b?.total) || 0;
+      if (n < 1) return;
+      const cats = Object.entries(b.by_category || {}).sort((a, c) => c[1] - a[1]);
+      const lead = cats[0] && cats[0][1] >= 5 ? `${cats[0][1].toLocaleString()} ${catName(cats[0][0])} profiles scored` : `${n.toLocaleString()} profile${n === 1 ? '' : 's'} scored so far`;
+      const eb = $view.querySelector('#scoredEyebrow'); const ec = $view.querySelector('#scoredCount');
+      if (eb && ec) { ec.textContent = lead; eb.hidden = false; }
+      const f = $view.querySelector('#scoredFoot'); const sep = $view.querySelector('#scoredSep');
+      if (f && sep) { f.textContent = lead.toUpperCase(); f.hidden = false; sep.hidden = false; }
+    }).catch(() => { });
 
     const scrollTo = sget('sc_scroll', null);
     if (scrollTo) { sessionStorage.removeItem('sc_scroll'); document.getElementById(scrollTo)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
@@ -539,6 +551,7 @@
             <div class="summary">${diff != null ? raw(h`You're <b>${Math.abs(diff)} points ${diff < 0 ? 'under' : diff > 0 ? 'over' : 'from'}</b> the ${cat} average. `) : ''}${s.summary || ''}</div>
             <div class="cmp">
               <div><div class="row you"><span class="l">@${biz.handle || 'you'}</span><span class="n">${overall}</span></div><div class="bar you"><div style="width:${overall}%"></div></div></div>
+              ${avg == null && s.category_baseline_pending ? raw(h`<div class="pending">Your ${cat} average appears once ${s.category_baseline_pending.min_n} profiles are scored — ${s.category_baseline_pending.n} so far.</div>`) : ''}
               ${avg != null ? raw(h`<div><div class="row"><span class="l">${cat} average ${sample ? raw(h`<small>(${sample} profiles)</small>`) : ''}</span><span class="n">${avg}</span></div><div class="bar avg"><div style="width:${avg}%"></div></div></div>`) : ''}
               ${top != null ? raw(h`<div><div class="row"><span class="l">Top quartile in your category</span><span class="n">${top}</span></div><div class="bar top"><div style="width:${top}%"></div></div></div>`) : ''}
             </div>
