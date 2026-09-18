@@ -80,6 +80,29 @@ Finally, after the report, output a machine-readable block on its own lines, exa
   },
 };
 
+// Tier 1: everything the free report locked, written from the same data.
+const PLAN_WRITER_PROMPT = `You are the Plan Writer for Scalecraft. A small-business owner has paid for their Growth Plan. You have their public account data, category benchmarks, and the free snapshot (scores + the first move of each 30-day phase). Write the rest of the plan. Be specific to THIS account: use its real posting days, formats, gaps, bio wording, caption themes and numbers. No generic advice.
+
+Handle: {{HANDLE}} ({{PLATFORM}})
+Category: {{CATEGORY}}
+Account data: {{RECENT_POST_SUMMARY}}
+Category benchmarks: {{CATEGORY_BENCHMARKS}}
+Snapshot (already shown to the owner): {{SNAPSHOT_JSON}}
+
+Produce ONLY a JSON object, no prose, no markdown fences, in exactly this shape:
+{"posting_days":["Mon","Wed","Sat"],"posting_time":"7:15am",
+ "phases":[
+  {"range":"1-30","moves":[{"n":2,"title":"short title","action":"one imperative sentence the owner can do this week","why":"one or two sentences tied to the data"},{"n":3,...},{"n":4,...},{"n":5,...}]},
+  {"range":"31-60","moves":[{"n":6,...},{"n":7,...},{"n":8,...},{"n":9,...}]},
+  {"range":"61-90","moves":[{"n":10,...},{"n":11,...},{"n":12,...},{"n":13,...}]}
+ ],
+ "calendar":[
+  {"week":1,"slots":[{"day":"Mon","format":"reel","angle":"what this post is about, under 12 words","prompt":"a caption/shooting brief the owner can follow, under 30 words"},{"day":"Wed",...},{"day":"Sat",...}]},
+  ... weeks 2 through 12, three slots each, on the same posting_days ...
+ ]}
+
+Rules: moves must not repeat the snapshot's first moves; move titles under 6 words; each phase's moves build on that phase's first move. Formats are one of reel, carousel, static, story. Weeks 1-4 serve phase 1, 5-8 phase 2, 9-12 phase 3. posting_days must match the snapshot's first move if it names days. Output valid JSON only.`;
+
 // Category benchmarks. These are working assumptions, not measured
 // averages — replace with real baselines once enough profiles are scored.
 const CATEGORY_BENCHMARKS = {
@@ -198,6 +221,14 @@ function getDecryptedKeys(userId) {
   };
 }
 
+// Output budget for the next LLM call(s); the plan writer needs more than a snapshot.
+let OUTPUT_TOKENS = 2048;
+function withOutputTokens(n, fn) {
+  const prev = OUTPUT_TOKENS;
+  OUTPUT_TOKENS = n;
+  return Promise.resolve().then(fn).finally(() => { OUTPUT_TOKENS = prev; });
+}
+
 async function callClaudeNonStreaming(claudeKey, claudeWorkspaceId, system, userMessage) {
   const headers = {
     "content-type": "application/json",
@@ -211,7 +242,7 @@ async function callClaudeNonStreaming(claudeKey, claudeWorkspaceId, system, user
     headers,
     body: JSON.stringify({
       model: "claude-opus-4-1",
-      max_tokens: 2048,
+      max_tokens: OUTPUT_TOKENS,
       system,
       messages: [{ role: "user", content: userMessage }],
     }),
@@ -269,7 +300,7 @@ async function callGroqNonStreaming(groqKey, systemInstruction, userMessage) {
             { role: "system", content: systemInstruction },
             { role: "user", content: userMessage },
           ],
-          max_tokens: 2048,
+          max_tokens: OUTPUT_TOKENS,
         }),
       });
       if (response.ok) {
@@ -304,7 +335,7 @@ async function callTogetherNonStreaming(togetherKey, system, userMessage) {
     },
     body: JSON.stringify({
       model: "meta-llama/Llama-3-70b-chat-hf",
-      max_tokens: 2048,
+      max_tokens: OUTPUT_TOKENS,
       messages: [
         { role: "system", content: system },
         { role: "user", content: userMessage },
@@ -332,7 +363,7 @@ async function callOpenAINonStreaming(openaiKey, system, userMessage) {
     },
     body: JSON.stringify({
       model: "gpt-4o-mini",
-      max_tokens: 2048,
+      max_tokens: OUTPUT_TOKENS,
       messages: [
         { role: "system", content: system },
         { role: "user", content: userMessage },
@@ -419,7 +450,7 @@ function splitStructuredBlock(text) {
   return { narrative: src.replace(m[0], "").trim(), structured };
 }
 
-async function evaluateTier0(accountId, inputParams) {
+async function runSnapshot(accountId, inputParams) {
   const { claudeKey, claudeWorkspaceId, geminiKey, groqKey } = getDecryptedKeys(accountId);
   const openaiKey = process.env.OPENAI_API_KEY;
   if (!claudeKey && !geminiKey && !groqKey && !openaiKey) {
@@ -459,7 +490,9 @@ async function evaluateTier0(accountId, inputParams) {
   const prompt2 = interpolateTemplate(PERSONA_PROMPTS.tier0.gapAuditor, templateVars);
 
   console.log("[Growth Engine] Starting evaluation. Fallback chain: Claude → Gemini → Groq → OpenAI");
-  const [personaAResponse, personaBResponse] = await Promise.all([
+  // Sequential, not parallel: two concurrent calls on a free-tier key trip the
+  // per-minute token cap and both retry.
+  const personaAResponse = await (
     // Persona A: Growth Scanner
     callWithQuadFallback(
       () => callClaudeNonStreaming(claudeKey, claudeWorkspaceId, "You are an expert social media strategist.", prompt1),
@@ -467,7 +500,8 @@ async function evaluateTier0(accountId, inputParams) {
       () => callGroqNonStreaming(groqKey, "You are an expert social media strategist.", prompt1),
       () => callOpenAINonStreaming(openaiKey, "You are an expert social media strategist.", prompt1),
       "Growth Scanner"
-    ),
+    ));
+  const personaBResponse = await (
     // Persona B: Gap Auditor
     callWithQuadFallback(
       () => callClaudeNonStreaming(claudeKey, claudeWorkspaceId, "You are a data-driven social media analyst.", prompt2),
@@ -475,8 +509,7 @@ async function evaluateTier0(accountId, inputParams) {
       () => callGroqNonStreaming(groqKey, "You are a data-driven social media analyst.", prompt2),
       () => callOpenAINonStreaming(openaiKey, "You are a data-driven social media analyst.", prompt2),
       "Gap Auditor"
-    ),
-  ]);
+    ));
 
   // Merge step
   const mergeTemplateVars = {
@@ -552,59 +585,81 @@ async function evaluateTier0(accountId, inputParams) {
     };
   }
 
+  return { reportBody, structured, postSummary, benchmarks, keys: { claudeKey, claudeWorkspaceId, geminiKey, groqKey, openaiKey } };
+}
+
+async function evaluateTier0(accountId, inputParams) {
+  const { reportBody } = await runSnapshot(accountId, inputParams);
   return reportBody;
 }
 
 async function evaluateTier1(accountId, inputParams) {
-  // Tier 1: Growth Plan (full 90-day calendar + LLM prompts)
-  // Same personas as Tier 0, but merge step outputs full calendar instead of teaser
-  // Placeholder: returns mock calendar for now
-
+  // Tier 1: Growth Plan — the free snapshot plus every locked item, from the same data.
+  const { reportBody, structured, postSummary, benchmarks, keys } = await runSnapshot(accountId, inputParams);
   const { handle, platform, category } = inputParams;
+  const { claudeKey, claudeWorkspaceId, geminiKey, groqKey, openaiKey } = keys;
 
-  const reportBody = {
-    report_id: "rpt_" + require("crypto").randomBytes(12).toString("hex"),
-    tier: "growth_plan",
-    business: {
-      handle,
-      platform,
-      category,
-      business_name: null,
-    },
-    generated_at: Date.now(),
-    refresh_due_at: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7 days for weekly refresh
-    data_confidence: "full",
-    scores: {
-      overall: 47,
-      category_avg: 61,
-      dimensions: [
-        { key: "posting_consistency", label: "Posting Consistency", score: 35, explanation: "1.8 posts/week vs 4-5/week" },
-        { key: "content_mix", label: "Content Mix", score: 58, explanation: "80% static / 20% video" },
-        { key: "engagement_rate", label: "Engagement Rate", score: 52, explanation: "1.1% avg vs 2.4% benchmark" },
-        { key: "discovery_signal", label: "Discovery Signal", score: 40, explanation: "Mostly existing followers" },
-      ],
-    },
-    content_calendar: {
-      weeks: Array.from({ length: 13 }, (_, i) => ({
-        week: i + 1,
-        format: i % 3 === 0 ? "reel" : i % 3 === 1 ? "carousel" : "static",
-        hook_angle: `Week ${i + 1} content angle for ${category}`,
-        posting_day: ["Monday", "Wednesday", "Friday"][i % 3],
-        posting_time: "18:00",
-        cta: "See details in Growth Plan",
-        llm_prompt: `Write a ${["reel", "carousel", "static"][i % 3]} for ${handle} (${category}): Week ${i + 1} angle.`,
-      })),
-    },
-    competitor_comparison: {
-      competitors: [
-        { handle: "@competitor_1", dimensions: { posting_consistency: 70, content_mix: 65, engagement_rate: 60, discovery_signal: 55 } },
-        { handle: "@competitor_2", dimensions: { posting_consistency: 65, content_mix: 58, engagement_rate: 55, discovery_signal: 50 } },
-      ],
-    },
-  };
+  const snapshotJson = JSON.stringify({
+    overall: reportBody.scores?.overall ?? null,
+    dimensions: reportBody.scores?.dimensions ?? [],
+    phases: (reportBody.growth_path?.phases ?? []).map((p) => ({ range: p.range, label: p.label, first_move: p.visible_action })),
+  });
+  const planPrompt = interpolateTemplate(PLAN_WRITER_PROMPT, {
+    HANDLE: handle, PLATFORM: platform, CATEGORY: category,
+    RECENT_POST_SUMMARY: postSummary, CATEGORY_BENCHMARKS: JSON.stringify(benchmarks), SNAPSHOT_JSON: snapshotJson,
+  });
+  const sys = "You write specific, data-grounded social media growth plans. Output JSON only.";
+  const planRaw = await withOutputTokens(4096, () => callWithQuadFallback(
+    () => callClaudeNonStreaming(claudeKey, claudeWorkspaceId, sys, planPrompt),
+    () => callGeminiNonStreaming(geminiKey, sys, planPrompt),
+    () => callGroqNonStreaming(groqKey, sys, planPrompt),
+    () => callOpenAINonStreaming(openaiKey, sys, planPrompt),
+    "Plan Writer"
+  ));
 
+  const plan = parseJsonLoose(planRaw);
+  if (!plan) throw new Error("Plan Writer returned no usable plan");
+
+  const days = Array.isArray(plan.posting_days) ? plan.posting_days.map(String) : [];
+  const weeks = (Array.isArray(plan.calendar) ? plan.calendar : []).slice(0, 12).map((w, i) => ({
+    week: Number(w.week) || i + 1,
+    phase: Math.min(3, Math.floor(i / 4) + 1),
+    slots: (Array.isArray(w.slots) ? w.slots : []).map((sl) => ({
+      day: String(sl.day || ""), format: String(sl.format || "post"), angle: String(sl.angle || ""), prompt: String(sl.prompt || ""),
+    })),
+  }));
+  const planPhases = Array.isArray(plan.phases) ? plan.phases : [];
+
+  reportBody.tier = "growth_plan";
+  reportBody.refresh_due_at = Date.now() + 7 * 24 * 60 * 60 * 1000;
+  if (!reportBody.growth_path) reportBody.growth_path = { phases: [] };
+  reportBody.growth_path.phases = reportBody.growth_path.phases.map((p, i) => {
+    const extra = planPhases.find((x) => String(x.range) === String(p.range)) || planPhases[i] || { moves: [] };
+    const moves = (Array.isArray(extra.moves) ? extra.moves : []).map((m, k) => ({
+      n: Number(m.n) || i * 4 + k + 2, title: String(m.title || ""), action: String(m.action || ""), why: String(m.why || ""),
+    }));
+    return { ...p, moves, locked: { count: 0, teaser: "" }, calendar_weeks: weeks.filter((w) => w.phase === i + 1) };
+  });
+  reportBody.growth_path.unlocked_steps = reportBody.growth_path.phases.reduce((n, p) => n + 1 + p.moves.length, 0);
+  reportBody.growth_path.total_steps = reportBody.growth_path.unlocked_steps;
+  reportBody.calendar = { posting_days: days, posting_time: plan.posting_time ? String(plan.posting_time) : null, weeks };
+  reportBody.upsell = { cta_label: "Upgrade to Business Evaluator", target_tier: "business_evaluator", unlock_count: 0 };
   return reportBody;
 }
+
+// LLMs sometimes wrap JSON in fences or prose; find the outermost object.
+function parseJsonLoose(text) {
+  const src = String(text || "");
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(src);
+  const candidates = [fenced && fenced[1], src.slice(src.indexOf("{"), src.lastIndexOf("}") + 1), src];
+  for (const c of candidates) {
+    if (!c) continue;
+    try { return JSON.parse(c); } catch { /* next */ }
+  }
+  console.warn("[Growth Engine] Plan JSON did not parse; first 200 chars:", src.slice(0, 200));
+  return null;
+}
+
 
 async function evaluateTier2(accountId, inputParams) {
   // Tier 2: Business Evaluator (calendar + business reconciliation + action plan)

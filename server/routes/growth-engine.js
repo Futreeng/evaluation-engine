@@ -162,21 +162,46 @@ router.get("/account/reports", authMiddleware, async (req, res) => {
 });
 
 // Queue evaluation (TEMP: no auth for frontend testing; add authMiddleware back once Haron builds login)
-router.post("/evaluate/social-snapshot", validateEvaluationRequest, async (req, res) => {
+// Reads the bearer token if one is sent, without requiring it — the free
+// snapshot is anonymous, but a signed-in subscriber gets their paid tier.
+const optionalAuth = async (req, _res, next) => {
+  const token = req.headers.authorization?.split(" ")[1];
+  if (token) {
+    const user = await verifyJWT(token);
+    if (user) req.user = user;
+  }
+  next();
+};
+
+// Which evaluator runs for an account. business_evaluator maps to the
+// growth_plan pipeline until tier 2 has its own.
+async function evaluationTierFor(accountId) {
+  if (!accountId || accountId === "demo-account") return "social_snapshot";
+  try {
+    const ent = await geDb.getOrCreateEntitlement(accountId);
+    const t = ent?.current_tier || ent?.currentTier || "social_snapshot";
+    if (t === "growth_plan" || t === "business_evaluator" || t === "agency") return "growth_plan";
+  } catch (err) {
+    console.warn("[Growth Engine] Entitlement lookup failed, defaulting to snapshot:", err.message);
+  }
+  return "social_snapshot";
+}
+
+router.post("/evaluate/social-snapshot", optionalAuth, validateEvaluationRequest, async (req, res) => {
   try {
     const { handle, platform, category, email } = req.body;
-    // TEMP: Use demo account for testing; will be req.user.id once auth is enforced
     const accountId = req.user?.id || "demo-account";
+    const tier = await evaluationTierFor(accountId);
 
     // Create job in database
-    const jobResult = await geDb.createJob(accountId, "social_snapshot", { handle, platform, category, email });
+    const jobResult = await geDb.createJob(accountId, tier, { handle, platform, category, email });
     const jobId = jobResult.jobId;
 
     // Process asynchronously (fire-and-forget)
-    jobQueue.processJob(jobId, accountId, "social_snapshot", { handle, platform, category, email })
+    jobQueue.processJob(jobId, accountId, tier, { handle, platform, category, email })
       .catch(err => console.error(`[Growth Engine] Async job ${jobId} error:`, err));
 
-    res.json({ job_id: jobId, status: "queued" });
+    res.json({ job_id: jobId, status: "queued", tier });
   } catch (err) {
     console.error("[Growth Engine] Queue error:", err);
     sendError(res, 500, "JOB_QUEUE_ERROR", err.message);

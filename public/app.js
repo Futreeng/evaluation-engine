@@ -277,7 +277,7 @@
             <div class="main">
               <div class="pill queued"><span class="dot"></span>Queued</div>
               <h2>${ahead ? `You're ${ordinal(ahead + 1)} in line.` : "You're in line."}</h2>
-              <div class="lead">${ahead ? `We're finishing ${ahead === 1 ? 'one evaluation' : ahead + ' evaluations'} ahead of yours. ` : ''}Nothing has started on <b>@${handle}</b> yet — it usually takes under twenty seconds from here. You can close this tab; the report lands in your inbox either way.</div>
+              <div class="lead">${ahead ? `We're finishing ${ahead === 1 ? 'one evaluation' : ahead + ' evaluations'} ahead of yours. ` : ''}Nothing has started on <b>@${handle}</b> yet — it usually takes under a minute from here. You can close this tab; the report lands in your inbox either way.</div>
               <div class="progress"><div class="track"><div class="sweep"></div></div>
                 <div class="row"><span>${ahead != null ? `${ahead} AHEAD` : 'QUEUED'}${eta ? ` · EST. ${eta}S` : ''}</span><span>${Math.floor((Date.now() - startedAt) / 1000)}S ELAPSED</span></div>
               </div>
@@ -412,14 +412,20 @@
     const items = Array.isArray(locked.items) && locked.items.length ? locked.items : Array.from({ length: Math.min(3, Math.max(1, count - 1)) }, (_, k) => ({
       meta: `MOVE ${String(firstLocked + k).padStart(2, '0')} · LOCKED`, w1: ['94%', '88%', '97%'][k], w2: ['61%', '44%', '72%'][k]
     }));
+    const moves = Array.isArray(p.moves) ? p.moves.filter(m => m && (m.action || m.title)) : [];
+    const weeks = Array.isArray(p.calendar_weeks) ? p.calendar_weeks : [];
+    const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    // Paid tier: real calendar grid from the plan's weeks (4 rows × 7 days)
+    const planCalendar = weeks.length ? weeks.slice(0, 4).flatMap(w => DAYS.map(d => (w.slots || []).some(sl => String(sl.day).slice(0, 3).toLowerCase() === d.toLowerCase()))) : null;
     return {
       days, label: p.label || `Phase ${i + 1}`,
       action: p.visible_action || p.action || '',
       detail: p.detail || '',
+      moves, weeks,
       // Use the model's teaser only if it names a count; the design promises one.
       lockedHeader: /\d/.test(locked.teaser || '') ? locked.teaser : `${count} specific moves + your weeks ${wk[0]}–${wk[1]} calendar`,
-      calendarLabel: locked.calendar_label || `WEEKS ${wk[0]}–${wk[1]} · ${calendar.filter(Boolean).length} POST SLOTS`,
-      calendar, items, count
+      calendarLabel: locked.calendar_label || `WEEKS ${wk[0]}–${wk[1]} · ${(planCalendar || calendar).filter(Boolean).length} POST SLOTS`,
+      calendar: planCalendar && planCalendar.length === 28 ? planCalendar : calendar, items, count
     };
   }
 
@@ -500,13 +506,18 @@
     const totalSteps = report.growth_path?.total_steps ?? phases.reduce((n, p) => n + 1 + p.count, 0);
     const up = report.upsell || {};
     let price = up.monthly_price || 39;
+    const paid = !!report.tier && report.tier !== 'social_snapshot';
+    const cal = report.calendar || {};
+    const calWeeks = Array.isArray(cal.weeks) ? cal.weeks : [];
 
-    renderHeader('report', { handle: biz.handle || '', ctx: [platName(biz.platform), cat, fmtDate(report.created_at)].filter(Boolean).join(' · ').toUpperCase() });
+    renderHeader('report', { handle: biz.handle || '', ctx: [platName(biz.platform), cat, fmtDate(report.created_at), paid ? 'GROWTH PLAN' : ''].filter(Boolean).join(' · ').toUpperCase() });
 
     let narrativeText = report.narrative || '';
     if (phases.length) {
       // The phase cards render the path; keep the prose from repeating it.
-      narrativeText = narrativeText.replace(/\n\**\s*YOUR 30[-–]60[-–]90[^\n]*\n[\s\S]*?(?=\n\**\s*WHAT THE FULL PLAN|\n\**\s*WHAT COMES NEXT|$)/i, '\n');
+      // Models mix hyphens (-, –, ‑) and heading styles; match loosely.
+      narrativeText = narrativeText.replace(/\n[*#\s]*YOUR 30[^\n]{0,4}60[^\n]{0,4}90[^\n]*\n[\s\S]*?(?=\n[*#\s]*WHAT THE FULL PLAN|\n[*#\s]*WHAT COMES NEXT|\n[*#\s]*REASONING SUMMARY|$)/i, '\n');
+      if (paid) narrativeText = narrativeText.replace(/\n[*#\s]*WHAT THE FULL PLAN ADDS[^\n]*\n[^\n]*\n?/i, '\n');
     }
     const narrativeHtml = narrativeText.trim() ? md(narrativeText) : '';
     $view.innerHTML = h`
@@ -545,8 +556,8 @@
 
         ${phases.length ? raw(h`<section>
           <div class="path-head">
-            <div><h2 class="sec-h">Your 30-60-90 day path</h2><p class="sec-s">The first move of each phase is yours now. The rest is written and waiting.</p></div>
-            <div class="unlockchip">${unlocked} OF ${totalSteps} STEPS UNLOCKED</div>
+            <div><h2 class="sec-h">Your 30-60-90 day path</h2><p class="sec-s">${paid ? 'Every move, in order, written from your own posts.' : 'The first move of each phase is yours now. The rest is written and waiting.'}</p></div>
+            <div class="unlockchip ${paid ? 'open' : ''}">${paid ? `ALL ${totalSteps} STEPS UNLOCKED` : `${unlocked} OF ${totalSteps} STEPS UNLOCKED`}</div>
           </div>
           <div class="phases">${raw(phases.map(p => h`<article class="phase">
             <div class="ph"><div class="days">${p.days}</div><div class="lbl">${p.label}</div></div>
@@ -554,10 +565,13 @@
               <div class="move"><div class="movetag">MOVE 01</div><div class="action">${p.action}</div></div>
               ${p.detail ? raw(h`<div class="detail">${p.detail}</div>`) : ''}
             </div>
-            <div class="locked">
-              <div class="lh"><div class="lock"></div><div class="t">${p.lockedHeader}</div></div>
+            ${p.moves.length ? raw(h`<div class="moves">
+              ${raw(p.moves.map(m => h`<div class="mv"><div class="movetag">MOVE ${String(m.n).padStart(2, '0')}</div><div class="mvb"><div class="mvt">${m.title}</div><div class="mva">${m.action}</div>${m.why ? raw(h`<div class="mvw">${m.why}</div>`) : ''}</div></div>`).join(''))}
+            </div>`) : ''}
+            <div class="locked ${p.moves.length ? 'open' : ''}">
+              ${p.moves.length ? '' : raw(h`<div class="lh"><div class="lock"></div><div class="t">${p.lockedHeader}</div></div>`)}
               <div class="lb">
-                ${raw(p.items.map(it => h`<div class="li"><div class="m">${it.meta}</div><div class="sk"><div style="width:${it.w1 || '90%'}"></div><div style="width:${it.w2 || '55%'}"></div></div></div>`).join(''))}
+                ${p.moves.length ? '' : raw(p.items.map(it => h`<div class="li"><div class="m">${it.meta}</div><div class="sk"><div style="width:${it.w1 || '90%'}"></div><div style="width:${it.w2 || '55%'}"></div></div></div>`).join(''))}
                 <div class="cal">
                   <div class="m">${p.calendarLabel}</div>
                   <div class="grid">${raw(p.calendar.map(on => `<div class="${on ? 'slot' : ''}"></div>`).join(''))}</div>
@@ -568,12 +582,29 @@
           </article>`).join(''))}</div>
         </section>`) : ''}
 
+        ${calWeeks.length ? raw(h`<section class="calendar">
+          <div class="path-head">
+            <div><h2 class="sec-h">Your 12-week calendar</h2><p class="sec-s">${cal.posting_days && cal.posting_days.length ? raw(h`${cal.posting_days.join(' · ')}${cal.posting_time ? ` at ${cal.posting_time}` : ''}. `) : ''}Each slot has an angle and a shooting brief — open a week to read them.</p></div>
+          </div>
+          <div class="weeks">${raw(calWeeks.map((w, i) => h`<details class="week" ${i === 0 ? 'open' : ''}>
+            <summary><span class="wk">WEEK ${w.week}</span><span class="ph">DAYS ${(w.phase - 1) * 30 + 1}–${w.phase * 30}</span><span class="slots">${raw((w.slots || []).map(sl => h`<span class="slot"><b>${String(sl.day).slice(0, 3)}</b> ${sl.format}</span>`).join(''))}</span></summary>
+            <div class="wbody">${raw((w.slots || []).map(sl => h`<div class="wslot"><div class="wday"><b>${String(sl.day).slice(0, 3)}</b><span>${sl.format}</span></div><div><div class="wangle">${sl.angle}</div>${sl.prompt ? raw(h`<div class="wprompt">${sl.prompt}</div>`) : ''}</div></div>`).join(''))}</div>
+          </details>`).join(''))}</div>
+        </section>`) : ''}
+
         ${narrativeHtml ? raw(h`<section class="narrative">
           <h2 class="sec-h">${hasScores ? 'The full read' : 'Your report'}</h2>
           <div class="prose">${raw(narrativeHtml)}</div>
         </section>`) : ''}
 
-        <section class="upsell">
+
+        ${paid ? raw(h`<section class="upsell quiet">
+          <div>
+            <h3>This plan refreshes weekly</h3>
+            <div class="p">Score @${biz.handle || 'this profile'} again any time — the moves and calendar are rewritten against your latest posts.${report.refresh_due_at ? ` Next scheduled refresh ${fmtDate(report.refresh_due_at)}.` : ''}</div>
+          </div>
+          <div class="right"><a class="btn ghost strong md" href="#/" data-scroll="form">Run a fresh evaluation</a></div>
+        </section>`) : raw(h`<section class="upsell">
           <div>
             <h3>${up.cta_label || 'Unlock your full Growth Plan'}</h3>
             <div class="p">${up.description || `${up.unlock_count || 12} locked items: the remaining specific moves and the week-by-week posting calendar for all three phases, written against your own posts — not a template.`}</div>
@@ -585,13 +616,13 @@
             <button class="btn" data-action="unlock" data-tier="${up.target_tier || 'growth_plan'}">Unlock the plan <span class="arrow">→</span></button>
             <div class="fine">Cancel anytime. Keep the report either way.</div>
           </div>
-        </section>
+        </section>`)}
       </div></div>`;
 
-    $view.querySelector('[data-action=unlock]').addEventListener('click', e => { sset('sc_intent_tier', e.currentTarget.dataset.tier); go('#/pricing'); });
+    $view.querySelector('[data-action=unlock]')?.addEventListener('click', e => { sset('sc_intent_tier', e.currentTarget.dataset.tier); go('#/pricing'); });
 
     // Never trust a cached price — refresh it from billing.
-    api('/billing/pricing', {}, { allow401: true }).then(p => {
+    if (!paid) api('/billing/pricing', {}, { allow401: true }).then(p => {
       const t = (p.tiers || []).find(x => x.tier === (up.target_tier || 'growth_plan'));
       if (t && t.monthlyPrice != null) {
         price = t.monthlyPrice;
@@ -657,7 +688,14 @@
           sessionStorage.removeItem('sc_intent_tier');
           // Re-read entitlements from the backend — the tier is never set client-side.
           try { ent = await api('/account/subscription-status'); } catch { try { ent = await api('/entitlements'); } catch { } }
-          toast('You’re on ' + ((pricing.tiers.find(t => t.tier === b.dataset.subscribe) || {}).name || 'the new plan') + '.');
+          const planName = (pricing.tiers.find(t => t.tier === b.dataset.subscribe) || {}).name || 'the new plan';
+          const last = sget('sc_form', {});
+          if (last.handle && last.platform && last.category && last.email) {
+            toast(`You’re on ${planName}. Writing the full plan for @${last.handle}…`);
+            await submitEvaluation(last, null);
+            return;
+          }
+          toast(`You’re on ${planName}. Score a profile to get the full plan.`);
           render();
         } catch (e) {
           if (e.status === 401) return;
