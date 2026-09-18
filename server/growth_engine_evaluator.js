@@ -3,6 +3,7 @@ const db = require("./db");
 const { analyzeTwitterAccount } = require("./twitter_fetcher");
 const { analyzeInstagramAccount } = require("./instagram_fetcher");
 const { analyzeInstagramAccountViaApify } = require("./instagram_apify_fetcher");
+const { scoreProfile } = require("./growth_engine_scoring");
 
 // Persona prompts for each tier
 const PERSONA_PROMPTS = {
@@ -25,23 +26,23 @@ Do not soften findings, but stay in "opportunity" framing — you are the optimi
 
     gapAuditor: `You are the Gap Auditor for Scalecraft, a social media evaluation for small-business owners.
 
-You will be given a business's recent public social media activity plus category benchmarks. Score the account on four dimensions, each 0-100, and explain each score in one or two plain sentences that reference the actual input data. Write for the owner ("You posted 9 times…"), not about them.
+The four dimension scores have ALREADY been computed from the account's public data (method below). Your job is to explain each score to the owner in one or two plain sentences that cite the actual numbers, and to say what would move it. Do not change, re-derive or dispute the scores.
 
 Input:
 Handle: {{HANDLE}} ({{PLATFORM}})
 Category: {{CATEGORY}}
 Recent activity: {{RECENT_POST_SUMMARY}}
-Category benchmarks: {{CATEGORY_BENCHMARKS}}
+Category targets: {{CATEGORY_BENCHMARKS}}
+Computed scores (with the evidence and sub-scores behind each): {{COMPUTED_SCORES}}
 
-Score and explain, using exactly these labels, one per line, in this format — LABEL: score — explanation:
-POSTING_CONSISTENCY: 0-100 — from posts_per_week, longest_gap_days and days_since_last_post vs the category norm. Same-days regularity matters more than raw volume.
-CONTENT_MIX: 0-100 — from the split of reels/video, carousels and static posts and what the captions are about (schedules and promos vs. people, results, behind-the-scenes) vs what performs in this category.
-ENGAGEMENT_QUALITY: 0-100 — from engagement_rate_percent, comments per post relative to likes, and video views relative to followers, vs the category benchmark. Comments and saves signal more than likes.
-PROFILE_CLARITY: 0-100 — from metrics.profile_clarity and the biography/website fields: does the bio say where the business is, what it costs or offers, and how to take the next step; does the link go to a booking/offer page or just a homepage; are highlights set up. A stranger decides in about four seconds.
+Output exactly these lines, one per dimension, in this format — LABEL: score — explanation. Use the score given.
+POSTING_CONSISTENCY: <given score> — explanation
+CONTENT_MIX: <given score> — explanation
+ENGAGEMENT_QUALITY: <given score> — explanation
+PROFILE_CLARITY: <given score> — explanation
+OVERALL_SCORE: <given overall> — one sentence naming the one or two dimensions that cost the most points.
 
-Then: OVERALL_SCORE: 0-100 — a simple average of the four, rounded.
-
-Every score must cite a real number or observation from the input — never a round, unsupported score. If a dimension genuinely can't be measured from the input, give your best estimate from what is there, say what's missing, and lower your confidence rather than refusing to score. Do not use markdown bold or headings.`,
+Write for the owner ("You posted 9 times…"). Reference the sub-scores when they explain the number (e.g. a 42-day gap zeroing the gap component). No markdown bold or headings.`,
 
     merge: `You are writing the free Scalecraft Social Snapshot for a small-business owner. Plain-spoken, specific, no hype. You have two analyses of their account:
 
@@ -71,7 +72,7 @@ Sequence the phases so the biggest gap is addressed first.
 **WHAT THE FULL PLAN ADDS**
 One sentence: the remaining moves for all three phases, the week-by-week posting calendar, and content prompts written from their own posts.
 
-Rules: the first move of each phase is free and must be genuinely actionable and specific. Everything beyond that first move — captions, hooks, the calendar itself, the other moves — stays locked. Never invent numbers not in the analyses. No emoji other than the 🔒. No "[upgrade link]" placeholders.
+Rules: the scores in GAP_AUDITOR_OUTPUT are final — copy them exactly into the JSON block, never round or adjust them. The first move of each phase is free and must be genuinely actionable and specific. Everything beyond that first move — captions, hooks, the calendar itself, the other moves — stays locked. Never invent numbers not in the analyses. No emoji other than the 🔒. No "[upgrade link]" placeholders.
 
 Finally, after the report, output a machine-readable block on its own lines, exactly like this, with real values (no comments, valid JSON):
 \`\`\`json
@@ -461,9 +462,11 @@ async function runSnapshot(accountId, inputParams) {
 
   // Fetch real social media data
   let postSummary;
+  let computed = null;
   try {
     const realData = await getRealPostData(handle, platform, category);
     postSummary = JSON.stringify(realData); // compact: every token counts against free-tier TPM caps
+    computed = scoreProfile(realData, category); // null for fetchers without the metric shape (Twitter)
   } catch (err) {
     console.warn("[Growth Engine] Real data fetch failed:", err.message);
     // A private, missing or malformed profile is not something to write a
@@ -483,6 +486,9 @@ async function runSnapshot(accountId, inputParams) {
     CATEGORY: category,
     RECENT_POST_SUMMARY: postSummary,
     CATEGORY_BENCHMARKS: JSON.stringify(benchmarks),
+    COMPUTED_SCORES: computed
+      ? JSON.stringify({ overall: computed.overall, dimensions: computed.dimensions.map((d) => ({ label: d.label, score: d.score, evidence: d.evidence, parts: d.parts })) })
+      : "not available for this platform — score each dimension yourself from the data and say so",
   };
 
   // Call both personas in parallel with fallback logic
@@ -521,13 +527,13 @@ async function runSnapshot(accountId, inputParams) {
   const mergePrompt = interpolateTemplate(PERSONA_PROMPTS.tier0.merge, mergeTemplateVars);
 
   // Merge: Claude → Gemini → Groq → OpenAI
-  const mergedReport = await callWithQuadFallback(
+  const mergedReport = await withOutputTokens(4096, () => callWithQuadFallback(
     () => callClaudeNonStreaming(claudeKey, claudeWorkspaceId, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt),
     () => callGeminiNonStreaming(geminiKey, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt),
     () => callGroqNonStreaming(groqKey, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt),
     () => callOpenAINonStreaming(openaiKey, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt),
     "Merge"
-  );
+  ));
 
   // The merge ends with a ```json block carrying the structured report
   // (scores + growth path, per FRONTEND_INTEGRATION_GUIDE). Split it out of
@@ -554,17 +560,39 @@ async function runSnapshot(accountId, inputParams) {
     },
   };
 
-  if (structured) {
-    const dims = Array.isArray(structured.dimensions) ? structured.dimensions : [];
-    reportBody.scores = {
-      overall: clampScore(structured.overall) ?? (dims.length ? Math.round(dims.reduce((a, d) => a + (clampScore(d.score) || 0), 0) / dims.length) : null),
-      category_avg: null, // no measured baseline yet — see CATEGORY_BENCHMARKS
-      summary: typeof structured.summary === "string" ? structured.summary : null,
+  if (structured || computed) {
+    const dims = Array.isArray(structured?.dimensions) ? structured.dimensions : [];
+    const llmScores = {
+      overall: clampScore(structured?.overall) ?? (dims.length ? Math.round(dims.reduce((a, d) => a + (clampScore(d.score) || 0), 0) / dims.length) : null),
       dimensions: dims
         .filter((d) => d && d.label)
         .map((d) => ({ label: String(d.label), score: clampScore(d.score), explanation: String(d.explanation || "") })),
     };
-    const phases = Array.isArray(structured.phases) ? structured.phases : [];
+    // Computed scores are the source of truth; the model contributes prose only.
+    // The Gap Auditor's "LABEL: score — explanation" lines are the primary
+    // source (concise, cite the sub-scores); the JSON block is the fallback.
+    const auditorExpl = {};
+    for (const line of String(personaBResponse || "").split("\n")) {
+      const m = /^\s*\**\s*([A-Z_ ]+?)\s*\**\s*:\s*\**\s*\d{1,3}\s*\**\s*[—–-]\s*(.+)$/.exec(line);
+      if (m) auditorExpl[m[1].toLowerCase().replace(/[^a-z]/g, "")] = m[2].trim();
+    }
+    const findExpl = (label) => {
+      const key = label.toLowerCase().replace(/[^a-z]/g, "");
+      if (auditorExpl[key]) return auditorExpl[key];
+      const hit = llmScores.dimensions.find((d) => d.label.toLowerCase().replace(/[^a-z]/g, "") === key);
+      return hit ? hit.explanation : "";
+    };
+    const overallLine = auditorExpl["overallscore"] || null;
+    reportBody.scores = computed
+      ? {
+          overall: computed.overall,
+          category_avg: null, // filled from measured baselines by the job queue
+          summary: typeof structured?.summary === "string" ? structured.summary : overallLine,
+          dimensions: computed.dimensions.map((d) => ({ label: d.label, score: d.score, explanation: findExpl(d.label) || d.evidence, evidence: d.evidence, parts: d.parts })),
+          method: computed.method,
+        }
+      : { ...llmScores, category_avg: null, summary: typeof structured?.summary === "string" ? structured.summary : null, method: "llm" };
+    const phases = Array.isArray(structured?.phases) ? structured.phases : [];
     if (phases.length) {
       reportBody.growth_path = {
         unlocked_steps: phases.length,
