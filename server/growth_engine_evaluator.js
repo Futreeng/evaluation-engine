@@ -286,7 +286,9 @@ async function callGeminiNonStreaming(geminiKey, systemInstruction, userMessage)
         body: JSON.stringify({
           contents: [{ parts: [{ text: userMessage }] }],
           systemInstruction: { parts: [{ text: systemInstruction }] },
-          generationConfig: { maxOutputTokens: OUTPUT_TOKENS },
+          // 2.5-flash "thinks" out of the same output budget and can return
+          // nothing but thoughts; turn that off so the budget goes to text.
+          generationConfig: { maxOutputTokens: OUTPUT_TOKENS, ...(model.startsWith("gemini-2.5") ? { thinkingConfig: { thinkingBudget: 0 } } : {}) },
         }),
       });
       if (response.ok) {
@@ -294,6 +296,7 @@ async function callGeminiNonStreaming(geminiKey, systemInstruction, userMessage)
         const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("") || "";
         if (text.trim()) return text;
         lastErr = new Error(`Gemini returned an empty completion (${model})`);
+        console.warn("[Growth Engine]", lastErr.message, JSON.stringify(data.candidates?.[0]?.finishReason || data.promptFeedback || "").slice(0, 80));
         break;
       }
       const detail = await response.text();
