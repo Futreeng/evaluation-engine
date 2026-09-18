@@ -2,6 +2,7 @@ const { decrypt } = require("./crypto");
 const db = require("./db");
 const { analyzeTwitterAccount } = require("./twitter_fetcher");
 const { analyzeInstagramAccount } = require("./instagram_fetcher");
+const { analyzeInstagramAccountViaApify } = require("./instagram_apify_fetcher");
 
 // Persona prompts for each tier
 const PERSONA_PROMPTS = {
@@ -109,7 +110,10 @@ async function getRealPostData(handle, platform, category) {
 
   if (platform === "instagram" || platform === "ig") {
     try {
-      const instagramData = await analyzeInstagramAccount(handle);
+      // Apify reads any public profile; the Graph API only reads accounts we own.
+      const instagramData = process.env.APIFY_TOKEN
+        ? await analyzeInstagramAccountViaApify(handle)
+        : await analyzeInstagramAccount(handle);
       return formatInstagramDataForAnalysis(instagramData);
     } catch (err) {
       console.error("[Growth Engine] Instagram fetch failed:", err.message);
@@ -147,14 +151,19 @@ function formatInstagramDataForAnalysis(instagramData) {
     handle: instagramData.handle,
     platform: "instagram",
     follower_count: instagramData.follower_count,
+    following_count: instagramData.following_count,
     post_count: instagramData.post_count,
+    biography: instagramData.biography || null,
+    website: instagramData.website || null,
     metrics: instagramData.analysis,
-    recent_activity: instagramData.recent_posts.slice(0, 10).map((p) => ({
+    recent_activity: instagramData.recent_posts.slice(0, 12).map((p) => ({
       date: p.timestamp.split("T")[0],
       engagement: (p.like_count || 0) + (p.comments_count || 0),
       likes: p.like_count || 0,
       comments: p.comments_count || 0,
-      media_type: p.media_type,
+      media_type: p.is_reel ? "REEL" : p.media_type,
+      video_views: p.video_view_count || undefined,
+      location: p.location || undefined,
       caption_preview: p.caption ? p.caption.substring(0, 100) : "",
     })),
   };
@@ -225,29 +234,44 @@ async function callGeminiNonStreaming(geminiKey, systemInstruction, userMessage)
 }
 
 async function callGroqNonStreaming(groqKey, systemInstruction, userMessage) {
-  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "authorization": `Bearer ${groqKey}`,
-    },
-    body: JSON.stringify({
-      model: "groq/compound",
-      messages: [
-        { role: "system", content: systemInstruction },
-        { role: "user", content: userMessage },
-      ],
-      max_tokens: 2048,
-    }),
-  });
-
-  if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(`Groq API error ${response.status}: ${detail.slice(0, 200)}`);
+  // groq/compound routes to a large model with an 8k TPM cap on the free tier.
+  // A single evaluation makes three calls, so honour Retry-After on 429 and
+  // fall back to a smaller model before giving up.
+  const models = [process.env.GROQ_MODEL || "groq/compound", "openai/gpt-oss-20b", "groq/compound-mini"];
+  let lastErr;
+  for (const model of models) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: { "content-type": "application/json", "authorization": `Bearer ${groqKey}` },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: systemInstruction },
+            { role: "user", content: userMessage },
+          ],
+          max_tokens: 2048,
+        }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        return data.choices[0].message.content;
+      }
+      const detail = await response.text();
+      lastErr = new Error(`Groq API error ${response.status} (${model}): ${detail.slice(0, 200)}`);
+      if (response.status === 429) {
+        const m = /try again in ([\d.]+)(m?s)/i.exec(detail);
+        const waitMs = m ? Math.ceil(parseFloat(m[1]) * (m[2] === "ms" ? 1 : 1000)) + 500 : (attempt + 1) * 8000;
+        if (waitMs <= 45000) {
+          console.log(`[Growth Engine] Groq 429 on ${model}, waiting ${waitMs}ms...`);
+          await new Promise((r) => setTimeout(r, waitMs));
+          continue;
+        }
+      }
+      break; // non-retryable for this model → next model
+    }
   }
-
-  const data = await response.json();
-  return data.choices[0].message.content;
+  throw lastErr;
 }
 
 async function callTogetherNonStreaming(togetherKey, system, userMessage) {
@@ -369,9 +393,12 @@ async function evaluateTier0(accountId, inputParams) {
   let postSummary;
   try {
     const realData = await getRealPostData(handle, platform, category);
-    postSummary = JSON.stringify(realData, null, 2);
+    postSummary = JSON.stringify(realData); // compact: every token counts against free-tier TPM caps
   } catch (err) {
     console.warn("[Growth Engine] Real data fetch failed:", err.message);
+    // A private, missing or malformed profile is not something to write a
+    // report around — fail the job so the UI can say so honestly.
+    if (/private|not found|not a valid|no public posts|not yet supported/i.test(err.message)) throw err;
     postSummary = JSON.stringify({
       handle,
       platform,

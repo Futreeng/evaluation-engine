@@ -504,3 +504,4 @@ button:disabled { cursor: default; opacity: .6; }
 .chip.soon { color: var(--dim); border-style: dashed; }
 .chip.soon small { font-family: var(--mono); font-size: 9px; letter-spacing: .1em; text-transform: uppercase; margin-left: 6px; color: var(--gold); }
 .chip.soon.on { background: var(--s2); color: var(--ink); }
+.narrative .prose .lock-note { margin-top: 6px; font-size: 14px; color: var(--dim); font-style: italic; }

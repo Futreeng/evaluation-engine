@@ -82,14 +82,17 @@ class JobQueue {
         throw new Error(`Unknown tier: ${tier}`);
       }
 
+      // Create report record first so the job payload carries the id that
+      // GET /reports/:id actually resolves (the evaluator's own report_id is
+      // not what the DB stores).
+      const { reportId } = await geDb.createReport(accountId, tier, inputParams, reportBody);
+      reportBody.report_id = reportId;
+
       // Mark complete
       await geDb.updateJobStatus(jobId, "complete", {
         resultPayload: reportBody,
         stage: "complete",
       });
-
-      // Create report record
-      await geDb.createReport(accountId, tier, inputParams, reportBody);
 
       // Save report as markdown file for reference
       try {

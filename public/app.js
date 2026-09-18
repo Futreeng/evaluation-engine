@@ -54,8 +54,14 @@
     const flushL = () => { if (list) { out.push('</' + list + '>'); list = null; } };
     for (const ln of lines) {
       const t = ln.trim();
-      if (!t) { flushP(); flushL(); continue; }
+      if (!t) { flushP(); continue; } // a blank line ends a paragraph, not a list — LLMs double-space list items
       let m;
+      // A locked-teaser line (🔒 …) or an indented line belongs to the list item above it
+      if (list && !/^([-*•]|\d+[.)])\s/.test(t) && (/^🔒/.test(t) || /^\s{2,}/.test(ln))) {
+        out[out.length - 1] = out[out.length - 1].replace(/<\/li>$/, '') + '<div class="lock-note">' + inline(t) + '</div></li>';
+        continue;
+      }
+      if (list && !/^([-*•]|\d+[.)])\s/.test(t) && !/^#/.test(t)) flushL();
       if ((m = /^(#{1,6})\s+(.*)$/.exec(t))) { flushP(); flushL(); const lvl = Math.min(4, m[1].length + 1); out.push(`<h${lvl}>${inline(m[2])}</h${lvl}>`); continue; }
       if (/^(-{3,}|\*{3,})$/.test(t)) { flushP(); flushL(); out.push('<hr>'); continue; }
       if ((m = /^[-*•]\s+(.*)$/.exec(t))) { flushP(); if (list !== 'ul') { flushL(); list = 'ul'; out.push('<ul>'); } out.push('<li>' + inline(m[1]) + '</li>'); continue; }
@@ -433,15 +439,27 @@
     r.narrative = typeof body.narrative === 'string' ? body.narrative : (typeof body === 'string' ? body : null);
     if (!r.scores || r.scores.overall == null) {
       const gap = body.raw_personas?.gap_auditor || '';
-      const text = gap + '\n' + (r.narrative || '');
-      const overall = num(/OVERALL[_ ]SCORE\s*(?:\([^)]*\))?[^0-9]{0,40}(\d{1,3})/i, text);
-      const avg = num(/CATEGORY[_ ]AVG(?:ERAGE)?\s*(?:\([^)]*\))?[^0-9]{0,40}(\d{1,3})/i, text);
+      const text = (gap + '\n' + (r.narrative || '')).replace(/\*\*|__/g, '');
+      const overall = num(/OVERALL[_ ]SCORE\s*(?:\([^)]*\))?[^0-9]{0,40}(\d{1,3})(?:\s*\/\s*100)?/i, text);
+      // Only trust a category average that is an actual 0-100 figure, not a benchmark list
+      const avgM = /CATEGORY[_ ]AVG(?:ERAGE)?\s*(?:\([^)]*\))?[^0-9\n]{0,30}(\d{1,3})(?:\s*\/\s*100)?\b(?![^\n]*(?:posts|%|week))/i.exec(text);
+      const avg = avgM ? clamp(avgM[1], 0, 100) : null;
       const dims = [];
+      const plain = gap.replace(/\*\*|__|\\\[|\\\]|`/g, '').replace(/\r/g, '');
+      const glines = plain.split('\n');
       for (const [key, label] of DIM_KEYS) {
-        // e.g. "2. CONTENT_MIX (0-100): 52 — nine of 14 posts are schedules."
-        const re = new RegExp(key.replace('_', '[_ ]') + '\\s*(?:\\([^)]*\\))?[^0-9\\n]{0,40}(\\d{1,3})(?:\\s*\\/\\s*100)?\\s*[:—–-]?\\s*([^\\n]*)', 'i');
-        const m = re.exec(gap);
-        if (m) dims.push({ label, score: clamp(m[1], 0, 100), explanation: (m[2] || '').replace(/^[\s:—–-]+/, '').trim() });
+        const keyRe = new RegExp(key.replace('_', '[_ ]'), 'i');
+        const idx = glines.findIndex(l => keyRe.test(l));
+        if (idx < 0) continue;
+        const line = glines[idx].replace(keyRe, '');
+        const sm = /(?:\(\s*0\s*[-–]\s*100\s*\)\s*)?[^0-9\n]{0,40}?(\d{1,3})(?:\s*\/\s*100)?/.exec(line);
+        if (!sm) continue;
+        let expl = line.slice(sm.index + sm[0].length).replace(/^[\s:—–\-]+/, '').trim();
+        if (expl.length < 20) {
+          const next = glines.slice(idx + 1).find(l => l.trim().length > 20 && !/^[-*#]/.test(l.trim()));
+          expl = next ? next.trim() : expl;
+        }
+        dims.push({ label, score: clamp(sm[1], 0, 100), explanation: expl });
       }
       if (overall != null || dims.length) r.scores = { overall: overall ?? (dims.length ? Math.round(dims.reduce((a, d) => a + d.score, 0) / dims.length) : null), category_avg: avg, dimensions: dims, parsed: true };
     }
