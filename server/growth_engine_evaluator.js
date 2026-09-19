@@ -704,8 +704,19 @@ async function evaluateTier1(accountId, inputParams) {
 
   // Two smaller calls instead of one big one: the combined plan ran past the
   // output limits of the fallback models and came back truncated.
-  const moves = await askJson(interpolateTemplate(PLAN_MOVES_PROMPT, baseVars), "Plan Writer: moves", 3072);
+  let moves = await askJson(interpolateTemplate(PLAN_MOVES_PROMPT, baseVars), "Plan Writer: moves", 3072);
+  const movesCount = (m) => (Array.isArray(m?.phases) ? m.phases : []).reduce((n, p) => n + (Array.isArray(p.moves) ? p.moves.length : 0), 0);
+  if (moves && movesCount(moves) === 0) {
+    console.warn("[Growth Engine] Plan Writer: moves parsed but empty, retrying once");
+    moves = (await askJson(interpolateTemplate(PLAN_MOVES_PROMPT, baseVars), "Plan Writer: moves (retry)", 3072)) || moves;
+  }
   if (!moves) throw new Error("Plan Writer returned no usable plan");
+  if (movesCount(moves) === 0) {
+    // Don't throw the whole paid report away over one flaky call; ship the
+    // snapshot + calendar and mark it for an early refresh.
+    console.warn("[Growth Engine] Plan Writer: no moves after retry — shipping partial plan");
+    reportBody.plan_incomplete = true;
+  }
   const calendarRaw = await askJson(interpolateTemplate(PLAN_CALENDAR_PROMPT, {
     ...baseVars,
     POSTING_DAYS: (moves.posting_days || []).join(", ") || "Mon, Wed, Fri",
@@ -725,7 +736,7 @@ async function evaluateTier1(accountId, inputParams) {
   const planPhases = Array.isArray(plan.phases) ? plan.phases : [];
 
   reportBody.tier = "growth_plan";
-  reportBody.refresh_due_at = Date.now() + 7 * 24 * 60 * 60 * 1000;
+  reportBody.refresh_due_at = Date.now() + (reportBody.plan_incomplete ? 1 : 7) * 24 * 60 * 60 * 1000;
   if (!reportBody.growth_path) reportBody.growth_path = { phases: [] };
   reportBody.growth_path.phases = reportBody.growth_path.phases.map((p, i) => {
     const extra = planPhases.find((x) => String(x.range) === String(p.range)) || planPhases[i] || { moves: [] };

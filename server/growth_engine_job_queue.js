@@ -10,7 +10,8 @@
 
 const { Worker } = require("worker_threads");
 const path = require("path");
-const geDb = require("./growth_engine_db");
+const geDb = require("./growth_engine_db_select");
+const { compareCompetitors } = require("./growth_engine_competitors");
 const { saveReportAsMarkdown } = require("./report_saver");
 
 class JobQueue {
@@ -128,6 +129,29 @@ class JobQueue {
         }
       } catch (err) {
         console.warn("[Growth Engine] History lookup failed:", err.message);
+      }
+
+      // Paid tiers: competitor handles given on the form are compared now, so
+      // the report arrives complete. Free tier keeps them for the teaser.
+      const wanted = Array.isArray(inputParams.competitors) ? inputParams.competitors : [];
+      if (wanted.length) {
+        reportBody.competitor_handles = wanted;
+        if (tier !== "social_snapshot") {
+          try {
+            await geDb.updateJobStatus(jobId, "running", { stage: "comparing competitors" });
+            const comparison = await compareCompetitors({ handle: inputParams.handle, platform: inputParams.platform, category: inputParams.category, handles: wanted });
+            const own = reportBody.scores;
+            if (own && Number.isFinite(own.overall)) {
+              comparison.you.overall = own.overall;
+              comparison.you.dimensions = (own.dimensions || []).map((d) => ({ label: d.label, score: d.score }));
+              const scored = comparison.competitors.filter((c) => c.ok);
+              comparison.rank = { position: [own.overall, ...scored.map((c) => c.overall)].sort((a, b) => b - a).indexOf(own.overall) + 1, of: scored.length + 1 };
+            }
+            reportBody.competitors = comparison;
+          } catch (err) {
+            console.warn("[Growth Engine] Competitor comparison failed:", err.message);
+          }
+        }
       }
 
       const { reportId } = await geDb.createReport(accountId, tier, inputParams, reportBody);
