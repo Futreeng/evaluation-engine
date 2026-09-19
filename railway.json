@@ -1,0 +1,12 @@
+{
+  "name": "futureEng Growth Engine",
+  "description": "AI-powered social media audit backend",
+  "build": {
+    "builder": "nixpacks"
+  },
+  "deploy": {
+    "startCommand": "cd server && npm start",
+    "restartPolicyType": "on_failure",
+    "restartPolicyMaxRetries": 5
+  }
+}
