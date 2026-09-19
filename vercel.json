@@ -1,5 +1,9 @@
 {
-  "buildCommand": "echo 'Static deployment ready'",
-  "devCommand": "python -m http.server 3000",
-  "public": "public"
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "outputDirectory": "public",
+  "buildCommand": "sed -i 's/useMock: false/useMock: true/' public/config.js && echo 'Demo build: mock API enabled'",
+  "framework": null,
+  "headers": [
+    { "source": "/(.*)\\.(js|css)", "headers": [{ "key": "Cache-Control", "value": "public, max-age=3600, must-revalidate" }] }
+  ]
 }

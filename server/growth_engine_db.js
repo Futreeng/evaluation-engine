@@ -18,10 +18,13 @@ async function initDb() {
     const data = fs.readFileSync(GROWTH_ENGINE_DB_FILE);
     db = new SQL.Database(data);
   } else {
+    fs.mkdirSync(path.dirname(GROWTH_ENGINE_DB_FILE), { recursive: true });
     db = new SQL.Database();
-    initSchema();
-    saveDb();
   }
+  // Every statement is CREATE ... IF NOT EXISTS, so this also migrates
+  // existing files forward when a table is added.
+  initSchema();
+  saveDb();
 
   return db;
 }
@@ -56,6 +59,21 @@ function initSchema() {
       updated_at INTEGER NOT NULL
     )
   `);
+
+  // Category baselines: one row per completed evaluation, so category
+  // averages come from profiles we actually scored, not assumptions.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS growth_engine_baselines (
+      id TEXT PRIMARY KEY,
+      category TEXT NOT NULL,
+      platform TEXT NOT NULL,
+      handle TEXT NOT NULL,
+      overall INTEGER NOT NULL,
+      dimensions TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    )
+  `);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_baselines_cat ON growth_engine_baselines (category, platform)`);
 
   // Reports table: stores generated reports
   db.run(`
@@ -154,6 +172,68 @@ async function createJob(accountId, tier, inputParams) {
 
   saveDb();
   return { jobId, status: "queued", createdAt: now };
+}
+
+// ===================== CATEGORY BASELINES =====================
+
+// Record a scored profile. One row per handle+category+platform (latest wins)
+// so re-running the same account doesn't weight the average.
+async function recordBaseline({ category, platform, handle, overall, dimensions }) {
+  if (!db) throw new Error("Database not initialized");
+  if (!category || !platform || !handle || !Number.isFinite(overall)) return;
+  const key = `${category}|${platform}|${String(handle).toLowerCase()}`;
+  const dims = {};
+  for (const d of dimensions || []) if (d && d.label && Number.isFinite(d.score)) dims[d.label] = d.score;
+  db.run(
+    `INSERT OR REPLACE INTO growth_engine_baselines (id, category, platform, handle, overall, dimensions, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [key, category, platform, String(handle).toLowerCase(), Math.round(overall), JSON.stringify(dims), Date.now()]
+  );
+  saveDb();
+}
+
+// Average scores for a category (any platform). Returns null below min_n.
+async function getCategoryBaseline(category, { minN = 20 } = {}) {
+  if (!db) throw new Error("Database not initialized");
+  const result = db.exec(`SELECT overall, dimensions FROM growth_engine_baselines WHERE category = ?`, [category]);
+  if (!result.length) return null;
+  const rows = result[0].values;
+  if (rows.length < minN) return { n: rows.length, min_n: minN, ready: false };
+  const overalls = rows.map((r) => Number(r[0])).sort((a, b) => a - b);
+  const dimSums = {}; const dimCounts = {};
+  for (const r of rows) {
+    let dims = {}; try { dims = JSON.parse(r[1]); } catch { /* skip */ }
+    for (const [k, v] of Object.entries(dims)) { dimSums[k] = (dimSums[k] || 0) + v; dimCounts[k] = (dimCounts[k] || 0) + 1; }
+  }
+  const avg = Math.round(overalls.reduce((a, b) => a + b, 0) / overalls.length);
+  const q3 = overalls[Math.min(overalls.length - 1, Math.floor(overalls.length * 0.75))];
+  const dimensions = {};
+  for (const k of Object.keys(dimSums)) dimensions[k] = Math.round(dimSums[k] / dimCounts[k]);
+  return { n: rows.length, min_n: minN, ready: true, overall: avg, top_quartile: q3, dimensions };
+}
+
+// Totals for the landing page: profiles scored overall and per category.
+async function getBaselineSummary() {
+  if (!db) throw new Error("Database not initialized");
+  const result = db.exec(`SELECT category, COUNT(*) FROM growth_engine_baselines GROUP BY category`);
+  const by_category = {};
+  let total = 0;
+  if (result.length) for (const [c, n] of result[0].values) { by_category[c] = Number(n); total += Number(n); }
+  return { total, by_category };
+}
+
+// Free-tier quota: completed or in-flight snapshot jobs for an email
+// (input_params is JSON; the LIKE keeps this index-free but cheap enough
+// for the table sizes involved).
+async function countFreeSnapshotsByEmail(email) {
+  if (!db) throw new Error("Database not initialized");
+  const needle = `%"email":${JSON.stringify(String(email).trim().toLowerCase())}%`;
+  const result = db.exec(
+    `SELECT COUNT(*) FROM growth_engine_jobs
+     WHERE tier = 'social_snapshot' AND status != 'failed' AND lower(input_params) LIKE ?`,
+    [needle]
+  );
+  return result.length ? Number(result[0].values[0][0]) : 0;
 }
 
 async function getJob(jobId) {
@@ -279,6 +359,34 @@ async function getReport(reportId) {
     createdAt: row[columns.indexOf("created_at")],
     updatedAt: row[columns.indexOf("updated_at")],
   };
+}
+
+// Merge fields into a stored report body (e.g. competitor comparison added later).
+async function patchReportBody(reportId, patch) {
+  if (!db) throw new Error("Database not initialized");
+  const report = await getReport(reportId);
+  if (!report) return null;
+  const body = { ...(report.reportBody || {}), ...patch };
+  db.run(`UPDATE growth_engine_reports SET report_body = ?, updated_at = ? WHERE report_id = ?`, [JSON.stringify(body), Date.now(), reportId]);
+  saveDb();
+  return { ...report, reportBody: body };
+}
+
+// Score history for one handle on one account, oldest first.
+async function listScoreHistory(accountId, handle, platform) {
+  if (!db) throw new Error("Database not initialized");
+  const result = db.exec(
+    `SELECT report_id, tier, generated_at, report_body FROM growth_engine_reports
+     WHERE account_id = ? AND lower(business_handle) = ? AND business_platform = ? ORDER BY generated_at ASC`,
+    [accountId, String(handle).toLowerCase(), platform]
+  );
+  if (!result.length) return [];
+  return result[0].values.map(([report_id, tier, generated_at, body]) => {
+    let sc = null; try { sc = JSON.parse(body).scores || null; } catch { /* skip */ }
+    return sc && Number.isFinite(sc.overall)
+      ? { report_id, tier, generated_at, overall: sc.overall, dimensions: (sc.dimensions || []).map((d) => ({ label: d.label, score: d.score })) }
+      : null;
+  }).filter(Boolean);
 }
 
 async function updateReportRefreshDue(reportId, refreshDueAt) {
@@ -526,6 +634,12 @@ async function updateUserPassword(userId, passwordHash) {
 }
 
 module.exports = {
+  countFreeSnapshotsByEmail,
+  recordBaseline,
+  getCategoryBaseline,
+  patchReportBody,
+  listScoreHistory,
+  getBaselineSummary,
   initDb,
   // Jobs
   createJob,

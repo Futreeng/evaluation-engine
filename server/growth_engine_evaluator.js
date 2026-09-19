@@ -2,96 +2,153 @@ const { decrypt } = require("./crypto");
 const db = require("./db");
 const { analyzeTwitterAccount } = require("./twitter_fetcher");
 const { analyzeInstagramAccount } = require("./instagram_fetcher");
+const { analyzeInstagramAccountViaApify } = require("./instagram_apify_fetcher");
+const { scoreProfile, rankPosts } = require("./growth_engine_scoring");
 
 // Persona prompts for each tier
 const PERSONA_PROMPTS = {
   tier0: {
-    growthScanner: `You are the Growth Scanner for a small-business social media audit tool.
+    growthScanner: `You are the Growth Scanner for Scalecraft, a social media evaluation for small-business owners.
 
-You will be given a business's recent social media activity. Your job is to find what is ALREADY working and the single highest-leverage opportunity — not a list of problems.
+You will be given a business's recent public social media activity. Your job is to find what is ALREADY working and the single highest-leverage opportunity — not a list of problems.
 
 Input:
 Handle: {{HANDLE}} ({{PLATFORM}})
 Category: {{CATEGORY}}
 Recent activity: {{RECENT_POST_SUMMARY}}
+Best and worst recent posts vs the account's own average: {{POST_INSIGHTS}}
 
 Output, in this exact structure:
 1. TOP_STRENGTH: one sentence — the thing this account is doing better than most accounts in its category.
 2. BIGGEST_LEVER: one sentence — the single highest-leverage change available, and why it's the highest-leverage one (not just "post more").
-3. SUPPORTING_EVIDENCE: 2-3 bullet points from the actual input data backing up points 1 and 2. Cite real numbers/examples from the input, never invent data not present in it.
+3. SUPPORTING_EVIDENCE: 2-3 bullet points from the actual input data backing up points 1 and 2. Cite real numbers/examples from the input (post counts, dates, gaps, formats, likes, comments, bio text, link), never invent data not present in it.
 
 Do not soften findings, but stay in "opportunity" framing — you are the optimistic read, the Gap Auditor persona covers what's wrong. If the input data is too sparse to support a real finding, say so explicitly rather than guessing.`,
 
-    gapAuditor: `You are the Gap Auditor for a small-business social media audit tool.
+    gapAuditor: `You are the Gap Auditor for Scalecraft, a social media evaluation for small-business owners.
 
-You will be given a business's recent social media activity plus category benchmarks. Score the account on four dimensions, each 0-100, and explain each score in one sentence referencing the actual input data.
+The four dimension scores have ALREADY been computed from the account's public data (method below). Your job is to explain each score to the owner in one or two plain sentences that cite the actual numbers, and to say what would move it. Do not change, re-derive or dispute the scores.
 
 Input:
 Handle: {{HANDLE}} ({{PLATFORM}})
 Category: {{CATEGORY}}
 Recent activity: {{RECENT_POST_SUMMARY}}
-Category benchmarks: {{CATEGORY_BENCHMARKS}}
+Category targets: {{CATEGORY_BENCHMARKS}}
+Computed scores (with the evidence and sub-scores behind each): {{COMPUTED_SCORES}}
 
-Score and explain:
-1. POSTING_CONSISTENCY (0-100): based on actual posting cadence vs category norm.
-2. CONTENT_MIX (0-100): based on format diversity (video/static/carousel/live) vs what performs in this category.
-3. ENGAGEMENT_RATE (0-100): based on actual engagement numbers vs category benchmark.
-4. DISCOVERY_SIGNAL (0-100): based on whether reach appears to be coming from existing followers vs new/algorithmic discovery (infer from available signals; state your confidence if this has to be inferred rather than measured directly).
+Output exactly these lines, one per dimension, in this format — LABEL: score — explanation. Use the score given.
+POSTING_CONSISTENCY: <given score> — explanation
+CONTENT_MIX: <given score> — explanation
+ENGAGEMENT_QUALITY: <given score> — explanation
+PROFILE_CLARITY: <given score> — explanation
+OVERALL_SCORE: <given overall> — one sentence naming the one or two dimensions that cost the most points.
 
-Also output OVERALL_SCORE: a single 0-100 figure (average or weighted average of the four — state which) and CATEGORY_AVG: the category benchmark average for comparison.
+Write for the owner ("You posted 9 times…"), starting each explanation with a capital letter. Use the sub-scores to understand what cost the points and say it in plain words ("the 42-day gap alone cost you most of this score") — do not quote sub-score numbers or component names. No markdown bold or headings.`,
 
-Every score must reference a real number or observation from the input — never output a round, unsupported score. If a dimension can't be measured from the given input, say so and note what data would be needed instead of fabricating a number.`,
-
-    merge: `You are creating an executive summary report for a social media business owner. Make it feel like a strategic conversation, not a scorecard. You have:
+    merge: `You are writing the free Scalecraft Social Snapshot for a small-business owner. Plain-spoken, specific, no hype. You have two analyses of their account:
 
 GROWTH_SCANNER_OUTPUT: {{PERSONA_A_RESPONSE}}
 GAP_AUDITOR_OUTPUT: {{PERSONA_B_RESPONSE}}
+POST_INSIGHTS (their best and worst recent posts, ranked against their own average): {{POST_INSIGHTS}}
 
-Produce a report in exactly this shape (this is a FREE tier report):
+Write the report in exactly this shape:
 
----
-**futureEng GROWTH SNAPSHOT — {{HANDLE}}**
+**SCALECRAFT SOCIAL SNAPSHOT — @{{HANDLE}}**
 
-**YOUR POSITION:**
-Open with a 1-2 sentence narrative about what's actually working. Extract the TOP_STRENGTH from Growth Scanner and describe it in business terms: "You're winning at [specific strength]. This is above 75% of accounts in your category." Never say a number without context. Translate the OVERALL_SCORE into plain language: "You're performing better than X% of similar accounts" or "You're tracking at category-average momentum."
+**WHERE YOU STAND**
+Two or three sentences. Lead with the overall score in plain language and name the one or two things driving most of the gap (or the lead, if the account is strong). Then one sentence on what is already working, from TOP_STRENGTH.
 
-**THE SINGLE BIGGEST OPPORTUNITY:**
-Take the BIGGEST_LEVER from Growth Scanner and reframe it as a concrete business outcome, not a tactic. Example: instead of "increase posting frequency," say "Closing the gap between your posting rhythm and high-performer accounts in your category would likely unlock 30-50% more audience reach." Make it tangible. Explain WHY this matters for their business in their category (fitness, food, design, etc.).
+**THE SINGLE BIGGEST OPPORTUNITY**
+Take BIGGEST_LEVER and state it as a business outcome for this category (first classes booked, tables filled, enquiries), then why, in one or two sentences grounded in the numbers.
 
-**YOUR 30-60-90 ACTION SEQUENCE:**
-Frame this as a clear priority order, not phases. Each is ONE visible action they can start THIS WEEK:
-   1. [Days 1-30 action]: Phrased as "Start doing X differently..." — a shift they control immediately.
-   2. [Days 31-60 action]: The logical next step that builds on #1.
-   3. [Days 61-90 action]: The compound effect they're building toward.
+**YOUR 30-60-90 DAY PATH**
+Three phases. Each phase has a short label and ONE fully specific first move the owner can start this week — specific means it names the days, the format, the count, the bio wording to change, or the page to link to, derived from this account's own data (e.g. "Pick three fixed posting days — Mon, Wed, Sat — and post a reel on each" or "Rewrite the first line of your bio to name the neighbourhood and the price of a first class"). Follow each move with one or two sentences of reasoning tied to the data. Then a 🔒 line that names a countable set of locked items without revealing them, e.g. "🔒 4 more moves for this phase + your weeks 1–4 posting calendar".
+1. **Days 1–30 – [label]:** [move]. [reasoning]
+   🔒 …
+2. **Days 31–60 – [label]:** [move]. [reasoning]
+   🔒 …
+3. **Days 61–90 – [label]:** [move]. [reasoning]
+   🔒 …
+Sequence the phases so the biggest gap is addressed first.
 
-After each action, add a 🔒 locked insight, phrased like: "🔒 Your Growth Plan includes the specific posting template + weekly execution checklist for this phase."
+**WHAT YOUR BEST POSTS HAVE IN COMMON**
+Two or three sentences from POST_INSIGHTS: name the top post by date and what it was, say what the top three share (format, subject, day, how the caption opens) and what the bottom three share. Concrete, not "engaging content".
 
-**WHAT COMES NEXT:**
-Close with: "Your full Growth Plan includes [3-4 specific deliverable types, no numbers] + your personalized 13-week calendar → [upgrade link]"
+**WHAT THE FULL PLAN ADDS**
+One sentence: the remaining moves for all three phases, the week-by-week posting calendar, and content prompts written from their own posts.
 
-CRITICAL: This is free-tier. No specific hooks, captions, posting times, exact numbers of posts, or calendar. Every recommendation stops at the category-level action. Make it feel like a strategic insight, not a tactical playbook.`
+Rules: the scores in GAP_AUDITOR_OUTPUT are final — copy them exactly into the JSON block, never round or adjust them. The first move of each phase is free and must be genuinely actionable and specific. Everything beyond that first move — captions, hooks, the calendar itself, the other moves — stays locked. Never invent numbers not in the analyses. No emoji other than the 🔒. No "[upgrade link]" placeholders.
+
+Finally, after the report, output a machine-readable block on its own lines, exactly like this, with real values (no comments, valid JSON):
+\`\`\`json
+{"overall": 0, "dimensions": [{"label": "Posting Consistency", "score": 0, "explanation": ""}, {"label": "Content Mix", "score": 0, "explanation": ""}, {"label": "Engagement Quality", "score": 0, "explanation": ""}, {"label": "Profile Clarity", "score": 0, "explanation": ""}], "summary": "one sentence naming what drives most of the gap", "best_posts_note": "two sentences: what the top posts share and what the bottom posts share", "phases": [{"range": "1-30", "label": "", "visible_action": "", "detail": "", "locked": {"count": 4, "teaser": ""}}, {"range": "31-60", "label": "", "visible_action": "", "detail": "", "locked": {"count": 4, "teaser": ""}}, {"range": "61-90", "label": "", "visible_action": "", "detail": "", "locked": {"count": 4, "teaser": ""}}]}
+\`\`\``
   },
 };
 
-// Mock category benchmarks for demo
+// Tier 1: everything the free report locked, written from the same data.
+const PLAN_MOVES_PROMPT = `You are the Plan Writer for Scalecraft. A small-business owner has paid for their Growth Plan. You have their public account data, category benchmarks, and the free snapshot (scores + the first move of each 30-day phase). Write the remaining moves. Be specific to THIS account: use its real posting days, formats, gaps, bio wording, caption themes, best/worst posts and numbers. Every move must cite a specific post, number, day or bio line from the data. No generic advice (no "run a giveaway", "engage with your audience").
+
+Handle: {{HANDLE}} ({{PLATFORM}})
+Category: {{CATEGORY}}
+Account data: {{RECENT_POST_SUMMARY}}
+Best and worst recent posts: {{POST_INSIGHTS}}
+Category benchmarks: {{CATEGORY_BENCHMARKS}}
+Snapshot (already shown to the owner): {{SNAPSHOT_JSON}}
+
+Produce ONLY a JSON object, no prose, no markdown fences:
+{"posting_days":["Mon","Wed","Sat"],"posting_time":"7:15am",
+ "phases":[
+  {"range":"1-30","moves":[{"n":2,"title":"under 6 words","action":"one imperative sentence the owner can do this week","why":"one sentence tied to a number, post or bio line from the data"},{"n":3,...},{"n":4,...},{"n":5,...}]},
+  {"range":"31-60","moves":[{"n":6,...},{"n":7,...},{"n":8,...},{"n":9,...}]},
+  {"range":"61-90","moves":[{"n":10,...},{"n":11,...},{"n":12,...},{"n":13,...}]}
+ ]}
+posting_days must match the snapshot's first move if it names days. Moves must not repeat the snapshot's first moves. Valid JSON only.`;
+
+const PLAN_CALENDAR_PROMPT = `You are the Plan Writer for Scalecraft. Write a 12-week posting calendar for this account, built from its own best-performing formats and subjects.
+
+Handle: {{HANDLE}} ({{PLATFORM}})
+Category: {{CATEGORY}}
+Best and worst recent posts: {{POST_INSIGHTS}}
+Posting days: {{POSTING_DAYS}} at {{POSTING_TIME}}
+Phase plan (weeks 1-4 serve phase 1, 5-8 phase 2, 9-12 phase 3): {{PHASES_JSON}}
+
+Produce ONLY a JSON array of 12 weeks, no prose, no markdown fences:
+[{"week":1,"slots":[{"day":"Mon","format":"reel","angle":"what the post is about, under 10 words","prompt":"a shooting/caption brief the owner can follow, under 25 words"},{"day":"Wed",...},{"day":"Sat",...}]}, ... through week 12]
+One slot per posting day per week. Formats: reel, carousel, static, story. Vary subjects across weeks; reuse the account's proven formats. Valid JSON only.`;
+
+// Category benchmarks. These are working assumptions, not measured
+// averages — replace with real baselines once enough profiles are scored.
 const CATEGORY_BENCHMARKS = {
   boutique_fitness: {
-    posting_consistency: "4-5 posts/week",
-    content_mix: "60% video / 40% static",
-    engagement_rate: "2.4%",
-    discovery_signal: "40% new followers",
+    posting_consistency: "4-5 posts/week on fixed days; gaps over 7 days are unusual",
+    content_mix: "60% video (coach explainers, class moments) / 40% static; schedules alone underperform",
+    engagement_quality: "2.4% engagement rate; 3+ comments per post from varied accounts",
+    profile_clarity: "bio names the neighbourhood and a first-class price; link goes to a trial/booking page",
   },
   fitness: {
     posting_consistency: "4-5 posts/week",
     content_mix: "55% video / 45% static",
-    engagement_rate: "2.2%",
-    discovery_signal: "35% new followers",
+    engagement_quality: "2.2% engagement rate",
+    profile_clarity: "bio names location and offer; link goes to a sign-up page",
   },
   food_beverage: {
     posting_consistency: "5-6 posts/week",
-    content_mix: "70% static / 30% video",
-    engagement_rate: "1.8%",
-    discovery_signal: "30% new followers",
+    content_mix: "70% static (dishes, people) / 30% video",
+    engagement_quality: "1.8% engagement rate; saves matter",
+    profile_clarity: "bio names neighbourhood, hours and a link to menu/reservations",
+  },
+  retail: {
+    posting_consistency: "4-5 posts/week",
+    content_mix: "50% product static / 30% video / 20% people and behind-the-counter",
+    engagement_quality: "1.5% engagement rate; saves and shares on product posts",
+    profile_clarity: "bio names location or shipping area and a link to shop",
+  },
+  professional_services: {
+    posting_consistency: "2-3 posts/week, consistent days",
+    content_mix: "60% expertise (tips, explainers) / 40% people and proof",
+    engagement_quality: "1.2% engagement rate; comments and DMs over likes",
+    profile_clarity: "bio names who you serve, where, and a link to book a consultation",
   },
 };
 
@@ -109,7 +166,10 @@ async function getRealPostData(handle, platform, category) {
 
   if (platform === "instagram" || platform === "ig") {
     try {
-      const instagramData = await analyzeInstagramAccount(handle);
+      // Apify reads any public profile; the Graph API only reads accounts we own.
+      const instagramData = process.env.APIFY_TOKEN
+        ? await analyzeInstagramAccountViaApify(handle)
+        : await analyzeInstagramAccount(handle);
       return formatInstagramDataForAnalysis(instagramData);
     } catch (err) {
       console.error("[Growth Engine] Instagram fetch failed:", err.message);
@@ -147,14 +207,19 @@ function formatInstagramDataForAnalysis(instagramData) {
     handle: instagramData.handle,
     platform: "instagram",
     follower_count: instagramData.follower_count,
+    following_count: instagramData.following_count,
     post_count: instagramData.post_count,
+    biography: instagramData.biography || null,
+    website: instagramData.website || null,
     metrics: instagramData.analysis,
-    recent_activity: instagramData.recent_posts.slice(0, 10).map((p) => ({
+    recent_activity: instagramData.recent_posts.slice(0, 12).map((p) => ({
       date: p.timestamp.split("T")[0],
       engagement: (p.like_count || 0) + (p.comments_count || 0),
       likes: p.like_count || 0,
       comments: p.comments_count || 0,
-      media_type: p.media_type,
+      media_type: p.is_reel ? "REEL" : p.media_type,
+      video_views: p.video_view_count || undefined,
+      location: p.location || undefined,
       caption_preview: p.caption ? p.caption.substring(0, 100) : "",
     })),
   };
@@ -170,6 +235,14 @@ function getDecryptedKeys(userId) {
   };
 }
 
+// Output budget for the next LLM call(s); the plan writer needs more than a snapshot.
+let OUTPUT_TOKENS = 2048;
+function withOutputTokens(n, fn) {
+  const prev = OUTPUT_TOKENS;
+  OUTPUT_TOKENS = n;
+  return Promise.resolve().then(fn).finally(() => { OUTPUT_TOKENS = prev; });
+}
+
 async function callClaudeNonStreaming(claudeKey, claudeWorkspaceId, system, userMessage) {
   const headers = {
     "content-type": "application/json",
@@ -183,7 +256,7 @@ async function callClaudeNonStreaming(claudeKey, claudeWorkspaceId, system, user
     headers,
     body: JSON.stringify({
       model: "claude-opus-4-1",
-      max_tokens: 2048,
+      max_tokens: OUTPUT_TOKENS,
       system,
       messages: [{ role: "user", content: userMessage }],
     }),
@@ -199,55 +272,92 @@ async function callClaudeNonStreaming(claudeKey, claudeWorkspaceId, system, user
 }
 
 async function callGeminiNonStreaming(geminiKey, systemInstruction, userMessage) {
-  // v1 endpoint with gemini-3.5-flash (stable, less demand than 3.6)
-  const url = `https://generativelanguage.googleapis.com/v1/models/gemini-3.5-flash:generateContent?key=${encodeURIComponent(geminiKey)}`;
-
-  const body = {
-    contents: [{ parts: [{ text: userMessage }] }],
-    systemInstruction: { parts: [{ text: systemInstruction }] },
-  };
-
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(`Gemini API error ${response.status}: ${detail.slice(0, 200)}`);
+  if (!geminiKey) throw new Error("Gemini API key not configured");
+  // Free-tier Gemini sheds load with 503s on the busiest model; walk a short
+  // list and retry briefly rather than giving the call away to the next provider.
+  const models = [process.env.GEMINI_MODEL || "gemini-2.5-flash", "gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"];
+  let lastErr;
+  for (const model of models) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const url = `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${encodeURIComponent(geminiKey)}`;
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: userMessage }] }],
+          systemInstruction: { parts: [{ text: systemInstruction }] },
+          // 2.5-flash "thinks" out of the same output budget and can return
+          // nothing but thoughts; turn that off so the budget goes to text.
+          generationConfig: { maxOutputTokens: OUTPUT_TOKENS, ...(model.startsWith("gemini-2.5") ? { thinkingConfig: { thinkingBudget: 0 } } : {}) },
+        }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("") || "";
+        if (text.trim()) return text;
+        lastErr = new Error(`Gemini returned an empty completion (${model})`);
+        console.warn("[Growth Engine]", lastErr.message, JSON.stringify(data.candidates?.[0]?.finishReason || data.promptFeedback || "").slice(0, 80));
+        break;
+      }
+      const detail = await response.text();
+      lastErr = new Error(`Gemini API error ${response.status} (${model}): ${detail.slice(0, 200)}`);
+      if (response.status === 503 || response.status === 429) {
+        if (attempt === 0) { console.log(`[Growth Engine] Gemini ${response.status} on ${model}, retrying in 4s...`); await new Promise((r) => setTimeout(r, 4000)); continue; }
+        break; // next model
+      }
+      if (response.status === 404) break; // model id gone — next
+      throw lastErr; // auth/quota/other: don't burn time
+    }
   }
-
-  const data = await response.json();
-  const candidates = data.candidates || [];
-  if (candidates.length === 0) throw new Error("No candidates in Gemini response");
-  return candidates[0].content.parts[0].text;
+  throw lastErr;
 }
 
 async function callGroqNonStreaming(groqKey, systemInstruction, userMessage) {
-  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "authorization": `Bearer ${groqKey}`,
-    },
-    body: JSON.stringify({
-      model: "groq/compound",
-      messages: [
-        { role: "system", content: systemInstruction },
-        { role: "user", content: userMessage },
-      ],
-      max_tokens: 2048,
-    }),
-  });
-
-  if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(`Groq API error ${response.status}: ${detail.slice(0, 200)}`);
+  // groq/compound routes to a large model with an 8k TPM cap on the free tier.
+  // A single evaluation makes three calls, so honour Retry-After on 429 and
+  // fall back to a smaller model before giving up.
+  const models = [process.env.GROQ_MODEL || "groq/compound", "openai/gpt-oss-20b", "groq/compound-mini"];
+  let lastErr;
+  for (const model of models) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: { "content-type": "application/json", "authorization": `Bearer ${groqKey}` },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: systemInstruction },
+            { role: "user", content: userMessage },
+          ],
+          max_tokens: OUTPUT_TOKENS,
+        }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        const content = data.choices?.[0]?.message?.content;
+        if (content && content.trim()) return content;
+        // Empty completion (budget spent on hidden reasoning) — try the next model.
+        lastErr = new Error(`Groq returned an empty completion (${model})`);
+        console.warn("[Growth Engine]", lastErr.message);
+        break;
+      }
+      const detail = await response.text();
+      lastErr = new Error(`Groq API error ${response.status} (${model}): ${detail.slice(0, 200)}`);
+      if (response.status === 429) {
+        // Daily caps say "try again in 5m45s" — don't wait on those, move on.
+        const m = /try again in (?:(\d+)m)?([\d.]+)?(m?s)?/i.exec(detail);
+        const waitMs = m ? (Number(m[1] || 0) * 60000) + Math.ceil(parseFloat(m[2] || 0) * (m[3] === "ms" ? 1 : 1000)) + 500 : (attempt + 1) * 8000;
+        if (/per day|RPD|TPD/i.test(detail)) { console.log(`[Growth Engine] Groq daily cap on ${model}, skipping`); break; }
+        if (waitMs <= 45000) {
+          console.log(`[Growth Engine] Groq 429 on ${model}, waiting ${waitMs}ms...`);
+          await new Promise((r) => setTimeout(r, waitMs));
+          continue;
+        }
+      }
+      break; // non-retryable for this model → next model
+    }
   }
-
-  const data = await response.json();
-  return data.choices[0].message.content;
+  throw lastErr;
 }
 
 async function callTogetherNonStreaming(togetherKey, system, userMessage) {
@@ -261,7 +371,7 @@ async function callTogetherNonStreaming(togetherKey, system, userMessage) {
     },
     body: JSON.stringify({
       model: "meta-llama/Llama-3-70b-chat-hf",
-      max_tokens: 2048,
+      max_tokens: OUTPUT_TOKENS,
       messages: [
         { role: "system", content: system },
         { role: "user", content: userMessage },
@@ -289,7 +399,7 @@ async function callOpenAINonStreaming(openaiKey, system, userMessage) {
     },
     body: JSON.stringify({
       model: "gpt-4o-mini",
-      max_tokens: 2048,
+      max_tokens: OUTPUT_TOKENS,
       messages: [
         { role: "system", content: system },
         { role: "user", content: userMessage },
@@ -356,7 +466,27 @@ async function callWithQuadFallback(primaryCall, secondaryCall, tertiaryCall, qu
   }
 }
 
-async function evaluateTier0(accountId, inputParams) {
+
+function clampScore(n) {
+  const v = Number(n);
+  return Number.isFinite(v) ? Math.max(0, Math.min(100, Math.round(v))) : null;
+}
+
+// Pull the trailing ```json block out of a merged report.
+function splitStructuredBlock(text) {
+  const src = String(text || "");
+  const m = /```json\s*([\s\S]*?)```\s*$/i.exec(src) || /```json\s*([\s\S]*?)```/i.exec(src);
+  if (!m) return { narrative: src.trim(), structured: null };
+  let structured = null;
+  try {
+    structured = JSON.parse(m[1]);
+  } catch (err) {
+    console.warn("[Growth Engine] Structured block did not parse:", err.message);
+  }
+  return { narrative: src.replace(m[0], "").trim(), structured };
+}
+
+async function runSnapshot(accountId, inputParams) {
   const { claudeKey, claudeWorkspaceId, geminiKey, groqKey } = getDecryptedKeys(accountId);
   const openaiKey = process.env.OPENAI_API_KEY;
   if (!claudeKey && !geminiKey && !groqKey && !openaiKey) {
@@ -367,16 +497,19 @@ async function evaluateTier0(accountId, inputParams) {
 
   // Fetch real social media data
   let postSummary;
+  let computed = null;
+  let postInsights = null;
   try {
     const realData = await getRealPostData(handle, platform, category);
-    postSummary = JSON.stringify(realData, null, 2);
+    postSummary = JSON.stringify(realData); // compact: every token counts against free-tier TPM caps
+    computed = scoreProfile(realData, category); // null for fetchers without the metric shape (Twitter)
+    postInsights = rankPosts(realData.recent_activity || realData.recent_posts);
   } catch (err) {
     console.warn("[Growth Engine] Real data fetch failed:", err.message);
-    postSummary = JSON.stringify({
-      handle,
-      platform,
-      note: `Could not fetch real data: ${err.message}. Analyze based on platform best practices.`,
-    });
+    // No data, no report. A private/missing profile is the owner's to fix; a
+    // network or provider failure is ours — either way the UI says so honestly
+    // instead of a "best practices" report that scores nothing real.
+    throw err;
   }
   const benchmarks = CATEGORY_BENCHMARKS[category] || CATEGORY_BENCHMARKS.fitness;
 
@@ -386,6 +519,14 @@ async function evaluateTier0(accountId, inputParams) {
     CATEGORY: category,
     RECENT_POST_SUMMARY: postSummary,
     CATEGORY_BENCHMARKS: JSON.stringify(benchmarks),
+    POST_INSIGHTS: postInsights
+      ? JSON.stringify({ avg_engagement: postInsights.avg_engagement, best_format: postInsights.patterns.best_format, best_day: postInsights.patterns.best_day,
+          top: postInsights.top.map((p) => ({ date: String(p.date).slice(0, 10), format: p.format, day: p.weekday, vs_avg: p.vs_avg, caption: p.caption })),
+          bottom: postInsights.bottom.map((p) => ({ date: String(p.date).slice(0, 10), format: p.format, day: p.weekday, vs_avg: p.vs_avg, caption: p.caption })) })
+      : "not available",
+    COMPUTED_SCORES: computed
+      ? JSON.stringify({ overall: computed.overall, dimensions: computed.dimensions.map((d) => ({ label: d.label, score: d.score, evidence: d.evidence, parts: d.parts })) })
+      : "not available for this platform — score each dimension yourself from the data and say so",
   };
 
   // Call both personas in parallel with fallback logic
@@ -393,7 +534,9 @@ async function evaluateTier0(accountId, inputParams) {
   const prompt2 = interpolateTemplate(PERSONA_PROMPTS.tier0.gapAuditor, templateVars);
 
   console.log("[Growth Engine] Starting evaluation. Fallback chain: Claude → Gemini → Groq → OpenAI");
-  const [personaAResponse, personaBResponse] = await Promise.all([
+  // Sequential, not parallel: two concurrent calls on a free-tier key trip the
+  // per-minute token cap and both retry.
+  const personaAResponse = await (
     // Persona A: Growth Scanner
     callWithQuadFallback(
       () => callClaudeNonStreaming(claudeKey, claudeWorkspaceId, "You are an expert social media strategist.", prompt1),
@@ -401,7 +544,8 @@ async function evaluateTier0(accountId, inputParams) {
       () => callGroqNonStreaming(groqKey, "You are an expert social media strategist.", prompt1),
       () => callOpenAINonStreaming(openaiKey, "You are an expert social media strategist.", prompt1),
       "Growth Scanner"
-    ),
+    ));
+  const personaBResponse = await (
     // Persona B: Gap Auditor
     callWithQuadFallback(
       () => callClaudeNonStreaming(claudeKey, claudeWorkspaceId, "You are a data-driven social media analyst.", prompt2),
@@ -409,8 +553,7 @@ async function evaluateTier0(accountId, inputParams) {
       () => callGroqNonStreaming(groqKey, "You are a data-driven social media analyst.", prompt2),
       () => callOpenAINonStreaming(openaiKey, "You are a data-driven social media analyst.", prompt2),
       "Gap Auditor"
-    ),
-  ]);
+    ));
 
   // Merge step
   const mergeTemplateVars = {
@@ -422,15 +565,19 @@ async function evaluateTier0(accountId, inputParams) {
   const mergePrompt = interpolateTemplate(PERSONA_PROMPTS.tier0.merge, mergeTemplateVars);
 
   // Merge: Claude → Gemini → Groq → OpenAI
-  const mergedReport = await callWithQuadFallback(
+  const mergedReport = await withOutputTokens(4096, () => callWithQuadFallback(
     () => callClaudeNonStreaming(claudeKey, claudeWorkspaceId, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt),
     () => callGeminiNonStreaming(geminiKey, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt),
     () => callGroqNonStreaming(groqKey, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt),
     () => callOpenAINonStreaming(openaiKey, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt),
     "Merge"
-  );
+  ));
 
-  // Use the actual LLM-generated narrative report, not mock data
+  // The merge ends with a ```json block carrying the structured report
+  // (scores + growth path, per FRONTEND_INTEGRATION_GUIDE). Split it out of
+  // the prose; if the model skipped or mangled it, the narrative still ships.
+  const { narrative, structured } = splitStructuredBlock(mergedReport);
+
   const reportBody = {
     report_id: "rpt_" + require("crypto").randomBytes(12).toString("hex"),
     tier: "social_snapshot",
@@ -442,8 +589,8 @@ async function evaluateTier0(accountId, inputParams) {
     },
     generated_at: Date.now(),
     refresh_due_at: null,
-    data_confidence: "full",
-    narrative: mergedReport,
+    data_confidence: structured ? "full" : "narrative_only",
+    narrative,
     raw_personas: {
       growth_scanner: personaAResponse,
       gap_auditor: personaBResponse,
@@ -451,59 +598,162 @@ async function evaluateTier0(accountId, inputParams) {
     },
   };
 
+  if (structured || computed) {
+    const dims = Array.isArray(structured?.dimensions) ? structured.dimensions : [];
+    const llmScores = {
+      overall: clampScore(structured?.overall) ?? (dims.length ? Math.round(dims.reduce((a, d) => a + (clampScore(d.score) || 0), 0) / dims.length) : null),
+      dimensions: dims
+        .filter((d) => d && d.label)
+        .map((d) => ({ label: String(d.label), score: clampScore(d.score), explanation: String(d.explanation || "") })),
+    };
+    // Computed scores are the source of truth; the model contributes prose only.
+    // The Gap Auditor's "LABEL: score — explanation" lines are the primary
+    // source (concise, cite the sub-scores); the JSON block is the fallback.
+    const auditorExpl = {};
+    for (const line of String(personaBResponse || "").split("\n")) {
+      const m = /^\s*\**\s*([A-Z_ ]+?)\s*\**\s*:\s*\**\s*\d{1,3}\s*\**\s*[—–-]\s*(.+)$/.exec(line);
+      if (m) { const t = m[2].trim(); auditorExpl[m[1].toLowerCase().replace(/[^a-z]/g, "")] = t.charAt(0).toUpperCase() + t.slice(1); }
+    }
+    const findExpl = (label) => {
+      const key = label.toLowerCase().replace(/[^a-z]/g, "");
+      if (auditorExpl[key]) return auditorExpl[key];
+      const hit = llmScores.dimensions.find((d) => d.label.toLowerCase().replace(/[^a-z]/g, "") === key);
+      return hit ? hit.explanation : "";
+    };
+    const overallLine = auditorExpl["overallscore"] || null;
+    reportBody.scores = computed
+      ? {
+          overall: computed.overall,
+          category_avg: null, // filled from measured baselines by the job queue
+          summary: typeof structured?.summary === "string" ? structured.summary : overallLine,
+          dimensions: computed.dimensions.map((d) => ({ label: d.label, score: d.score, explanation: findExpl(d.label) || d.evidence, evidence: d.evidence, parts: d.parts })),
+          method: computed.method,
+        }
+      : { ...llmScores, category_avg: null, summary: typeof structured?.summary === "string" ? structured.summary : null, method: "llm" };
+    const phases = Array.isArray(structured?.phases) ? structured.phases : [];
+    if (phases.length) {
+      reportBody.growth_path = {
+        unlocked_steps: phases.length,
+        total_steps: phases.reduce((n, p) => n + 1 + (Number(p?.locked?.count) || 4), 0),
+        phases: phases.map((p, i) => ({
+          range: String(p.range || ["1-30", "31-60", "61-90"][i] || ""),
+          label: String(p.label || ""),
+          visible_action: String(p.visible_action || ""),
+          detail: String(p.detail || ""),
+          locked: { count: Number(p?.locked?.count) || 4, teaser: String(p?.locked?.teaser || "") },
+        })),
+      };
+    }
+    if (postInsights) {
+      reportBody.post_insights = {
+        ...postInsights,
+        note: typeof structured?.best_posts_note === "string" ? structured.best_posts_note : null,
+      };
+    }
+    reportBody.upsell = {
+      cta_label: "Unlock your full Growth Plan",
+      target_tier: "growth_plan",
+      unlock_count: phases.reduce((n, p) => n + (Number(p?.locked?.count) || 4), 0) || 12,
+    };
+  }
+
+  return { reportBody, structured, postSummary, benchmarks, keys: { claudeKey, claudeWorkspaceId, geminiKey, groqKey, openaiKey } };
+}
+
+async function evaluateTier0(accountId, inputParams) {
+  const { reportBody } = await runSnapshot(accountId, inputParams);
   return reportBody;
 }
 
 async function evaluateTier1(accountId, inputParams) {
-  // Tier 1: Growth Plan (full 90-day calendar + LLM prompts)
-  // Same personas as Tier 0, but merge step outputs full calendar instead of teaser
-  // Placeholder: returns mock calendar for now
-
+  // Tier 1: Growth Plan — the free snapshot plus every locked item, from the same data.
+  const { reportBody, structured, postSummary, benchmarks, keys } = await runSnapshot(accountId, inputParams);
   const { handle, platform, category } = inputParams;
+  const { claudeKey, claudeWorkspaceId, geminiKey, groqKey, openaiKey } = keys;
 
-  const reportBody = {
-    report_id: "rpt_" + require("crypto").randomBytes(12).toString("hex"),
-    tier: "growth_plan",
-    business: {
-      handle,
-      platform,
-      category,
-      business_name: null,
-    },
-    generated_at: Date.now(),
-    refresh_due_at: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7 days for weekly refresh
-    data_confidence: "full",
-    scores: {
-      overall: 47,
-      category_avg: 61,
-      dimensions: [
-        { key: "posting_consistency", label: "Posting Consistency", score: 35, explanation: "1.8 posts/week vs 4-5/week" },
-        { key: "content_mix", label: "Content Mix", score: 58, explanation: "80% static / 20% video" },
-        { key: "engagement_rate", label: "Engagement Rate", score: 52, explanation: "1.1% avg vs 2.4% benchmark" },
-        { key: "discovery_signal", label: "Discovery Signal", score: 40, explanation: "Mostly existing followers" },
-      ],
-    },
-    content_calendar: {
-      weeks: Array.from({ length: 13 }, (_, i) => ({
-        week: i + 1,
-        format: i % 3 === 0 ? "reel" : i % 3 === 1 ? "carousel" : "static",
-        hook_angle: `Week ${i + 1} content angle for ${category}`,
-        posting_day: ["Monday", "Wednesday", "Friday"][i % 3],
-        posting_time: "18:00",
-        cta: "See details in Growth Plan",
-        llm_prompt: `Write a ${["reel", "carousel", "static"][i % 3]} for ${handle} (${category}): Week ${i + 1} angle.`,
-      })),
-    },
-    competitor_comparison: {
-      competitors: [
-        { handle: "@competitor_1", dimensions: { posting_consistency: 70, content_mix: 65, engagement_rate: 60, discovery_signal: 55 } },
-        { handle: "@competitor_2", dimensions: { posting_consistency: 65, content_mix: 58, engagement_rate: 55, discovery_signal: 50 } },
-      ],
-    },
+  const snapshotJson = JSON.stringify({
+    overall: reportBody.scores?.overall ?? null,
+    dimensions: reportBody.scores?.dimensions ?? [],
+    phases: (reportBody.growth_path?.phases ?? []).map((p) => ({ range: p.range, label: p.label, first_move: p.visible_action })),
+  });
+  const baseVars = {
+    HANDLE: handle, PLATFORM: platform, CATEGORY: category,
+    RECENT_POST_SUMMARY: postSummary, CATEGORY_BENCHMARKS: JSON.stringify(benchmarks), SNAPSHOT_JSON: snapshotJson,
+    POST_INSIGHTS: reportBody.post_insights
+      ? JSON.stringify({ best_format: reportBody.post_insights.patterns?.best_format, best_day: reportBody.post_insights.patterns?.best_day,
+          top: reportBody.post_insights.top.map((p) => ({ date: String(p.date).slice(0, 10), format: p.format, vs_avg: p.vs_avg, caption: p.caption })),
+          bottom: reportBody.post_insights.bottom.map((p) => ({ date: String(p.date).slice(0, 10), format: p.format, vs_avg: p.vs_avg, caption: p.caption })) })
+      : "not available",
+  };
+  const sys = "You write specific, data-grounded social media growth plans. Output JSON only.";
+  const askJson = async (prompt, label, budget) => {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const raw = await withOutputTokens(budget, () => callWithQuadFallback(
+        () => callClaudeNonStreaming(claudeKey, claudeWorkspaceId, sys, prompt),
+        () => callGeminiNonStreaming(geminiKey, sys, prompt),
+        () => callGroqNonStreaming(groqKey, sys, prompt),
+        () => callOpenAINonStreaming(openaiKey, sys, prompt),
+        attempt ? `${label} (retry)` : label
+      ));
+      const parsed = parseJsonLoose(raw);
+      if (parsed) return parsed;
+      console.warn(`[Growth Engine] ${label} output unusable${attempt ? "" : ", retrying once"}`);
+    }
+    return null;
   };
 
+  // Two smaller calls instead of one big one: the combined plan ran past the
+  // output limits of the fallback models and came back truncated.
+  const moves = await askJson(interpolateTemplate(PLAN_MOVES_PROMPT, baseVars), "Plan Writer: moves", 3072);
+  if (!moves) throw new Error("Plan Writer returned no usable plan");
+  const calendarRaw = await askJson(interpolateTemplate(PLAN_CALENDAR_PROMPT, {
+    ...baseVars,
+    POSTING_DAYS: (moves.posting_days || []).join(", ") || "Mon, Wed, Fri",
+    POSTING_TIME: moves.posting_time || "morning",
+    PHASES_JSON: JSON.stringify((reportBody.growth_path?.phases ?? []).map((p, i) => ({ range: p.range, label: p.label, first_move: p.visible_action, moves: (moves.phases?.[i]?.moves || []).map((m) => m.title) }))),
+  }), "Plan Writer: calendar", 4096);
+  const plan = { ...moves, calendar: Array.isArray(calendarRaw) ? calendarRaw : (calendarRaw && Array.isArray(calendarRaw.calendar) ? calendarRaw.calendar : []) };
+
+  const days = Array.isArray(plan.posting_days) ? plan.posting_days.map(String) : [];
+  const weeks = (Array.isArray(plan.calendar) ? plan.calendar : []).slice(0, 12).map((w, i) => ({
+    week: Number(w.week) || i + 1,
+    phase: Math.min(3, Math.floor(i / 4) + 1),
+    slots: (Array.isArray(w.slots) ? w.slots : []).map((sl) => ({
+      day: String(sl.day || ""), format: String(sl.format || "post"), angle: String(sl.angle || ""), prompt: String(sl.prompt || ""),
+    })),
+  }));
+  const planPhases = Array.isArray(plan.phases) ? plan.phases : [];
+
+  reportBody.tier = "growth_plan";
+  reportBody.refresh_due_at = Date.now() + 7 * 24 * 60 * 60 * 1000;
+  if (!reportBody.growth_path) reportBody.growth_path = { phases: [] };
+  reportBody.growth_path.phases = reportBody.growth_path.phases.map((p, i) => {
+    const extra = planPhases.find((x) => String(x.range) === String(p.range)) || planPhases[i] || { moves: [] };
+    const moves = (Array.isArray(extra.moves) ? extra.moves : []).map((m, k) => ({
+      n: Number(m.n) || i * 4 + k + 2, title: String(m.title || ""), action: String(m.action || ""), why: String(m.why || ""),
+    }));
+    return { ...p, moves, locked: { count: 0, teaser: "" }, calendar_weeks: weeks.filter((w) => w.phase === i + 1) };
+  });
+  reportBody.growth_path.unlocked_steps = reportBody.growth_path.phases.reduce((n, p) => n + 1 + p.moves.length, 0);
+  reportBody.growth_path.total_steps = reportBody.growth_path.unlocked_steps;
+  reportBody.calendar = { posting_days: days, posting_time: plan.posting_time ? String(plan.posting_time) : null, weeks };
+  reportBody.upsell = { cta_label: "Upgrade to Business Evaluator", target_tier: "business_evaluator", unlock_count: 0 };
   return reportBody;
 }
+
+// LLMs sometimes wrap JSON in fences or prose; find the outermost object.
+function parseJsonLoose(text) {
+  const src = String(text || "");
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(src);
+  const candidates = [fenced && fenced[1], src.slice(src.indexOf("{"), src.lastIndexOf("}") + 1), src];
+  for (const c of candidates) {
+    if (!c) continue;
+    try { return JSON.parse(c); } catch { /* next */ }
+  }
+  console.warn("[Growth Engine] Plan JSON did not parse; first 200 chars:", src.slice(0, 200));
+  return null;
+}
+
 
 async function evaluateTier2(accountId, inputParams) {
   // Tier 2: Business Evaluator (calendar + business reconciliation + action plan)
