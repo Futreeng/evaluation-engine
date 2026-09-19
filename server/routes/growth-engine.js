@@ -189,14 +189,22 @@ router.get("/job/:jobId", async (req, res) => {
     const job = await geDb.getJob(req.params.jobId);
     if (!job) return res.status(404).json({ error: "Job not found" });
 
-    res.json({
+    const response = {
       status: job.status,
       stage: job.stage || job.status,
       created_at: job.created_at,
       updated_at: job.updated_at,
       error: job.error,
       resultPayload: job.resultPayload,
-    });
+    };
+
+    // Compatibility: add `overall` field for frontend testing
+    // Extract from report narrative if available
+    if (job.resultPayload?.reportBody?.narrative) {
+      response.overall = job.resultPayload.reportBody.narrative;
+    }
+
+    res.json(response);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -207,7 +215,15 @@ router.get("/reports/:reportId", async (req, res) => {
   try {
     const report = await geDb.getReport(req.params.reportId);
     if (!report) return res.status(404).json({ error: "Report not found" });
-    res.json(report);
+
+    // Compatibility: add `overall` field for frontend testing
+    // Frontend looks for result.overall; we mirror reportBody.narrative here
+    const responseReport = {
+      ...report,
+      overall: report.reportBody?.narrative || "Report generated successfully"
+    };
+
+    res.json(responseReport);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
