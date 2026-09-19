@@ -82,14 +82,62 @@ class JobQueue {
         throw new Error(`Unknown tier: ${tier}`);
       }
 
+      // Create report record first so the job payload carries the id that
+      // GET /reports/:id actually resolves (the evaluator's own report_id is
+      // not what the DB stores).
+      // Feed the category baseline and, if it has enough profiles, attach the
+      // measured averages so the report can show "vs your category".
+      try {
+        const sc = reportBody.scores;
+        if (sc && Number.isFinite(sc.overall)) {
+          await geDb.recordBaseline({
+            category: inputParams.category, platform: inputParams.platform, handle: inputParams.handle,
+            overall: sc.overall, dimensions: sc.dimensions,
+          });
+          const base = await geDb.getCategoryBaseline(inputParams.category);
+          if (base && base.ready) {
+            sc.category_avg = base.overall;
+            sc.category_top_quartile = base.top_quartile;
+            sc.category_sample_size = base.n;
+            for (const d of sc.dimensions || []) if (base.dimensions[d.label] != null) d.category_avg = base.dimensions[d.label];
+          } else if (base) {
+            sc.category_sample_size = base.n;
+            sc.category_baseline_pending = { n: base.n, min_n: base.min_n };
+          }
+        }
+      } catch (err) {
+        console.warn("[Growth Engine] Baseline update failed:", err.message);
+      }
+
+      // Score history: compare with this account's last report for the handle.
+      try {
+        if (accountId && accountId !== "demo-account" && reportBody.scores) {
+          const prior = await geDb.listScoreHistory(accountId, inputParams.handle, inputParams.platform);
+          const prev = prior[prior.length - 1];
+          if (prev) {
+            const dims = {};
+            for (const d of prev.dimensions || []) dims[d.label] = d.score;
+            reportBody.history = {
+              runs: prior.length + 1,
+              previous: { report_id: prev.report_id, generated_at: prev.generated_at, overall: prev.overall },
+              delta_overall: reportBody.scores.overall - prev.overall,
+              delta_dimensions: (reportBody.scores.dimensions || []).map((d) => ({ label: d.label, delta: dims[d.label] != null ? d.score - dims[d.label] : null })),
+              series: [...prior.map((r) => ({ generated_at: r.generated_at, overall: r.overall })), { generated_at: Date.now(), overall: reportBody.scores.overall }],
+            };
+          }
+        }
+      } catch (err) {
+        console.warn("[Growth Engine] History lookup failed:", err.message);
+      }
+
+      const { reportId } = await geDb.createReport(accountId, tier, inputParams, reportBody);
+      reportBody.report_id = reportId;
+
       // Mark complete
       await geDb.updateJobStatus(jobId, "complete", {
         resultPayload: reportBody,
         stage: "complete",
       });
-
-      // Create report record
-      await geDb.createReport(accountId, tier, inputParams, reportBody);
 
       // Save report as markdown file for reference
       try {

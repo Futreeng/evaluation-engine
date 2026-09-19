@@ -4,6 +4,7 @@ const geDb = require("../growth_engine_db");
 const { evaluateProfile } = require("../growth_engine_evaluator");
 const BillingManager = require("../growth_engine_billing");
 const JobQueue = require("../growth_engine_job_queue");
+const { compareCompetitors, MAX_COMPETITORS } = require("../growth_engine_competitors");
 const { signup, login, verifyJWT } = require("../auth");
 const {
   sendError,
@@ -162,21 +163,62 @@ router.get("/account/reports", authMiddleware, async (req, res) => {
 });
 
 // Queue evaluation (TEMP: no auth for frontend testing; add authMiddleware back once Haron builds login)
-router.post("/evaluate/social-snapshot", validateEvaluationRequest, async (req, res) => {
+// Reads the bearer token if one is sent, without requiring it — the free
+// snapshot is anonymous, but a signed-in subscriber gets their paid tier.
+const optionalAuth = async (req, _res, next) => {
+  const token = req.headers.authorization?.split(" ")[1];
+  if (token) {
+    const user = await verifyJWT(token);
+    if (user) req.user = user;
+  }
+  next();
+};
+
+// Which evaluator runs for an account. business_evaluator maps to the
+// growth_plan pipeline until tier 2 has its own.
+async function evaluationTierFor(accountId) {
+  if (!accountId || accountId === "demo-account") return "social_snapshot";
+  try {
+    const ent = await geDb.getOrCreateEntitlement(accountId);
+    const t = ent?.current_tier || ent?.currentTier || "social_snapshot";
+    if (t === "growth_plan" || t === "business_evaluator" || t === "agency") return "growth_plan";
+  } catch (err) {
+    console.warn("[Growth Engine] Entitlement lookup failed, defaulting to snapshot:", err.message);
+  }
+  return "social_snapshot";
+}
+
+router.post("/evaluate/social-snapshot", optionalAuth, validateEvaluationRequest, async (req, res) => {
   try {
     const { handle, platform, category, email } = req.body;
-    // TEMP: Use demo account for testing; will be req.user.id once auth is enforced
     const accountId = req.user?.id || "demo-account";
+    const tier = await evaluationTierFor(accountId);
+
+    // The free Social Snapshot is one per email. Paid accounts are unlimited.
+    if (tier === "social_snapshot") {
+      const limit = Number(process.env.FREE_SNAPSHOTS_PER_EMAIL || 1);
+      const used = await geDb.countFreeSnapshotsByEmail(email);
+      if (used >= limit) {
+        return res.status(402).json({
+          error: "You've used your free evaluation for this email. Sign in and start a Growth Plan for unlimited audits.",
+          code: "FREE_LIMIT_REACHED",
+          status: 402,
+          used,
+          limit,
+          upgrade_tier: "growth_plan",
+        });
+      }
+    }
 
     // Create job in database
-    const jobResult = await geDb.createJob(accountId, "social_snapshot", { handle, platform, category, email });
+    const jobResult = await geDb.createJob(accountId, tier, { handle, platform, category, email });
     const jobId = jobResult.jobId;
 
     // Process asynchronously (fire-and-forget)
-    jobQueue.processJob(jobId, accountId, "social_snapshot", { handle, platform, category, email })
+    jobQueue.processJob(jobId, accountId, tier, { handle, platform, category, email })
       .catch(err => console.error(`[Growth Engine] Async job ${jobId} error:`, err));
 
-    res.json({ job_id: jobId, status: "queued" });
+    res.json({ job_id: jobId, status: "queued", tier });
   } catch (err) {
     console.error("[Growth Engine] Queue error:", err);
     sendError(res, 500, "JOB_QUEUE_ERROR", err.message);
@@ -208,6 +250,63 @@ router.get("/reports/:reportId", async (req, res) => {
     const report = await geDb.getReport(req.params.reportId);
     if (!report) return res.status(404).json({ error: "Report not found" });
     res.json(report);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Competitor comparison — Growth Plan and above. Scores up to five handles
+// with the same deterministic scorer and stores the result on the report.
+router.post("/reports/:reportId/competitors", authMiddleware, async (req, res) => {
+  try {
+    const report = await geDb.getReport(req.params.reportId);
+    if (!report) return sendError(res, 404, "REPORT_NOT_FOUND", "Report not found");
+    if (report.accountId !== req.user.id) return sendError(res, 403, "NOT_YOUR_REPORT", "This report belongs to another account");
+    const access = await billingManager.checkEntitlement(req.user.id, "growth_plan");
+    if (!access.hasAccess) return res.status(402).json({ error: "Competitor comparison is part of the Growth Plan.", code: "UPGRADE_REQUIRED", required_tier: "growth_plan", status: 402 });
+    const handles = Array.isArray(req.body.handles) ? req.body.handles : [];
+    if (!handles.length || handles.length > MAX_COMPETITORS) return sendError(res, 400, "INVALID_HANDLES", `Provide 1–${MAX_COMPETITORS} competitor handles`);
+    const comparison = await compareCompetitors({
+      handle: report.business.handle, platform: report.business.platform, category: report.business.category, handles,
+    });
+    // The owner's row should match the report they're looking at, not a re-pull.
+    const own = report.reportBody?.scores;
+    if (own && Number.isFinite(own.overall)) {
+      comparison.you.overall = own.overall;
+      comparison.you.dimensions = (own.dimensions || []).map((d) => ({ label: d.label, score: d.score }));
+      const scored = comparison.competitors.filter((c) => c.ok);
+      comparison.rank = { position: [own.overall, ...scored.map((c) => c.overall)].sort((a, b) => b - a).indexOf(own.overall) + 1, of: scored.length + 1 };
+    }
+    await geDb.patchReportBody(report.reportId, { competitors: comparison });
+    res.json(comparison);
+  } catch (err) {
+    sendError(res, 500, "COMPETITOR_ERROR", err.message);
+  }
+});
+
+// Score history for a handle (signed-in accounts only — anonymous runs aren't linked)
+router.get("/account/history", authMiddleware, async (req, res) => {
+  try {
+    const { handle, platform } = req.query;
+    if (!handle) return sendError(res, 400, "INVALID_HANDLE", "handle is required");
+    res.json({ handle, platform: platform || "instagram", history: await geDb.listScoreHistory(req.user.id, handle, platform || "instagram") });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Category baseline status (public; powers the "N profiles scored" copy)
+router.get("/baselines", async (req, res) => {
+  try {
+    res.json(await geDb.getBaselineSummary());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+router.get("/baselines/:category", async (req, res) => {
+  try {
+    const base = await geDb.getCategoryBaseline(req.params.category);
+    res.json(base || { n: 0, min_n: 20, ready: false });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
