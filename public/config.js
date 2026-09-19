@@ -4,7 +4,7 @@
 // including auth (/auth/login, /auth/signup).
 window.SCALECRAFT_CONFIG = {
   useMock: false,
-  apiBase: '/api/growth-engine/v1',
+  apiBase: 'https://discerning-wisdom-production-6696.up.railway.app/api/growth-engine/v1',
   pollIntervalMs: 2000,
   // Platforms the backend's validateEvaluationRequest accepts today.
   // Others still render in the form but are marked "soon" and can't be submitted.
