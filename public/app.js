@@ -183,10 +183,10 @@
           </div>
           <div class="form-card" id="form">
             <h3>Score my profile</h3>
-            <div class="sub">Five fields. Nothing else.</div>
+            <div class="sub">See how you stack up against competitors.</div>
             <form id="evalForm" novalidate>
               <div class="field">
-                <div class="label">Handle</div>
+                <div class="label">Your handle</div>
                 <div class="handle-wrap"><div class="at">@</div><input type="text" name="handle" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="yourstudio" value="${prefill}"></div>
               </div>
               <div class="field">
@@ -201,6 +201,12 @@
                   <select name="category">${raw(CATEGORIES.map(([k, n]) => h`<option value="${k}" ${k === category ? 'selected' : ''}>${n}</option>`).join(''))}</select>
                   <span class="change">CHANGE</span>
                 </div>
+              </div>
+              <div class="field">
+                <div class="label">Competitor handles (optional)</div>
+                <div class="sub-label">Compare against 1-2 competitors. Same platform.</div>
+                <input type="text" name="competitor1" placeholder="@competitor1" autocapitalize="none" spellcheck="false">
+                <input type="text" name="competitor2" placeholder="@competitor2" autocapitalize="none" spellcheck="false" style="margin-top: 8px;">
               </div>
               <div class="field">
                 <div class="label">Where to send the report</div>
@@ -223,16 +229,19 @@
     form.addEventListener('submit', async e => {
       e.preventDefault();
       const err = form.querySelector('#formError');
+      const competitors = [form.competitor1.value.replace(/^@/, '').trim(), form.competitor2.value.replace(/^@/, '').trim()].filter(Boolean);
       const payload = {
         handle: form.handle.value.replace(/^@/, '').trim(),
         platform: chosenPlatform,
         category: form.category.value,
-        email: form.email.value.trim()
+        email: form.email.value.trim(),
+        competitors: competitors.length > 0 ? competitors : null
       };
       const problems = [];
       if (!/^[A-Za-z0-9._-]{1,60}$/.test(payload.handle)) problems.push('a handle (letters, numbers, dots or underscores)');
       if (!supported(payload.platform)) { err.textContent = platName(payload.platform) + " isn't scored yet — Instagram and X are live today."; err.hidden = false; return; }
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.email)) problems.push('an email we can send the report to');
+      if (competitors.length > 0 && competitors.some(c => !/^[A-Za-z0-9._-]{1,60}$/.test(c))) problems.push('valid competitor handles');
       if (problems.length) { err.textContent = 'We need ' + problems.join(' and ') + '.'; err.hidden = false; return; }
       err.hidden = true;
       sset('sc_form', payload);
