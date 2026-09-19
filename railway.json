@@ -1,12 +1,14 @@
 {
-  "name": "futureEng Growth Engine",
-  "description": "AI-powered social media audit backend",
+  "$schema": "https://railway.app/railway.schema.json",
   "build": {
-    "builder": "nixpacks"
+    "builder": "NIXPACKS",
+    "buildCommand": "cd server && npm ci --omit=dev"
   },
   "deploy": {
     "startCommand": "cd server && npm start",
-    "restartPolicyType": "on_failure",
+    "healthcheckPath": "/api/growth-engine/v1/health",
+    "healthcheckTimeout": 120,
+    "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 5
   }
 }

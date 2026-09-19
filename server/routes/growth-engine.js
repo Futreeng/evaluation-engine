@@ -259,10 +259,15 @@ router.get("/job/:jobId", async (req, res) => {
 });
 
 // Get report (no auth for demo)
-router.get("/reports/:reportId", async (req, res) => {
+router.get("/reports/:reportId", optionalAuth, async (req, res) => {
   try {
     const report = await geDb.getReport(req.params.reportId);
     if (!report) return res.status(404).json({ error: "Report not found" });
+    // Free snapshots are link-shareable (the id is unguessable). Paid reports
+    // belong to the account that paid for them.
+    if (report.tier && report.tier !== "social_snapshot" && report.accountId !== req.user?.id) {
+      return sendError(res, req.user ? 403 : 401, req.user ? "NOT_YOUR_REPORT" : "MISSING_TOKEN", "Sign in to view this report");
+    }
 
     // Compatibility: add `overall` field for frontend testing
     // Frontend looks for result.overall; we mirror reportBody.narrative here

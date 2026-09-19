@@ -539,6 +539,7 @@
       try { report = normalizeReport(await api('/reports/' + encodeURIComponent(reportId)), reportId); sset('sc_report_' + reportId, report); }
       catch (e) {
         if (e.status === 401) return;
+        if (e.status === 403) { $view.innerHTML = h`<div class="center-msg"><h2>This report belongs to another account.</h2><a href="#/reports">Your reports</a></div>`; return; }
         $view.innerHTML = h`<div class="center-msg"><h2>We couldn't find that report.</h2><a href="#/">Score a profile</a></div>`; return;
       }
     }
