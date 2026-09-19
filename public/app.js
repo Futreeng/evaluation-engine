@@ -824,7 +824,7 @@
           </div>
           <div class="form-error" id="signinError" hidden></div>
           <button class="btn" type="submit">Sign in</button>
-          <div class="alt">No account yet? <a href="#/" data-scroll="form">Score a profile free</a></div>
+          <div class="alt">No account yet? <a href="#/signup">Create one</a></div>
         </form>
       </div></div>`;
     const form = $view.querySelector('#signinForm');
@@ -846,6 +846,49 @@
       } catch (e2) {
         err.textContent = e2.status === 401 ? "That email and password don't match." : (e2.message || 'Sign-in failed.');
         err.hidden = false; btn.disabled = false; btn.textContent = 'Sign in';
+      }
+    });
+  }
+
+  // ------------------------------------------------------------ sign up
+  function viewSignup() {
+    renderHeader('signup');
+    const next = sget('sc_next', '#/');
+    $view.innerHTML = h`
+      <div class="signin"><div class="box">
+        <div class="brandname">Scalecraft</div>
+        <form class="card" id="signupForm" novalidate>
+          <h2>Create account</h2>
+          <div class="field"><div class="label">Company / Name</div><input type="text" name="company_name" placeholder="Sunrise Fitness" required></div>
+          <div class="field"><div class="label">Email</div><input type="email" name="email" autocomplete="email" placeholder="maya@sunrisefitness.co" required></div>
+          <div class="field"><div class="label">Password</div><input type="password" name="password" autocomplete="new-password" placeholder="••••••••••" required></div>
+          <div class="field"><div class="label">Confirm password</div><input type="password" name="password_confirm" autocomplete="new-password" placeholder="••••••••••" required></div>
+          <div class="form-error" id="signupError" hidden></div>
+          <button class="btn" type="submit">Create account</button>
+          <div class="alt">Already signed up? <a href="#/signin">Sign in here</a></div>
+        </form>
+      </div></div>`;
+    const form = $view.querySelector('#signupForm');
+    form.addEventListener('submit', async e => {
+      e.preventDefault();
+      const err = form.querySelector('#signupError');
+      const email = form.email.value.trim(), company = form.company_name.value.trim(), pass = form.password.value, passconf = form.password_confirm.value;
+      if (!email || !company || !pass) { err.textContent = 'All fields required.'; err.hidden = false; return; }
+      if (pass !== passconf) { err.textContent = 'Passwords don't match.'; err.hidden = false; return; }
+      if (pass.length < 8) { err.textContent = 'Password must be at least 8 characters.'; err.hidden = false; return; }
+      err.hidden = true;
+      const btn = form.querySelector('button[type=submit]'); btn.disabled = true; btn.textContent = 'Creating…';
+      try {
+        const res = await api('/auth/signup', { method: 'POST', body: JSON.stringify({ email, password: pass, company_name: company }) }, { allow401: true });
+        const t = res.token || res.access_token || res.jwt;
+        if (!t) throw new Error('No token in response');
+        setToken(t);
+        sset('sc_form', { email });
+        sessionStorage.removeItem('sc_next');
+        go(next && next !== '#/signup' ? next : '#/');
+      } catch (e2) {
+        err.textContent = e2.status === 409 ? 'Email already registered.' : (e2.message || 'Signup failed.');
+        err.hidden = false; btn.disabled = false; btn.textContent = 'Create account';
       }
     });
   }
@@ -893,6 +936,7 @@
     if (parts[0] === 'pricing') return viewPricing();
     if (parts[0] === 'reports') return viewReports();
     if (parts[0] === 'signin') return viewSignin();
+    if (parts[0] === 'signup') return viewSignup();
     renderHeader('landing');
     $view.innerHTML = h`<div class="center-msg"><h2>Nothing here.</h2><a href="#/">Back to start</a></div>`;
   }
