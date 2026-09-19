@@ -1,6 +1,6 @@
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
-const geDb = require("./growth_engine_db_select");
+const geDb = require("./growth_engine_db");
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const TOKEN_EXPIRY = "7d";

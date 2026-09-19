@@ -11,7 +11,7 @@
  * Production: Integrates with real Stripe API
  */
 
-const geDb = require("./growth_engine_db_select");
+const geDb = require("./growth_engine_db");
 const crypto = require("crypto");
 
 // Tier pricing (in cents, monthly)

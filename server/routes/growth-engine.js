@@ -1,6 +1,6 @@
 const express = require("express");
 const { v4: uid } = require("uuid");
-const geDb = require("../growth_engine_db_select");
+const geDb = require("../growth_engine_db");
 const { evaluateProfile } = require("../growth_engine_evaluator");
 const BillingManager = require("../growth_engine_billing");
 const JobQueue = require("../growth_engine_job_queue");
@@ -191,12 +191,6 @@ async function evaluationTierFor(accountId) {
 router.post("/evaluate/social-snapshot", optionalAuth, validateEvaluationRequest, async (req, res) => {
   try {
     const { handle, platform, category, email } = req.body;
-    // Optional competitor handles from the form. Stored with the job; the
-    // comparison itself is a Growth Plan feature and runs after the report.
-    const competitors = (Array.isArray(req.body.competitors) ? req.body.competitors : [])
-      .map((h) => String(h || "").replace(/^@/, "").trim().toLowerCase())
-      .filter((h) => /^[a-z0-9._-]{1,60}$/.test(h) && h !== String(handle).toLowerCase())
-      .slice(0, MAX_COMPETITORS);
     const accountId = req.user?.id || "demo-account";
     const tier = await evaluationTierFor(accountId);
 
@@ -217,11 +211,11 @@ router.post("/evaluate/social-snapshot", optionalAuth, validateEvaluationRequest
     }
 
     // Create job in database
-    const jobResult = await geDb.createJob(accountId, tier, { handle, platform, category, email, competitors });
+    const jobResult = await geDb.createJob(accountId, tier, { handle, platform, category, email });
     const jobId = jobResult.jobId;
 
     // Process asynchronously (fire-and-forget)
-    jobQueue.processJob(jobId, accountId, tier, { handle, platform, category, email, competitors })
+    jobQueue.processJob(jobId, accountId, tier, { handle, platform, category, email })
       .catch(err => console.error(`[Growth Engine] Async job ${jobId} error:`, err));
 
     res.json({ job_id: jobId, status: "queued", tier });
