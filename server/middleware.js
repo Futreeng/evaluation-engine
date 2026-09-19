@@ -74,7 +74,7 @@ function validateEvaluationRequest(req, res, next) {
     return sendError(res, 400, "INVALID_PLATFORM", "Platform is required");
   }
 
-  const validPlatforms = ["twitter", "x", "instagram", "ig"];
+  const validPlatforms = ["twitter", "x", "instagram", "ig", "tiktok"];
   if (!validPlatforms.includes(platform.toLowerCase())) {
     return sendError(
       res,
@@ -116,7 +116,7 @@ function validateSubscriptionRequest(req, res, next) {
     return sendError(res, 400, "INVALID_TIER", "Tier is required");
   }
 
-  const validTiers = ["social_snapshot", "growth_plan", "business_evaluator", "agency"];
+  const validTiers = ["social_snapshot", "growth_plan", "growth_plan_pro", "business_growth", "business_evaluator", "agency"];
   if (!validTiers.includes(tier)) {
     return sendError(
       res,

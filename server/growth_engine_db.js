@@ -75,6 +75,15 @@ function initSchema() {
   `);
   db.run(`CREATE INDEX IF NOT EXISTS idx_baselines_cat ON growth_engine_baselines (category, platform)`);
 
+  db.run(`
+    CREATE TABLE IF NOT EXISTS growth_engine_waitlist (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL,
+      platform TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    )
+  `);
+
   // Reports table: stores generated reports
   db.run(`
     CREATE TABLE IF NOT EXISTS growth_engine_reports (
@@ -220,6 +229,27 @@ async function getBaselineSummary() {
   let total = 0;
   if (result.length) for (const [c, n] of result[0].values) { by_category[c] = Number(n); total += Number(n); }
   return { total, by_category };
+}
+
+// GDPR/CCPA: remove the account and everything written for it.
+async function deleteAccount(accountId) {
+  if (!db) throw new Error("Database not initialized");
+  const n = db.exec(`SELECT COUNT(*) FROM growth_engine_reports WHERE account_id = ?`, [accountId]);
+  const reports = n.length ? Number(n[0].values[0][0]) : 0;
+  for (const t of ["growth_engine_reports", "growth_engine_jobs", "growth_engine_tier_history", "growth_engine_entitlements", "entitlements"]) {
+    try { db.run(`DELETE FROM ${t} WHERE account_id = ?`, [accountId]); } catch { /* table/column may not exist in this schema */ }
+  }
+  try { db.run(`DELETE FROM entitlements WHERE user_id = ?`, [accountId]); } catch { /* sqlite schema uses account_id */ }
+  try { db.run(`DELETE FROM users WHERE user_id = ?`, [accountId]); } catch { /* users may live in the Convergence store */ }
+  saveDb();
+  return { deleted: true, reports };
+}
+
+async function addWaitlist(email, platform) {
+  if (!db) throw new Error("Database not initialized");
+  db.run(`INSERT OR REPLACE INTO growth_engine_waitlist (id, email, platform, created_at) VALUES (?, ?, ?, ?)`,
+    [`${platform}|${email}`, email, platform, Date.now()]);
+  saveDb();
 }
 
 // Free-tier quota: completed or in-flight snapshot jobs for an email
@@ -635,6 +665,8 @@ async function updateUserPassword(userId, passwordHash) {
 
 module.exports = {
   countFreeSnapshotsByEmail,
+  addWaitlist,
+  deleteAccount,
   recordBaseline,
   getCategoryBaseline,
   patchReportBody,

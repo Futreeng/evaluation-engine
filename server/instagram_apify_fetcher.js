@@ -123,6 +123,7 @@ async function analyzeInstagramAccountViaApify(rawHandle) {
   const bio = profile.biography || "";
   metrics.profile_clarity = {
     bio_length: bio.length,
+    bio_text: bio.slice(0, 300),
     bio_mentions_location: /\b(brooklyn|manhattan|queens|bronx|nyc|new york|[A-Z][a-z]+, [A-Z]{2}|📍)/i.test(bio) || !!posts.find((p) => p.location),
     bio_mentions_price: /\$\s?\d|\bfree\b|\btrial\b|\bintro\b/i.test(bio),
     bio_has_cta: /\b(book|sign up|join|dm|link below|tap|schedule|reserve)\b/i.test(bio),

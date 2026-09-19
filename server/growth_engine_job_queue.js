@@ -73,10 +73,13 @@ class JobQueue {
       const evaluator = require("./growth_engine_evaluator");
       let reportBody;
 
+      const onStage = async (stage, step) => {
+        try { await geDb.updateJobStatus(jobId, "running", { stage: `${stage}:${step}` }); } catch { /* cosmetic */ }
+      };
       if (tier === "social_snapshot") {
-        reportBody = await evaluator.evaluateTier0(accountId, inputParams);
+        reportBody = await evaluator.evaluateTier0(accountId, inputParams, onStage);
       } else if (tier === "growth_plan") {
-        reportBody = await evaluator.evaluateTier1(accountId, inputParams);
+        reportBody = await evaluator.evaluateTier1(accountId, inputParams, onStage);
       } else if (tier === "business_evaluator") {
         reportBody = await evaluator.evaluateTier2(accountId, inputParams);
       } else {

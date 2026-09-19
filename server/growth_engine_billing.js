@@ -17,8 +17,10 @@ const crypto = require("crypto");
 // Tier pricing (in cents, monthly)
 const TIER_PRICING = {
   social_snapshot: 0, // Free
-  growth_plan: 3900, // $39/month
-  business_evaluator: 9900, // $99/month
+  growth_plan: 1200, // $12/month — creators
+  growth_plan_pro: 2900, // $29/month — creators, every platform scored together
+  business_growth: 3900, // $39/month — businesses (phase 2)
+  business_evaluator: 9900, // $99/month — businesses
   agency: 24900, // $249/month base
 };
 
@@ -181,7 +183,7 @@ class BillingManager {
     const ent = await geDb.getOrCreateEntitlement(accountId);
 
     // Tier hierarchy: social_snapshot < growth_plan < business_evaluator < agency
-    const tierHierarchy = ["social_snapshot", "growth_plan", "business_evaluator", "agency"];
+    const tierHierarchy = ["social_snapshot", "growth_plan", "growth_plan_pro", "business_growth", "business_evaluator", "agency"];
     const requiredIndex = tierHierarchy.indexOf(requiredTier);
     const currentIndex = tierHierarchy.indexOf(ent.currentTier);
 
@@ -240,72 +242,81 @@ class BillingManager {
    * Get pricing information
    */
   getPricing() {
+    const yr = (cents) => Math.floor((cents * 12 * (1 - ANNUAL_DISCOUNT)) / 100);
     return {
+      audience: "creators",
       tiers: [
         {
           tier: "social_snapshot",
-          name: "Social Snapshot",
-          description: "Free tier - 1 evaluation",
+          name: "Snapshot",
+          description: "See where your account stands and why.",
           monthlyPrice: 0,
           annualPrice: 0,
+          note: "No card, ever",
           features: [
-            "1 social profile audit",
-            "4 dimension scores",
-            "3-phase growth preview",
-            "Teased recommendations",
-            "Email capture",
+            "Your score and the four dimensions, explained",
+            "Your best and worst posts",
+            "The first move of each 30-day phase",
+            "One account, once",
           ],
+          cta: "Score my account",
         },
         {
           tier: "growth_plan",
           name: "Growth Plan",
-          description: "Full social growth strategy",
-          monthlyPrice: 39,
-          annualPrice: Math.floor((3900 * 12 * (1 - ANNUAL_DISCOUNT)) / 100),
+          description: "The whole 90 days, written from your own posts.",
+          monthlyPrice: TIER_PRICING.growth_plan / 100,
+          annualPrice: yr(TIER_PRICING.growth_plan),
+          popular: true,
           features: [
-            "Unlimited audits",
-            "Full 90-day content calendar",
-            "13 weeks of post ideas",
-            "LLM production prompts",
-            "Competitor comparison",
-            "Weekly refresh",
+            "Every move, 13 in all, with the reason for each",
+            "Your 12-week posting calendar with a brief per post",
+            "Up to 5 competitors, scored the same way",
+            "Score history and weekly refresh",
+            "Unlimited accounts",
           ],
+          cta: "Start Growth Plan",
+        },
+        {
+          tier: "growth_plan_pro",
+          name: "Growth Plan Pro",
+          description: "Every platform you're on, scored together.",
+          monthlyPrice: TIER_PRICING.growth_plan_pro / 100,
+          annualPrice: yr(TIER_PRICING.growth_plan_pro),
+          optional: true,
+          features: [
+            "Everything in Growth Plan",
+            "All your platforms in one report",
+            "Priority refresh",
+          ],
+          cta: "Start Pro",
+        },
+      ],
+      business: [
+        {
+          tier: "business_growth",
+          name: "Business Growth Plan",
+          description: "Scored against your category; the plan is written for bookings.",
+          monthlyPrice: TIER_PRICING.business_growth / 100,
+          annualPrice: yr(TIER_PRICING.business_growth),
+          features: ["Everything in Growth Plan", "Category benchmarks for businesses", "Moves written for bookings, not followers"],
+          cta: "Start Business Growth Plan",
         },
         {
           tier: "business_evaluator",
           name: "Business Evaluator",
-          description: "Cross-functional growth plan",
-          monthlyPrice: 99,
-          annualPrice: Math.floor((9900 * 12 * (1 - ANNUAL_DISCOUNT)) / 100),
-          features: [
-            "Everything in Growth Plan",
-            "Margin-aware recommendations",
-            "Action plan checklist",
-            "Business reconciliation",
-            "Bi-weekly refresh",
-            "Inventory impact analysis",
-          ],
-        },
-        {
-          tier: "agency",
-          name: "Agency / Done-For-You",
-          description: "Multi-client management",
-          monthlyPrice: 249,
-          features: [
-            "Everything in Business Evaluator",
-            "Manage unlimited clients",
-            "White-label reports",
-            "API access",
-            "Bulk content generation",
-            "Custom integrations",
-          ],
-          note: "Base price + $25/client/month",
+          description: "The plan answers to the P&L, not just the feed.",
+          monthlyPrice: TIER_PRICING.business_evaluator / 100,
+          annualPrice: yr(TIER_PRICING.business_evaluator),
+          features: ["Everything in Business Growth Plan", "Margin-aware recommendations", "Action plan checklist with owners and dates", "Bi-weekly refresh"],
+          cta: "Start Business Evaluator",
         },
       ],
       discount: {
         annual: `${Math.round(ANNUAL_DISCOUNT * 100)}% off`,
         note: "Annual billing includes 25% discount",
       },
+      refund: "Not useful in the first 7 days? Reply to any email and we refund it.",
     };
   }
 

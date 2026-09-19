@@ -19,7 +19,42 @@ const TARGETS = {
   retail:                { posts_per_week: 4.5, max_gap_days: 7, video_share: 0.3, engagement_rate: 1.5, comment_share: 0.03, profile: { location: 20, price: 15, cta: 15, link: 10, booking_link: 30, highlights: 10 } },
   professional_services: { posts_per_week: 2.5, max_gap_days: 10, video_share: 0.4, engagement_rate: 1.2, comment_share: 0.05, profile: { location: 20, price: 10, cta: 25, link: 10, booking_link: 25, highlights: 10 } },
 };
-const DEFAULT_TARGET = TARGETS.fitness;
+
+// Creator niches. Profile Clarity is creator-shaped: what you're about, who
+// it's for, and a link that goes somewhere worth going — not location/price.
+const CREATOR = (posts_per_week, video_share, engagement_rate, comment_share = 0.04) => ({
+  posts_per_week, max_gap_days: 7, video_share, engagement_rate, comment_share,
+  creator: true,
+  profile: { substance: 25, link: 20, destination_link: 25, cta: 15, highlights: 15 },
+});
+const CREATOR_NICHES = {
+  fitness_creator:  CREATOR(4.5, 0.7, 3.0),
+  food_cooking:     CREATOR(4.0, 0.6, 2.5),
+  fashion:          CREATOR(4.5, 0.5, 2.0),
+  beauty_skincare:  CREATOR(4.0, 0.6, 2.4),
+  travel:           CREATOR(3.5, 0.6, 2.8),
+  comedy_entertainment: CREATOR(5.0, 0.9, 4.0, 0.06),
+  education_howto:  CREATOR(3.5, 0.7, 2.2, 0.05),
+  lifestyle_vlog:   CREATOR(4.0, 0.7, 2.6),
+  music:            CREATOR(3.5, 0.8, 3.0),
+  gaming:           CREATOR(4.5, 0.9, 3.5, 0.06),
+  tech_gadgets:     CREATOR(3.0, 0.7, 2.0, 0.05),
+  finance_business: CREATOR(3.0, 0.5, 1.8, 0.05),
+  parenting_family: CREATOR(4.0, 0.6, 2.6),
+  art_design:       CREATOR(3.5, 0.5, 3.2),
+  sports:           CREATOR(4.5, 0.8, 3.0),
+  pets:             CREATOR(4.5, 0.8, 4.0),
+  other:            CREATOR(4.0, 0.6, 2.5),
+};
+Object.assign(TARGETS, CREATOR_NICHES);
+const DEFAULT_TARGET = TARGETS.other;
+
+// Anything not in TARGETS (a typed "Other" niche) scores against the general
+// creator target and the report says so.
+function targetFor(category) {
+  const key = String(category || "").toLowerCase().trim();
+  return { target: TARGETS[key] || DEFAULT_TARGET, known: !!TARGETS[key] };
+}
 
 const clamp01 = (x) => Math.max(0, Math.min(1, Number.isFinite(x) ? x : 0));
 const pct = (x) => Math.round(clamp01(x) * 100);
@@ -91,6 +126,19 @@ function scoreProfileClarity(pc, t) {
   let s = 0;
   const hits = [], misses = [];
   const check = (ok, key, name) => { if (ok) { s += w[key]; hits.push(name); } else misses.push(name); };
+  if (t.creator) {
+    check(num(pc.bio_length) >= 40, "substance", "a bio that says what you're about");
+    check(!!pc.external_url, "link", "a link");
+    check(!!pc.external_url_is_booking || /youtu|tiktok|spotify|substack|beacons|linktr|stan\.store|patreon|gumroad|shop|newsletter|podcast|discord|twitch/i.test(pc.external_url || ""), "destination_link", "a link that goes somewhere worth going");
+    check(!!pc.bio_has_cta || /\b(follow|subscribe|watch|listen|join|dm|new (video|drop|episode))\b/i.test(pc.bio_text || ""), "cta", "a next step in your bio");
+    check(num(pc.highlight_count) >= 1, "highlights", "story highlights");
+    const total = Object.values(w).reduce((a, b) => a + b, 0);
+    return {
+      label: "Profile Clarity", score: pct(s / total),
+      evidence: `has: ${hits.join(", ") || "none"}; missing: ${misses.join(", ") || "nothing"}`,
+      parts: { substance: num(pc.bio_length) >= 40 ? w.substance : 0, link: pc.external_url ? w.link : 0 },
+    };
+  }
   check(!!pc.bio_mentions_location, "location", "location in bio");
   check(!!pc.bio_mentions_price, "price", "price or offer in bio");
   check(!!pc.bio_has_cta, "cta", "a next step in bio");
@@ -115,7 +163,7 @@ function scoreProfile(realData, category) {
   // evaluator's formatted view of it ({ metrics, recent_activity }).
   const m = realData && (realData.analysis || realData.metrics);
   if (!m || !m.posting_frequency || !m.engagement || !m.content) return null;
-  const t = TARGETS[category] || DEFAULT_TARGET;
+  const { target: t, known } = targetFor(category);
   const pc = m.profile_clarity || {};
   const posts = (realData.recent_posts || realData.recent_activity || []).map((p) => ({ caption: p.caption ?? p.caption_preview ?? "" }));
   const dims = [
@@ -125,7 +173,7 @@ function scoreProfile(realData, category) {
     scoreProfileClarity(pc, t),
   ];
   const overall = Math.round(dims.reduce((a, d) => a + d.score, 0) / dims.length);
-  return { overall, dimensions: dims, targets: t, method: "deterministic-v1" };
+  return { overall, dimensions: dims, targets: t, method: "deterministic-v1", niche_known: known, creator: !!t.creator };
 }
 
 /**
@@ -181,4 +229,4 @@ function rankPosts(posts, { top = 3, bottom = 3 } = {}) {
   };
 }
 
-module.exports = { scoreProfile, rankPosts, TARGETS };
+module.exports = { scoreProfile, rankPosts, targetFor, TARGETS, CREATOR_NICHES };

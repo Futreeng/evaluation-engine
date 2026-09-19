@@ -181,7 +181,7 @@ async function evaluationTierFor(accountId) {
   try {
     const ent = await geDb.getOrCreateEntitlement(accountId);
     const t = ent?.current_tier || ent?.currentTier || "social_snapshot";
-    if (t === "growth_plan" || t === "business_evaluator" || t === "agency") return "growth_plan";
+    if (t && t !== "social_snapshot") return "growth_plan"; // every paid tier runs the plan pipeline today
   } catch (err) {
     console.warn("[Growth Engine] Entitlement lookup failed, defaulting to snapshot:", err.message);
   }
@@ -237,9 +237,12 @@ router.get("/job/:jobId", async (req, res) => {
     const job = await geDb.getJob(req.params.jobId);
     if (!job) return res.status(404).json({ error: "Job not found" });
 
+    const stageMatch = /^(finding|reading|scoring|writing):(\d)$/.exec(job.stage || "");
     const response = {
       status: job.status,
-      stage: job.stage || job.status,
+      stage: stageMatch ? stageMatch[1] : (job.stage || job.status),
+      step: stageMatch ? Number(stageMatch[2]) : (job.status === "running" ? 1 : null),
+      total_steps: 4,
       created_at: job.created_at,
       updated_at: job.updated_at,
       error: job.error,
@@ -319,6 +322,46 @@ router.get("/account/history", authMiddleware, async (req, res) => {
     res.json({ handle, platform: platform || "instagram", history: await geDb.listScoreHistory(req.user.id, handle, platform || "instagram") });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete account + everything written for it (settings → "Delete my account")
+router.delete("/account", authMiddleware, async (req, res) => {
+  try {
+    res.json(await geDb.deleteAccount(req.user.id));
+  } catch (err) {
+    sendError(res, 500, "DELETE_ERROR", err.message);
+  }
+});
+
+// Coming-soon platform waitlist
+router.post("/waitlist", async (req, res) => {
+  try {
+    const email = String(req.body.email || "").trim().toLowerCase();
+    const platform = String(req.body.platform || "").trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return sendError(res, 400, "INVALID_EMAIL", "Email is required");
+    if (!/^[a-z]{1,30}$/.test(platform)) return sendError(res, 400, "INVALID_PLATFORM", "Platform is required");
+    await geDb.addWaitlist(email, platform);
+    res.json({ ok: true, platform });
+  } catch (err) {
+    sendError(res, 500, "WAITLIST_ERROR", err.message);
+  }
+});
+
+// Mark a move done / not done on a report the caller owns
+router.post("/reports/:reportId/moves", authMiddleware, async (req, res) => {
+  try {
+    const report = await geDb.getReport(req.params.reportId);
+    if (!report) return sendError(res, 404, "REPORT_NOT_FOUND", "Report not found");
+    if (report.accountId !== req.user.id) return sendError(res, 403, "NOT_YOUR_REPORT", "This report belongs to another account");
+    const key = String(req.body.key || "");
+    if (!/^[a-z0-9_-]{1,40}$/i.test(key)) return sendError(res, 400, "INVALID_MOVE", "key is required");
+    const done = { ...(report.reportBody?.moves_done || {}) };
+    if (req.body.done) done[key] = Date.now(); else delete done[key];
+    await geDb.patchReportBody(report.reportId, { moves_done: done });
+    res.json({ moves_done: done });
+  } catch (err) {
+    sendError(res, 500, "MOVE_ERROR", err.message);
   }
 });
 

@@ -486,7 +486,7 @@ function splitStructuredBlock(text) {
   return { narrative: src.replace(m[0], "").trim(), structured };
 }
 
-async function runSnapshot(accountId, inputParams) {
+async function runSnapshot(accountId, inputParams, onStage = () => {}) {
   const { claudeKey, claudeWorkspaceId, geminiKey, groqKey } = getDecryptedKeys(accountId);
   const openaiKey = process.env.OPENAI_API_KEY;
   if (!claudeKey && !geminiKey && !groqKey && !openaiKey) {
@@ -500,7 +500,9 @@ async function runSnapshot(accountId, inputParams) {
   let computed = null;
   let postInsights = null;
   try {
+    await onStage("finding", 1);
     const realData = await getRealPostData(handle, platform, category);
+    await onStage("reading", 2);
     postSummary = JSON.stringify(realData); // compact: every token counts against free-tier TPM caps
     computed = scoreProfile(realData, category); // null for fetchers without the metric shape (Twitter)
     postInsights = rankPosts(realData.recent_activity || realData.recent_posts);
@@ -511,6 +513,7 @@ async function runSnapshot(accountId, inputParams) {
     // instead of a "best practices" report that scores nothing real.
     throw err;
   }
+  await onStage("scoring", 3);
   const benchmarks = CATEGORY_BENCHMARKS[category] || CATEGORY_BENCHMARKS.fitness;
 
   const templateVars = {
@@ -562,6 +565,7 @@ async function runSnapshot(accountId, inputParams) {
     PERSONA_B_RESPONSE: personaBResponse,
   };
 
+  await onStage("writing", 4);
   const mergePrompt = interpolateTemplate(PERSONA_PROMPTS.tier0.merge, mergeTemplateVars);
 
   // Merge: Claude → Gemini → Groq → OpenAI
@@ -628,6 +632,8 @@ async function runSnapshot(accountId, inputParams) {
           summary: typeof structured?.summary === "string" ? structured.summary : overallLine,
           dimensions: computed.dimensions.map((d) => ({ label: d.label, score: d.score, explanation: findExpl(d.label) || d.evidence, evidence: d.evidence, parts: d.parts })),
           method: computed.method,
+          niche_known: computed.niche_known,
+          creator: computed.creator,
         }
       : { ...llmScores, category_avg: null, summary: typeof structured?.summary === "string" ? structured.summary : null, method: "llm" };
     const phases = Array.isArray(structured?.phases) ? structured.phases : [];
@@ -660,14 +666,15 @@ async function runSnapshot(accountId, inputParams) {
   return { reportBody, structured, postSummary, benchmarks, keys: { claudeKey, claudeWorkspaceId, geminiKey, groqKey, openaiKey } };
 }
 
-async function evaluateTier0(accountId, inputParams) {
-  const { reportBody } = await runSnapshot(accountId, inputParams);
+async function evaluateTier0(accountId, inputParams, onStage) {
+  const { reportBody } = await runSnapshot(accountId, inputParams, onStage);
   return reportBody;
 }
 
-async function evaluateTier1(accountId, inputParams) {
+async function evaluateTier1(accountId, inputParams, onStage = () => {}) {
   // Tier 1: Growth Plan — the free snapshot plus every locked item, from the same data.
-  const { reportBody, structured, postSummary, benchmarks, keys } = await runSnapshot(accountId, inputParams);
+  const { reportBody, structured, postSummary, benchmarks, keys } = await runSnapshot(accountId, inputParams, onStage);
+  await onStage("writing", 4);
   const { handle, platform, category } = inputParams;
   const { claudeKey, claudeWorkspaceId, geminiKey, groqKey, openaiKey } = keys;
 

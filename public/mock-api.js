@@ -8,15 +8,9 @@
   const STAGE_MS = M.stageMs ?? 2200;
   const FAIL_KEY = (M.failIfHandleIncludes || 'private').toLowerCase();
 
-  const STAGES = ['Profile clarity', 'Posting consistency', 'Content mix', 'Engagement quality'];
+  const STAGES = ['finding', 'reading', 'scoring', 'writing'];
 
-  const CATEGORY_NAMES = {
-    boutique_fitness: 'Boutique Fitness',
-    fitness: 'Fitness',
-    food_beverage: 'Food & Beverage',
-    retail: 'Retail',
-    professional_services: 'Professional Services'
-  };
+  const CATEGORY_NAMES = { fitness_creator: 'Fitness', food_cooking: 'Food & Cooking', lifestyle_vlog: 'Lifestyle & Vlog', other: 'Other', boutique_fitness: 'Boutique Fitness', retail: 'Retail' };
 
   const cal = slots => Array.from({ length: 28 }, (_, i) => slots.includes(i % 7));
 
@@ -31,8 +25,8 @@
         category_avg: 61,
         category_top_quartile: 78,
         category_sample_size: 1284,
-        summary: "Most of the gap is two things: how irregularly you post, and a bio that doesn't say where you are or what a first class costs.",
-        method: 'deterministic-v1',
+        summary: "Posting Consistency and Engagement Quality are driving most of the gap.",
+        method: 'deterministic-v1', niche_known: true, creator: true,
         dimensions: [
           {
             label: 'Posting Consistency', score: 35, category_avg: 58,
@@ -101,7 +95,7 @@
           }
         ]
       },
-      business: { handle, platform, category, category_name: catName },
+      business: { handle, platform, category, category_name: catName, followers: 12640167 },
       post_insights: {
         sample: 12, avg_engagement: 96,
         note: 'Your top three are all coach-on-camera reels posted before 8am on weekdays. The bottom three are class-schedule graphics posted on Fridays with no caption beyond the times.',
@@ -121,39 +115,24 @@
         cta_label: 'Unlock your full Growth Plan',
         target_tier: 'growth_plan',
         unlock_count: 12,
-        monthly_price: 39,
+        monthly_price: 12,
         description: '12 locked items: 11 more specific moves and the week-by-week posting calendar for all three phases, written against your own posts — not a template.'
       }
     };
   }
 
   const PRICING = {
+    audience: 'creators',
     discount: { annual: '25% off', note: 'Annual billing includes 25% discount' },
+    refund: 'Not useful in the first 7 days? Reply to any email and we refund it.',
     tiers: [
-      {
-        tier: 'social_snapshot', name: 'Social Snapshot', monthlyPrice: 0, note: 'No card, ever',
-        who: 'See where you stand and whether the plan is worth paying for.',
-        features: ['One profile audit', 'All four dimension scores', 'Category average comparison', 'Growth path preview — first move of each phase'],
-        cta: 'Score a profile'
-      },
-      {
-        tier: 'growth_plan', name: 'Growth Plan', monthlyPrice: 39, annualPrice: 351, popular: true,
-        who: 'For the owner doing their own social and tired of guessing what to post.',
-        features: ['Unlimited audits', 'Full 90-day calendar, week by week', 'Content prompts written from your own posts', 'Competitor analysis — 5 nearby accounts', 'Weekly refresh as your numbers move'],
-        cta: 'Start Growth Plan'
-      },
-      {
-        tier: 'business_evaluator', name: 'Business Evaluator', monthlyPrice: 99, annualPrice: 891,
-        who: 'For owners who want the plan to answer to the P&L, not just the feed.',
-        features: ['Everything in Growth Plan', 'Margin-aware recommendations', 'Action plan checklist with owners and dates', 'Business reconciliation — posts against revenue', 'Bi-weekly refresh'],
-        cta: 'Start Business Evaluator'
-      },
-      {
-        tier: 'agency', name: 'Agency / Done-For-You', monthlyPrice: 249, note: 'Base price + $25/client/month',
-        who: 'For studios and agencies running social for several clients at once.',
-        features: ['Everything in Business Evaluator', 'Manage unlimited clients', 'White-label reports', 'API access', 'Bulk content generation', 'Custom integrations'],
-        cta: 'Talk to us'
-      }
+      { tier: 'social_snapshot', name: 'Snapshot', monthlyPrice: 0, annualPrice: 0, note: 'One report per email', features: ['Your score and the four dimensions', 'Why each one landed where it did', 'Your best and worst posts', 'The first move of each phase'], cta: 'Score my account' },
+      { tier: 'growth_plan', name: 'Growth Plan', monthlyPrice: 12, annualPrice: 108, popular: true, features: ['Every move, 01 through 13', 'Your 12-week posting calendar', 'Competitor comparison, up to 5 handles', 'Weekly refresh and score history'], cta: 'Unlock the plan' },
+      { tier: 'growth_plan_pro', name: 'Growth Plan Pro', monthlyPrice: 29, annualPrice: 261, optional: true, features: ["Every platform you're on, scored together", 'Priority refresh — rescored within the hour', 'One plan that balances all of them'], cta: 'Choose Pro' }
+    ],
+    business: [
+      { tier: 'business_growth', name: 'Business', monthlyPrice: 39, annualPrice: 351, features: ['One business account, scored against its category', 'The booking-led plan and calendar', 'Weekly refresh'] },
+      { tier: 'business_evaluator', name: 'Business Pro', monthlyPrice: 99, annualPrice: 891, features: ['Up to five locations or accounts', 'Category benchmarks and competitor set', 'Priority refresh'] }
     ]
   };
 
@@ -234,15 +213,18 @@
     if (method === 'GET' && path === '/reports') return json(200, { reports: [...reports.values()] });
     if (method === 'GET' && path === '/entitlements') return json(200, entitlement);
     if (method === 'GET' && path === '/health') return json(200, { status: 'ok', mock: true });
+    if (method === 'POST' && path === '/waitlist') return json(200, { ok: true, platform: body.platform });
+    if (method === 'DELETE' && path === '/account') { entitlement = { account_id: 'acct_mock', current_tier: 'social_snapshot' }; return json(200, { deleted: true, reports: reports.size }); }
+    if (method === 'POST' && (m = path.match(/^\/reports\/([^/]+)\/moves$/))) { const r = reports.get(m[1]); if (!r) return json(404, { error: 'Report not found' }); r.moves_done = r.moves_done || {}; if (body.done) r.moves_done[body.key] = Date.now(); else delete r.moves_done[body.key]; return json(200, { moves_done: r.moves_done }); }
     if (method === 'GET' && path === '/billing/pricing') return json(200, PRICING);
     if (method === 'POST' && path === '/billing/subscribe') {
-      const tier = PRICING.tiers.find(t => t.tier === body.tier);
+      const tier = [...PRICING.tiers, ...PRICING.business].find(t => t.tier === body.tier);
       if (!tier) return json(400, { error: 'Unknown tier' });
       entitlement = { ...entitlement, current_tier: tier.tier, billing_cycle: body.billingCycle || 'monthly' };
       return json(200, { ok: true, entitlement });
     }
     if (method === 'POST' && path === '/billing/check-access') {
-      const order = ['social_snapshot', 'growth_plan', 'business_evaluator', 'agency'];
+      const order = ['social_snapshot', 'growth_plan', 'growth_plan_pro', 'business_growth', 'business_evaluator', 'agency'];
       const ok = order.indexOf(entitlement.current_tier) >= order.indexOf(body.requiredTier);
       return ok ? json(200, { access: true }) : json(402, { error: 'Upgrade required', required_tier: body.requiredTier });
     }

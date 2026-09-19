@@ -116,6 +116,13 @@ async function initSchema() {
     await client.query(`ALTER TABLE entitlements ALTER COLUMN current_tier SET DEFAULT 'social_snapshot'`);
 
     await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_waitlist (
+        id TEXT PRIMARY KEY,
+        email TEXT NOT NULL,
+        platform TEXT NOT NULL,
+        created_at BIGINT NOT NULL
+      )`);
+    await client.query(`
       CREATE TABLE IF NOT EXISTS growth_engine_tier_history (
         id TEXT PRIMARY KEY,
         account_id TEXT NOT NULL,
@@ -329,6 +336,21 @@ async function getTierHistory(accountId) {
   return r.rows.map((row) => ({ accountId: row.account_id, fromTier: row.from_tier, toTier: row.to_tier, changedAt: Number(row.changed_at) }));
 }
 
+async function deleteAccount(accountId) {
+  const n = await q(`SELECT COUNT(*) AS n FROM growth_engine_reports WHERE account_id = $1`, [accountId]);
+  await q(`DELETE FROM growth_engine_reports WHERE account_id = $1`, [accountId]);
+  await q(`DELETE FROM growth_engine_jobs WHERE account_id = $1`, [accountId]);
+  await q(`DELETE FROM growth_engine_tier_history WHERE account_id = $1`, [accountId]);
+  await q(`DELETE FROM entitlements WHERE user_id = $1`, [accountId]);
+  await q(`DELETE FROM users WHERE user_id = $1`, [accountId]);
+  return { deleted: true, reports: Number(n.rows[0]?.n || 0) };
+}
+
+async function addWaitlist(email, platform) {
+  await q(`INSERT INTO growth_engine_waitlist (id, email, platform, created_at) VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO NOTHING`,
+    [`${platform}|${email}`, email, platform, Date.now()]);
+}
+
 // ===================== CATEGORY BASELINES =====================
 
 async function recordBaseline({ category, platform, handle, overall, dimensions }) {
@@ -389,6 +411,8 @@ module.exports = {
   getJob,
   updateJobStatus,
   countFreeSnapshotsByEmail,
+  addWaitlist,
+  deleteAccount,
   // Reports
   createReport,
   getReport,
