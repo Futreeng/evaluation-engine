@@ -99,7 +99,7 @@ Snapshot (already shown to the owner): {{SNAPSHOT_JSON}}
 Produce ONLY a JSON object, no prose, no markdown fences:
 {"posting_days":["Mon","Wed","Sat"],"posting_time":"7:15am",
  "phases":[
-  {"range":"1-30","moves":[{"n":2,"title":"under 6 words","action":"one imperative sentence the owner can do this week","why":"one sentence tied to a number, post or bio line from the data"},{"n":3,...},{"n":4,...},{"n":5,...}]},
+  {"range":"1-30","moves":[{"n":2,"title":"under 6 words","action":"one imperative sentence, under 25 words","why":"one sentence under 25 words tied to a number, post or bio line from the data"},{"n":3,...},{"n":4,...},{"n":5,...}]},
   {"range":"31-60","moves":[{"n":6,...},{"n":7,...},{"n":8,...},{"n":9,...}]},
   {"range":"61-90","moves":[{"n":10,...},{"n":11,...},{"n":12,...},{"n":13,...}]}
  ]}
@@ -704,11 +704,16 @@ async function evaluateTier1(accountId, inputParams) {
 
   // Two smaller calls instead of one big one: the combined plan ran past the
   // output limits of the fallback models and came back truncated.
-  let moves = await askJson(interpolateTemplate(PLAN_MOVES_PROMPT, baseVars), "Plan Writer: moves", 3072);
-  const movesCount = (m) => (Array.isArray(m?.phases) ? m.phases : []).reduce((n, p) => n + (Array.isArray(p.moves) ? p.moves.length : 0), 0);
+  let moves = await askJson(interpolateTemplate(PLAN_MOVES_PROMPT, baseVars), "Plan Writer: moves", 6144);
+  const movesCount = (m) => {
+    if (!m) return 0;
+    if (Array.isArray(m.moves)) return m.moves.length;
+    const ph = Array.isArray(m.phases) ? m.phases : m.phases && typeof m.phases === "object" ? Object.values(m.phases) : [];
+    return ph.reduce((n, p) => n + (Array.isArray(p) ? p.length : Array.isArray(p?.moves) ? p.moves.length : 0), 0);
+  };
   if (moves && movesCount(moves) === 0) {
     console.warn("[Growth Engine] Plan Writer: moves parsed but empty, retrying once");
-    moves = (await askJson(interpolateTemplate(PLAN_MOVES_PROMPT, baseVars), "Plan Writer: moves (retry)", 3072)) || moves;
+    moves = (await askJson(interpolateTemplate(PLAN_MOVES_PROMPT, baseVars), "Plan Writer: moves (retry)", 6144)) || moves;
   }
   if (!moves) throw new Error("Plan Writer returned no usable plan");
   if (movesCount(moves) === 0) {
@@ -722,8 +727,9 @@ async function evaluateTier1(accountId, inputParams) {
     POSTING_DAYS: (moves.posting_days || []).join(", ") || "Mon, Wed, Fri",
     POSTING_TIME: moves.posting_time || "morning",
     PHASES_JSON: JSON.stringify((reportBody.growth_path?.phases ?? []).map((p, i) => ({ range: p.range, label: p.label, first_move: p.visible_action, moves: (moves.phases?.[i]?.moves || []).map((m) => m.title) }))),
-  }), "Plan Writer: calendar", 4096);
+  }), "Plan Writer: calendar", 6144);
   const plan = { ...moves, calendar: Array.isArray(calendarRaw) ? calendarRaw : (calendarRaw && Array.isArray(calendarRaw.calendar) ? calendarRaw.calendar : []) };
+  if (process.env.GE_DEBUG_PLAN) console.log("[Growth Engine] plan moves raw:", JSON.stringify(moves).slice(0, 600));
 
   const days = Array.isArray(plan.posting_days) ? plan.posting_days.map(String) : [];
   const weeks = (Array.isArray(plan.calendar) ? plan.calendar : []).slice(0, 12).map((w, i) => ({
@@ -733,13 +739,24 @@ async function evaluateTier1(accountId, inputParams) {
       day: String(sl.day || ""), format: String(sl.format || "post"), angle: String(sl.angle || ""), prompt: String(sl.prompt || ""),
     })),
   }));
-  const planPhases = Array.isArray(plan.phases) ? plan.phases : [];
+  // Normalise whatever phase shape came back: an array of {range, moves},
+  // an object keyed by range, or a flat moves list with a phase/range field.
+  const normRange = (r) => String(r ?? "").replace(/[–—]/g, "-").replace(/[^0-9-]/g, "");
+  let planPhases = [];
+  if (Array.isArray(plan.phases)) planPhases = plan.phases;
+  else if (plan.phases && typeof plan.phases === "object") planPhases = Object.entries(plan.phases).map(([range, v]) => ({ range, moves: Array.isArray(v) ? v : v?.moves || [] }));
+  if (!planPhases.length && Array.isArray(plan.moves)) {
+    const byRange = {};
+    for (const m of plan.moves) { const r = normRange(m.range || m.phase) || (Number(m.n) <= 5 ? "1-30" : Number(m.n) <= 9 ? "31-60" : "61-90"); (byRange[r] ||= []).push(m); }
+    planPhases = Object.entries(byRange).map(([range, moves]) => ({ range, moves }));
+  }
+  planPhases = planPhases.map((ph) => ({ ...ph, range: normRange(ph.range), moves: Array.isArray(ph.moves) ? ph.moves : [] }));
 
   reportBody.tier = "growth_plan";
   reportBody.refresh_due_at = Date.now() + (reportBody.plan_incomplete ? 1 : 7) * 24 * 60 * 60 * 1000;
   if (!reportBody.growth_path) reportBody.growth_path = { phases: [] };
   reportBody.growth_path.phases = reportBody.growth_path.phases.map((p, i) => {
-    const extra = planPhases.find((x) => String(x.range) === String(p.range)) || planPhases[i] || { moves: [] };
+    const extra = planPhases.find((x) => x.range === normRange(p.range)) || planPhases[i] || { moves: [] };
     const moves = (Array.isArray(extra.moves) ? extra.moves : []).map((m, k) => ({
       n: Number(m.n) || i * 4 + k + 2, title: String(m.title || ""), action: String(m.action || ""), why: String(m.why || ""),
     }));
@@ -752,17 +769,43 @@ async function evaluateTier1(accountId, inputParams) {
   return reportBody;
 }
 
-// LLMs sometimes wrap JSON in fences or prose; find the outermost object.
+// LLMs sometimes wrap JSON in fences or prose, or run out of output budget
+// mid-array. Find the outermost object; if it doesn't parse, close whatever
+// was left open (dropping the last, partial element) and try again.
 function parseJsonLoose(text) {
   const src = String(text || "");
   const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(src);
-  const candidates = [fenced && fenced[1], src.slice(src.indexOf("{"), src.lastIndexOf("}") + 1), src];
+  const start = Math.min(...["{", "["].map((c) => src.indexOf(c)).filter((i) => i >= 0), Infinity);
+  const body = Number.isFinite(start) ? src.slice(start) : src;
+  const candidates = [fenced && fenced[1], body.slice(0, Math.max(body.lastIndexOf("}"), body.lastIndexOf("]")) + 1), body, repairTruncatedJson(body)];
   for (const c of candidates) {
     if (!c) continue;
     try { return JSON.parse(c); } catch { /* next */ }
   }
   console.warn("[Growth Engine] Plan JSON did not parse; first 200 chars:", src.slice(0, 200));
   return null;
+}
+
+// Close open strings/arrays/objects of a truncated JSON document after
+// cutting back to the last complete element.
+function repairTruncatedJson(src) {
+  let s = String(src || "").replace(/,\s*$/, "");
+  // Cut back to the last complete value boundary (a closing brace/bracket or a
+  // full "key": value pair). Crude but enough for arrays of objects.
+  const cut = Math.max(s.lastIndexOf("}"), s.lastIndexOf("]"));
+  if (cut > 0) s = s.slice(0, cut + 1);
+  const stack = [];
+  let inStr = false, esc = false;
+  for (const ch of s) {
+    if (inStr) { if (esc) esc = false; else if (ch === "\\") esc = true; else if (ch === '"') inStr = false; continue; }
+    if (ch === '"') inStr = true;
+    else if (ch === "{" || ch === "[") stack.push(ch === "{" ? "}" : "]");
+    else if (ch === "}" || ch === "]") stack.pop();
+  }
+  if (inStr) s += '"';
+  s = s.replace(/,\s*$/, "");
+  while (stack.length) s += stack.pop();
+  return s;
 }
 
 
