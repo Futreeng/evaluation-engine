@@ -966,6 +966,7 @@
   });
 
   window.addEventListener('hashchange', route);
+  console.log('[Scalecraft] Config:', { useMock: CFG.useMock, apiBase: CFG.apiBase });
   if (CFG.useMock) { const b = document.createElement('div'); b.className = 'mockbadge'; b.textContent = 'Mock API'; document.body.appendChild(b); }
   route();
 })();
