@@ -9,7 +9,7 @@ window.SCALECRAFT_CONFIG = {
   useMock: false,  // ⚠️ CRITICAL: MUST BE FALSE FOR PRODUCTION
   apiBase: 'https://discerning-wisdom-production-6696.up.railway.app/api/growth-engine/v1',
   pollIntervalMs: 2000,
-  supportedPlatforms: ['instagram', 'x']
+  supportedPlatforms: ['instagram', 'x'],
   // NOTE: mock-api.js is NOT loaded. No fallback to mock data.
   // All evaluation is real: Twitter/Instagram API → Railway backend → LLM → Report
 };
