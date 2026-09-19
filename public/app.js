@@ -183,7 +183,7 @@
           </div>
           <div class="form-card" id="form">
             <h3>Score my profile</h3>
-            <div class="sub">See how you stack up against competitors.</div>
+            <div class="sub">Five fields. Nothing else.</div>
             <form id="evalForm" novalidate>
               <div class="field">
                 <div class="label">Your handle</div>
@@ -203,10 +203,10 @@
                 </div>
               </div>
               <div class="field">
-                <div class="label">Competitor handles (optional)</div>
-                <div class="sub-label">Compare against 1-2 competitors. Same platform.</div>
-                <input type="text" name="competitor1" placeholder="@competitor1" autocapitalize="none" spellcheck="false">
-                <input type="text" name="competitor2" placeholder="@competitor2" autocapitalize="none" spellcheck="false" style="margin-top: 8px;">
+                <div class="label">Competitors <span class="opt">optional · same platform</span></div>
+                <input type="text" name="competitor1" placeholder="@a-studio-nearby" autocapitalize="none" spellcheck="false" value="${last.competitors?.[0] || ''}">
+                <input type="text" name="competitor2" placeholder="@another" autocapitalize="none" spellcheck="false" style="margin-top: 8px;" value="${last.competitors?.[1] || ''}">
+                <div class="fine" style="margin-top:7px">Free reports show where you rank. The Growth Plan shows what each one does that you don’t.</div>
               </div>
               <div class="field">
                 <div class="label">Where to send the report</div>
@@ -235,7 +235,7 @@
         platform: chosenPlatform,
         category: form.category.value,
         email: form.email.value.trim(),
-        competitors: competitors.length > 0 ? competitors : null
+        competitors: competitors.length > 0 ? competitors : []
       };
       const problems = [];
       if (!/^[A-Za-z0-9._-]{1,60}$/.test(payload.handle)) problems.push('a handle (letters, numbers, dots or underscores)');
@@ -631,20 +631,20 @@
           </div>
           ${paid ? raw(h`
             <form class="compform" id="compForm">
-              <div class="field" style="flex:1"><div class="label">Competitor handles (comma-separated, up to 5)</div><input type="text" name="handles" placeholder="@barrysbootcamp, @rumbleboxing" value="${comp ? comp.competitors.map(c => c.handle).join(', ') : ''}"></div>
+              <div class="field" style="flex:1"><div class="label">Competitor handles (comma-separated, up to 5)</div><input type="text" name="handles" placeholder="@barrysbootcamp, @rumbleboxing" value="${comp ? comp.competitors.map(c => c.handle).join(', ') : (report.competitor_handles || []).join(', ')}"></div>
               <button class="btn md" type="submit">${comp ? 'Re-run comparison' : 'Compare'}</button>
             </form>
             <div id="compResult">${comp ? raw(competitorTable(comp)) : ''}</div>`)
           : raw(h`<div class="compteaser">
               <div class="row"><span class="l">@${biz.handle || 'you'}</span><span class="n">${overall}</span></div>
-              ${raw(['', '', ''].map((_, i) => `<div class="row ghost"><span class="l"><span class="sk" style="width:${[120, 96, 140][i]}px"></span></span><span class="n"><span class="sk" style="width:22px"></span></span></div>`).join(''))}
-              <div class="fine">Add competitor handles after you unlock the plan.</div>
+              ${raw((report.competitor_handles && report.competitor_handles.length ? report.competitor_handles : ['', '', '']).slice(0, 3).map((hn, i) => h`<div class="row ghost"><span class="l">${hn ? '@' + hn : raw(`<span class="sk" style="width:${[120, 96, 140][i]}px"></span>`)}</span><span class="n"><span class="sk" style="width:22px"></span></span></div>`).join(''))}
+              <div class="fine">${report.competitor_handles && report.competitor_handles.length ? 'Their scores and what they do differently unlock with the plan.' : 'Add competitor handles after you unlock the plan.'}</div>
             </div>`)}
         </section>
 
         ${phases.length ? raw(h`<section>
           <div class="path-head">
-            <div><h2 class="sec-h">Your 30-60-90 day path</h2><p class="sec-s">${paid ? 'Every move, in order, written from your own posts.' : 'The first move of each phase is yours now. The rest is written and waiting.'}</p></div>
+            <div><h2 class="sec-h">Your 30-60-90 day path</h2><p class="sec-s">${paid ? (report.plan_incomplete ? 'The first moves are here; the rest of the plan didn’t finish writing. Run a fresh evaluation and it will fill in.' : 'Every move, in order, written from your own posts.') : 'The first move of each phase is yours now. The rest is written and waiting.'}</p></div>
             <div class="unlockchip ${paid ? 'open' : ''}">${paid ? `ALL ${totalSteps} STEPS UNLOCKED` : `${unlocked} OF ${totalSteps} STEPS UNLOCKED`}</div>
           </div>
           <div class="phases">${raw(phases.map(p => h`<article class="phase">
@@ -883,7 +883,7 @@
       const err = form.querySelector('#signupError');
       const email = form.email.value.trim(), company = form.company_name.value.trim(), pass = form.password.value, passconf = form.password_confirm.value;
       if (!email || !company || !pass) { err.textContent = 'All fields required.'; err.hidden = false; return; }
-      if (pass !== passconf) { err.textContent = 'Passwords don't match.'; err.hidden = false; return; }
+      if (pass !== passconf) { err.textContent = 'Passwords don’t match.'; err.hidden = false; return; }
       if (pass.length < 8) { err.textContent = 'Password must be at least 8 characters.'; err.hidden = false; return; }
       err.hidden = true;
       const btn = form.querySelector('button[type=submit]'); btn.disabled = true; btn.textContent = 'Creating…';
