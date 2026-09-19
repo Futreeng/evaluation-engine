@@ -662,6 +662,42 @@ async function runSnapshot(accountId, inputParams) {
 
 async function evaluateTier0(accountId, inputParams) {
   const { reportBody } = await runSnapshot(accountId, inputParams);
+
+  // Competitor data: optional, adds value without breaking anything
+  if (inputParams.competitors && Array.isArray(inputParams.competitors) && inputParams.competitors.length > 0) {
+    try {
+      const competitors = [];
+      const { platform } = inputParams;
+      const fetcher = platform === 'instagram' ? analyzeInstagramAccount : analyzeTwitterAccount;
+
+      for (const handle of inputParams.competitors.slice(0, 2)) {
+        if (!handle) continue;
+        try {
+          const compData = await fetcher(handle);
+          if (compData && compData.metrics) {
+            competitors.push({ handle, ...compData.metrics });
+          }
+        } catch (err) {
+          console.warn(`[Growth Engine] Could not fetch competitor ${handle}:`, err.message);
+          // Continue with other competitors - don't break the report
+        }
+      }
+
+      // Add competitor analysis to report if we got any
+      if (competitors.length > 0 && reportBody.scores) {
+        reportBody.competitors = competitors;
+        // Brief comparison text for narrative
+        const userScore = reportBody.scores.overall || 0;
+        const compScores = competitors.map(c => c.overall_score || 0);
+        const avgCompScore = compScores.length > 0 ? Math.round(compScores.reduce((a,b) => a+b) / compScores.length) : 0;
+        reportBody.competitor_analysis = `You score ${userScore}. Your competitors average ${avgCompScore}. ${userScore > avgCompScore ? 'You\'re ahead.' : 'Opportunity to close the gap.'}`;
+      }
+    } catch (err) {
+      console.warn("[Growth Engine] Competitor analysis failed (non-fatal):", err.message);
+      // Report generation continues without competitor data
+    }
+  }
+
   return reportBody;
 }
 
