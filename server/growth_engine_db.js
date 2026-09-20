@@ -120,6 +120,19 @@ function initSchema() {
     )
   `);
 
+  // Plan context: the four intake answers (next 90 days, hours, goal, style)
+  // per account + handle + platform. Reused by every refresh and re-run.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS growth_engine_plan_context (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      handle TEXT NOT NULL,
+      platform TEXT NOT NULL,
+      context TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `);
+
   // Reports table: stores generated reports
   db.run(`
     CREATE TABLE IF NOT EXISTS growth_engine_reports (
@@ -357,6 +370,42 @@ async function addWaitlist(email, platform) {
   db.run(`INSERT OR REPLACE INTO growth_engine_waitlist (id, email, platform, created_at) VALUES (?, ?, ?, ?)`,
     [`${platform}|${email}`, email, platform, Date.now()]);
   saveDb();
+}
+
+async function getPlanContext(accountId, handle, platform) {
+  if (!db) throw new Error("Database not initialized");
+  const r = db.exec(`SELECT context, updated_at FROM growth_engine_plan_context WHERE id = ?`, [`${accountId}|${platform}|${String(handle).toLowerCase()}`]);
+  if (!r.length || !r[0].values.length) return null;
+  try { return { ...JSON.parse(r[0].values[0][0]), updated_at: r[0].values[0][1] }; } catch { return null; }
+}
+async function setPlanContext(accountId, handle, platform, context) {
+  if (!db) throw new Error("Database not initialized");
+  const { updated_at, ...ctx } = context || {};
+  db.run(`INSERT OR REPLACE INTO growth_engine_plan_context (id, account_id, handle, platform, context, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+    [`${accountId}|${platform}|${String(handle).toLowerCase()}`, accountId, String(handle).toLowerCase(), platform, JSON.stringify(ctx), Date.now()]);
+  saveDb();
+  return { ...ctx, updated_at: Date.now() };
+}
+
+// Paid reports generated inside a window — the scheduled-email sweeper uses
+// this to find plans at day 28 / 58 / 60.
+async function listPaidReportsBetween(fromTs, toTs) {
+  if (!db) throw new Error("Database not initialized");
+  const result = db.exec(
+    `SELECT * FROM growth_engine_reports WHERE tier != 'social_snapshot' AND generated_at >= ? AND generated_at <= ? ORDER BY generated_at ASC`,
+    [fromTs, toTs]
+  );
+  if (!result || result.length === 0) return [];
+  const columns = result[0].columns;
+  return result[0].values.map((row) => ({
+    reportId: row[columns.indexOf("report_id")],
+    accountId: row[columns.indexOf("account_id")],
+    tier: row[columns.indexOf("tier")],
+    business: { handle: row[columns.indexOf("business_handle")], platform: row[columns.indexOf("business_platform")], category: row[columns.indexOf("business_category")] },
+    generatedAt: row[columns.indexOf("generated_at")],
+    refreshDueAt: row[columns.indexOf("refresh_due_at")],
+    reportBody: JSON.parse(row[columns.indexOf("report_body")]),
+  }));
 }
 
 // Free-tier quota by account: has this handle on this platform already been
@@ -802,6 +851,9 @@ module.exports = {
   getUsage,
   bumpUsage,
   addWaitlist,
+  getPlanContext,
+  setPlanContext,
+  listPaidReportsBetween,
   deleteAccount,
   recordBaseline,
   getCategoryBaseline,

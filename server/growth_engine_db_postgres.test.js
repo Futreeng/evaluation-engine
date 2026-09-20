@@ -69,6 +69,14 @@ const assert = require("assert");
   assert.deepEqual((await db.getCategoryBaseline("fitness")), null);
   assert.equal((await db.getBaselineSummary()).total, 21);
 
+  // plan context — upsert per account+handle+platform
+  assert.equal(await db.getPlanContext("acct_a", "Talon", "instagram"), null);
+  await db.setPlanContext("acct_a", "Talon", "instagram", { horizon: "fewer_shoots", hours: "2_5" });
+  await db.setPlanContext("acct_a", "talon", "instagram", { horizon: "usual", hours: "2_5", goal: "deals" });
+  const ctx = await db.getPlanContext("acct_a", "TALON", "instagram");
+  assert.equal(ctx.horizon, "usual"); assert.equal(ctx.goal, "deals"); assert.ok(ctx.updated_at > 0);
+  assert.equal((await db.listPaidReportsBetween(0, Date.now() + 1)).every((r) => r.tier !== "social_snapshot"), true);
+
   console.log("postgres module: all assertions passed");
   process.exit(0);
 })().catch((e) => { console.error("FAILED:", e.message); process.exit(1); });

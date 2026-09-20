@@ -71,6 +71,7 @@ Three phases. Each phase has a short label and ONE fully specific first move the
 3. **Days 61–90 – [label]:** [move]. [reasoning]
    🔒 …
 Sequence the phases so the biggest gap is addressed first.
+{{PLAN_CONTEXT}}
 
 **WHAT YOUR BEST POSTS HAVE IN COMMON**
 Two or three sentences from POST_INSIGHTS: name the top post by date and what it was, say what the top three share (format, subject, day, how the caption opens) and what the bottom three share. Concrete, not "engaging content".
@@ -86,6 +87,41 @@ Finally, after the report, output a machine-readable block on its own lines, exa
 \`\`\``
   },
 };
+
+// The creator's intake answers, turned into hard rules for every prompt that
+// writes moves or calendar slots. Empty string when nothing was answered.
+const PLAN_CONTEXT_LABELS = {
+  horizon: { usual: "business as usual", fewer_shoots: "fewer new shoots than usual (no trips, off-season, injury or a busy stretch)", launch: "something launching (an event, drop or move)" },
+  hours: { lt2: "under 2 hours a week", "2_5": "2–5 hours a week", "5_10": "5–10 hours a week", "10plus": "10+ hours a week" },
+  goal: { followers: "more followers", deals: "brand deals and sponsors", sell: "selling something (a guide, coaching, a product)", bookings: "bookings and clients", consistency: "just getting consistent" },
+  style: { on_camera: "on camera, talking", behind: "behind the camera (voiceover, b-roll)", photos: "photos and carousels mostly", help: "has help (an editor or team)" },
+};
+function planContextBlock(ctx, days = 90) {
+  if (!ctx || !Object.keys(ctx).some((k) => ctx[k])) return "";
+  const L = PLAN_CONTEXT_LABELS;
+  const lines = [];
+  if (ctx.horizon && L.horizon[ctx.horizon]) lines.push(`- Next ${days} days: ${L.horizon[ctx.horizon]}.`);
+  if (ctx.hours && L.hours[ctx.hours]) lines.push(`- Time for content: ${L.hours[ctx.hours]}.`);
+  if (ctx.goal && L.goal[ctx.goal]) lines.push(`- What they want from the next ${days} days: ${L.goal[ctx.goal]}.`);
+  if (ctx.link) lines.push(`- Their link (use this exact URL in any bio/link move, never a placeholder): ${ctx.link}`);
+  if (ctx.contact) lines.push(`- The email brands should use (use it exactly in any bio/contact move, never a placeholder): ${ctx.contact}`);
+  if (ctx.style && L.style[ctx.style]) lines.push(`- How they like to make content: ${L.style[ctx.style]}.`);
+  if (ctx.notes) lines.push(`- In their words: "${String(ctx.notes).slice(0, 200)}"`);
+  const rules = [];
+  if (ctx.horizon === "fewer_shoots") rules.push("They will not be shooting much new footage. Every move must be doable from their existing posts (repurposing, re-cuts, throwback carousels, 'what I'd do differently'), from home (talk-to-camera, planning, gear, local content) or with no camera at all. At least 70% of calendar slots must be source 'archive' or 'no_camera'. Never assume a trip, shoot, class or event that is not in their data.");
+  if (ctx.horizon === "launch") rules.push("Something is launching. Build the calendar toward it: tease, launch, follow-up. Ask nothing that ignores it.");
+  if (ctx.hours === "lt2") rules.push("They have under 2 hours a week. Cadence target is at most 2 posts a week; no move may need more than 30 minutes; prefer once-only moves over ongoing ones.");
+  if (ctx.hours === "2_5") rules.push("They have 2–5 hours a week. Cadence target is at most 3 posts a week; keep ongoing moves under 30 minutes each.");
+  if (ctx.style === "photos") rules.push("They mostly shoot photos. Lean on carousels and stills; do not prescribe talk-to-camera video.");
+  if (ctx.style === "behind") rules.push("They stay behind the camera. Use voiceover, b-roll and text-on-screen; do not prescribe talking to camera.");
+  if (ctx.style === "on_camera") rules.push("They are comfortable on camera; talk-to-camera is a strength to use.");
+  if (ctx.goal === "deals") rules.push(`Bio, link and pinned-post moves aim at brand deals: a media kit or contact line, a clear niche statement, proof posts pinned.${ctx.contact ? "" : " No contact email was given: tell them to add one and say where, but never invent an address or write a placeholder like email@domain.com."}`);
+  if (ctx.goal === "sell") rules.push("Bio, link and CTA moves aim at what they sell; every CTA points at their link.");
+  if (ctx.goal === "bookings") rules.push("Bio, link and CTA moves aim at bookings; every CTA points at their link.");
+  if (ctx.goal === "followers") rules.push("Optimise for reach and follows: hooks, shareable formats, discovery.");
+  if (ctx.goal === "consistency") rules.push("Optimise for a cadence they can keep, not for reach. Fewer, smaller moves.");
+  return `\nAbout this creator (answered by them — treat as hard constraints):\n${lines.join("\n")}${rules.length ? `\nRules that follow:\n- ${rules.join("\n- ")}` : ""}\n`;
+}
 
 // One call per 30-day phase, run in parallel. Each move carries the how,
 // a ready-to-paste example, a done-when check and a time cost — the part a
@@ -103,9 +139,10 @@ Category benchmarks: {{CATEGORY_BENCHMARKS}}
 Snapshot (already shown to the owner): {{SNAPSHOT_JSON}}
 This phase's first move (already written — do not repeat it as a numbered move): {{FIRST_MOVE}}
 {{OTHER_PHASES}}
-
+{{PLAN_CONTEXT}}
 Field rules:
 - "how": 3 to 5 numbered steps, each under 20 words, concrete to {{PLATFORM}}'s actual screens ("Edit profile → Links → Add external link") and to this account's own posts and wording.
+- Never write bracketed placeholders like [Your Link Here] or email@domain.com. If a link or email is needed and none was given, say what to add and where, in plain words.
 - "example": ready-to-paste copy the creator can use as a starting point — the literal bio line, highlight names, hook sentence, caption closer, DM script. Written in this account's own voice, taken from its captions. Under 60 words. Use null only when a move has nothing to paste (e.g. a scheduling habit).
 - "done_when": one check the creator can verify on their own profile in ten seconds, under 15 words.
 - "time": effort in plain words, e.g. "20 min, once", "10 min per post, ongoing", "1 hour this week".
@@ -122,11 +159,11 @@ Handle: {{HANDLE}} ({{PLATFORM}})
 Category: {{CATEGORY}}
 Best and worst recent posts: {{POST_INSIGHTS}}
 Posting days: {{POSTING_DAYS}} at {{POSTING_TIME}}
-Phase plan (weeks 1-4 serve phase 1, 5-8 phase 2, 9-12 phase 3): {{PHASES_JSON}}
-
-Produce ONLY a JSON array of 12 weeks, no prose, no markdown fences:
-[{"week":1,"slots":[{"day":"Mon","format":"reel","angle":"what the post is about, under 10 words","prompt":"a shooting/caption brief the owner can follow, under 25 words"},{"day":"Wed",...},{"day":"Sat",...}]}, ... through week 12]
-One slot per posting day per week. Formats: reel, carousel, static, story. Vary subjects across weeks; reuse the account's proven formats. Valid JSON only.`;
+Phase plan (weeks 1-4 serve phase 1, 5-8 phase 2{{PHASE3_NOTE}}): {{PHASES_JSON}}
+{{PLAN_CONTEXT}}
+Produce ONLY a JSON array of {{WEEKS}} weeks, no prose, no markdown fences:
+[{"week":1,"slots":[{"day":"Mon","format":"reel","source":"new","angle":"what the post is about, under 10 words","prompt":"a shooting/caption brief the owner can follow, under 25 words"},{"day":"Wed",...},{"day":"Sat",...}]}, ... through week {{WEEKS}}]
+One slot per posting day per week. Formats: reel, carousel, static, story. "source" is where the material comes from: "new" (needs a new shoot), "archive" (re-cut, repurposed or throwback from existing posts) or "no_camera" (talk-to-camera at home, text, screenshots, planning). Vary subjects across weeks; reuse the account's proven formats. Valid JSON only.`;
 
 // Category benchmarks. These are working assumptions, not measured
 // averages — replace with real baselines once enough profiles are scored.
@@ -496,11 +533,14 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
   let computed = null;
   let postInsights = null;
   let followers = null;
+  let postsLast14d = null;
   try {
     await onStage("finding", 1);
     const realData = await getRealPostData(handle, platform, category);
     await onStage("reading", 2);
     followers = Number.isFinite(realData.follower_count) ? realData.follower_count : null;
+    const acts = realData.recent_activity || realData.recent_posts || [];
+    postsLast14d = acts.filter((p) => { const t = +new Date(p.date || p.timestamp); return Number.isFinite(t) && Date.now() - t <= 14 * 86400000; }).length;
     postSummary = JSON.stringify(realData); // compact: every token counts against free-tier TPM caps
     computed = scoreProfile(realData, category); // null for fetchers without the metric shape (Twitter)
     postInsights = rankPosts(realData.recent_activity || realData.recent_posts);
@@ -518,6 +558,7 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
     HANDLE: handle,
     PLATFORM: platform,
     CATEGORY: category,
+    PLAN_CONTEXT: planContextBlock(inputParams.plan_context, inputParams.one_time_unlock ? 60 : 90),
     RECENT_POST_SUMMARY: postSummary,
     CATEGORY_BENCHMARKS: JSON.stringify(benchmarks),
     POST_INSIGHTS: postInsights
@@ -592,6 +633,7 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
     },
     generated_at: Date.now(),
     refresh_due_at: null,
+    posts_last_14d: postsLast14d,
     data_confidence: structured ? "full" : "narrative_only",
     narrative,
     raw_personas: {
@@ -684,8 +726,14 @@ async function evaluateTier1(accountId, inputParams, onStage = () => {}) {
     dimensions: reportBody.scores?.dimensions ?? [],
     phases: (reportBody.growth_path?.phases ?? []).map((p) => ({ range: p.range, label: p.label, first_move: p.visible_action })),
   });
+  // One-time unlock buys phases 1–2 (60 days); phase 3 stays locked as the
+  // visible reason to subscribe. Subscribers get all three.
+  const PHASES_BOUGHT = inputParams.one_time_unlock ? 2 : 3;
+  const WEEKS_BOUGHT = PHASES_BOUGHT * 4;
+  const planContext = inputParams.plan_context || null;
   const baseVars = {
     HANDLE: handle, PLATFORM: platform, CATEGORY: category,
+    PLAN_CONTEXT: planContextBlock(planContext, PHASES_BOUGHT * 30),
     RECENT_POST_SUMMARY: postSummary, CATEGORY_BENCHMARKS: JSON.stringify(benchmarks), SNAPSHOT_JSON: snapshotJson,
     POST_INSIGHTS: reportBody.post_insights
       ? JSON.stringify({ best_format: reportBody.post_insights.patterns?.best_format, best_day: reportBody.post_insights.patterns?.best_day,
@@ -715,7 +763,7 @@ async function evaluateTier1(accountId, inputParams, onStage = () => {}) {
   // models; splitting also means one flaky call loses a phase, not the plan.
   const snapPhases = reportBody.growth_path?.phases ?? [];
   const MOVES_PER_PHASE = 4;
-  const phaseResults = await Promise.all(snapPhases.slice(0, 3).map((p, i) => {
+  const phaseResults = await Promise.all(snapPhases.slice(0, PHASES_BOUGHT).map((p, i) => {
     const first = i * MOVES_PER_PHASE + 2;
     const others = snapPhases.filter((_, k) => k !== i).map((q) => `${q.range}: ${q.label} — first move: ${q.visible_action}`);
     return askJson(interpolateTemplate(PLAN_PHASE_PROMPT, {
@@ -727,7 +775,7 @@ async function evaluateTier1(accountId, inputParams, onStage = () => {}) {
   }));
   const gotPhases = phaseResults.filter(Boolean);
   if (!gotPhases.length) throw new Error("Plan Writer returned no usable plan");
-  if (gotPhases.length < snapPhases.slice(0, 3).length) {
+  if (gotPhases.length < snapPhases.slice(0, PHASES_BOUGHT).length) {
     // Don't throw the whole paid report away over one flaky call; ship what
     // came back and mark it for an early refresh.
     console.warn(`[Growth Engine] Plan Writer: ${gotPhases.length} of ${snapPhases.length} phases written — shipping partial plan`);
@@ -736,23 +784,27 @@ async function evaluateTier1(accountId, inputParams, onStage = () => {}) {
   const lead = phaseResults[0] || gotPhases[0];
   const moves = {
     posting_days: lead.posting_days, posting_time: lead.posting_time,
-    phases: snapPhases.slice(0, 3).map((p, i) => ({ range: p.range, moves: phaseResults[i]?.moves || [], first_move: phaseResults[i]?.first_move || null })),
+    phases: snapPhases.slice(0, PHASES_BOUGHT).map((p, i) => ({ range: p.range, moves: phaseResults[i]?.moves || [], first_move: phaseResults[i]?.first_move || null })),
   };
   const calendarRaw = await askJson(interpolateTemplate(PLAN_CALENDAR_PROMPT, {
     ...baseVars,
     POSTING_DAYS: (moves.posting_days || []).join(", ") || "Mon, Wed, Fri",
     POSTING_TIME: moves.posting_time || "morning",
-    PHASES_JSON: JSON.stringify((reportBody.growth_path?.phases ?? []).map((p, i) => ({ range: p.range, label: p.label, first_move: p.visible_action, moves: (moves.phases?.[i]?.moves || []).map((m) => m.title) }))),
+    PHASES_JSON: JSON.stringify((reportBody.growth_path?.phases ?? []).slice(0, PHASES_BOUGHT).map((p, i) => ({ range: p.range, label: p.label, first_move: p.visible_action, moves: (moves.phases?.[i]?.moves || []).map((m) => m.title) }))),
+    PHASE3_NOTE: PHASES_BOUGHT === 3 ? ", 9-12 phase 3" : "",
+    WEEKS: WEEKS_BOUGHT,
   }), "Plan Writer: calendar", 6144);
   const plan = { ...moves, calendar: Array.isArray(calendarRaw) ? calendarRaw : (calendarRaw && Array.isArray(calendarRaw.calendar) ? calendarRaw.calendar : []) };
   if (process.env.GE_DEBUG_PLAN) console.log("[Growth Engine] plan moves raw:", JSON.stringify(moves).slice(0, 600));
 
   const days = Array.isArray(plan.posting_days) ? plan.posting_days.map(String) : [];
-  const weeks = (Array.isArray(plan.calendar) ? plan.calendar : []).slice(0, 12).map((w, i) => ({
+  const SOURCES = new Set(["new", "archive", "no_camera"]);
+  const weeks = (Array.isArray(plan.calendar) ? plan.calendar : []).slice(0, WEEKS_BOUGHT).map((w, i) => ({
     week: Number(w.week) || i + 1,
     phase: Math.min(3, Math.floor(i / 4) + 1),
     slots: (Array.isArray(w.slots) ? w.slots : []).map((sl) => ({
       day: String(sl.day || ""), format: String(sl.format || "post"), angle: String(sl.angle || ""), prompt: String(sl.prompt || ""),
+      source: SOURCES.has(String(sl.source || "").toLowerCase()) ? String(sl.source).toLowerCase() : "new",
     })),
   }));
   // Normalise whatever phase shape came back: an array of {range, moves},
@@ -772,9 +824,14 @@ async function evaluateTier1(accountId, inputParams, onStage = () => {}) {
   reportBody.refresh_due_at = inputParams.one_time_unlock ? null : Date.now() + (reportBody.plan_incomplete ? 1 : 7) * 24 * 60 * 60 * 1000;
   if (!reportBody.growth_path) reportBody.growth_path = { phases: [] };
   reportBody.growth_path.phases = reportBody.growth_path.phases.map((p, i) => {
+    if (i >= PHASES_BOUGHT) {
+      // Not bought: keep the free-report shape (opener visible, rows locked)
+      // so the report shows exactly what the subscription adds.
+      return { ...p, moves: [], opener: null, locked: { count: Number(p?.locked?.count) || 4, teaser: `Days ${p.range || "61-90"} unlock with the Growth Plan` }, calendar_weeks: [], not_included: true };
+    }
     const extra = planPhases.find((x) => x.range === normRange(p.range)) || planPhases[i] || { moves: [] };
     const detail = (m) => ({
-      how: Array.isArray(m.how) ? m.how.map((x) => String(x)).filter(Boolean).slice(0, 6) : [],
+      how: Array.isArray(m.how) ? m.how.map((x) => String(x).replace(/^\s*(?:step\s*)?\d+[.)]\s*/i, "").trim()).filter(Boolean).slice(0, 6) : [],
       example: m.example && String(m.example).trim() && !/^null$/i.test(String(m.example).trim()) ? String(m.example).trim() : null,
       done_when: m.done_when ? String(m.done_when) : "", time: m.time ? String(m.time) : "",
     });
@@ -785,8 +842,10 @@ async function evaluateTier1(accountId, inputParams, onStage = () => {}) {
     return { ...p, moves, opener, locked: { count: 0, teaser: "" }, calendar_weeks: weeks.filter((w) => w.phase === i + 1) };
   });
   reportBody.growth_path.unlocked_steps = reportBody.growth_path.phases.reduce((n, p) => n + 1 + p.moves.length, 0);
-  reportBody.growth_path.total_steps = reportBody.growth_path.unlocked_steps;
+  reportBody.growth_path.total_steps = reportBody.growth_path.unlocked_steps + reportBody.growth_path.phases.reduce((n, p) => n + (p.not_included ? (p.locked?.count || 4) : 0), 0);
   reportBody.calendar = { posting_days: days, posting_time: plan.posting_time ? String(plan.posting_time) : null, weeks };
+  reportBody.plan_days = PHASES_BOUGHT * 30;
+  reportBody.plan_context = planContext;
   reportBody.upsell = { cta_label: "Upgrade to Business Evaluator", target_tier: "business_evaluator", unlock_count: 0 };
   return reportBody;
 }

@@ -136,6 +136,15 @@ async function initSchema() {
         created_at BIGINT NOT NULL
       )`);
     await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_plan_context (
+        id TEXT PRIMARY KEY,
+        account_id TEXT NOT NULL,
+        handle TEXT NOT NULL,
+        platform TEXT NOT NULL,
+        context TEXT NOT NULL,
+        updated_at BIGINT NOT NULL
+      )`);
+    await client.query(`
       CREATE TABLE IF NOT EXISTS growth_engine_tier_history (
         id TEXT PRIMARY KEY,
         account_id TEXT NOT NULL,
@@ -422,6 +431,24 @@ async function addWaitlist(email, platform) {
     [`${platform}|${email}`, email, platform, Date.now()]);
 }
 
+async function getPlanContext(accountId, handle, platform) {
+  const r = await q(`SELECT context, updated_at FROM growth_engine_plan_context WHERE id = $1`, [`${accountId}|${platform}|${String(handle).toLowerCase()}`]);
+  if (!r.rows.length) return null;
+  try { return { ...JSON.parse(r.rows[0].context), updated_at: Number(r.rows[0].updated_at) }; } catch { return null; }
+}
+async function setPlanContext(accountId, handle, platform, context) {
+  const { updated_at, ...ctx } = context || {};
+  const now = Date.now();
+  await q(`INSERT INTO growth_engine_plan_context (id, account_id, handle, platform, context, updated_at) VALUES ($1, $2, $3, $4, $5, $6)
+           ON CONFLICT (id) DO UPDATE SET context = EXCLUDED.context, updated_at = EXCLUDED.updated_at`,
+    [`${accountId}|${platform}|${String(handle).toLowerCase()}`, accountId, String(handle).toLowerCase(), platform, JSON.stringify(ctx), now]);
+  return { ...ctx, updated_at: now };
+}
+async function listPaidReportsBetween(fromTs, toTs) {
+  const r = await q(`SELECT * FROM growth_engine_reports WHERE tier <> 'social_snapshot' AND generated_at >= $1 AND generated_at <= $2 ORDER BY generated_at ASC`, [fromTs, toTs]);
+  return r.rows.map(reportRow);
+}
+
 // ===================== CATEGORY BASELINES =====================
 
 async function recordBaseline({ category, platform, handle, overall, dimensions }) {
@@ -493,6 +520,9 @@ module.exports = {
   getUsage,
   bumpUsage,
   addWaitlist,
+  getPlanContext,
+  setPlanContext,
+  listPaidReportsBetween,
   deleteAccount,
   // Reports
   createReport,

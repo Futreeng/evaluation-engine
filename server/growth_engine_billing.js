@@ -289,11 +289,13 @@ class BillingManager {
           annualPrice: yr(TIER_PRICING.growth_plan),
           popular: true,
           features: [
-            "Every move, 01 through 13, with the reason for each",
+            "All 90 days: every move, 01 through 13, with the how and a paste-ready example",
             "Your 12-week posting calendar with a brief per post",
+            "Written around your next 90 days — time, goal, what you can shoot",
             "Re-scored every week — see what each move changed",
+            "Day-30 and day-60 check-ins that reshape the plan if life changes",
             "Up to 5 competitors, scored the same way",
-            "Score and follower history",
+            "Score and follower history, and a fresh plan every 90 days",
           ],
           cta: "Start Growth Plan",
         },
@@ -338,11 +340,13 @@ class BillingManager {
       one_time: [
         {
           product: "plan_unlock",
-          name: "Unlock this report",
-          description: "The full plan for one report. No subscription, no refresh.",
+          name: "60-day plan",
+          days: 60,
+          description: "Phases 1 and 2 of this report's plan, written once. No subscription, no refresh.",
           price: ONE_TIME_PRICING.plan_unlock / 100,
-          features: ["Every move, 01 through 13", "Your 12-week calendar", "Keep it forever"],
-          cta: "Unlock once",
+          features: ["Days 1–60: moves 01 through 09, with the how and examples", "Your 8-week calendar", "Keep it forever"],
+          not_included: ["Days 61–90 (phase 3)", "Weekly re-score and what changed", "Day-30 and day-60 check-ins", "Competitors", "Score and follower history", "A fresh plan every 90 days"],
+          cta: "Get the 60-day plan",
         },
       ],
       discount: {

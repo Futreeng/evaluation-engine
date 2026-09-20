@@ -189,9 +189,52 @@ async function evaluationTierFor(accountId) {
   return "social_snapshot";
 }
 
+// The four intake answers (plus optional link and notes). Anything else is dropped.
+const CTX_ENUM = {
+  horizon: ["usual", "fewer_shoots", "launch"],
+  hours: ["lt2", "2_5", "5_10", "10plus"],
+  goal: ["followers", "deals", "sell", "bookings", "consistency"],
+  style: ["on_camera", "behind", "photos", "help"],
+};
+function cleanPlanContext(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const out = {};
+  for (const [k, vals] of Object.entries(CTX_ENUM)) if (vals.includes(raw[k])) out[k] = raw[k];
+  if (typeof raw.link === "string" && raw.link.trim()) { const l = raw.link.trim().slice(0, 200); out.link = /^https?:\/\//i.test(l) ? l : `https://${l}`; }
+  if (typeof raw.notes === "string" && raw.notes.trim()) out.notes = raw.notes.trim().slice(0, 140);
+  if (typeof raw.contact === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw.contact.trim())) out.contact = raw.contact.trim().slice(0, 120);
+  return Object.keys(out).length ? out : null;
+}
+// Saved context for this account + handle, or the one sent with the request.
+async function resolvePlanContext(req, accountId, handle, platform) {
+  const sent = cleanPlanContext(req.body.plan_context);
+  if (sent && accountId && accountId !== "demo-account") { try { await geDb.setPlanContext(accountId, handle, platform, sent); } catch { /* best-effort */ } return sent; }
+  if (sent) return sent;
+  if (accountId && accountId !== "demo-account") { try { return await geDb.getPlanContext(accountId, handle, platform); } catch { return null; } }
+  return null;
+}
+
+router.get("/account/plan-context", authMiddleware, async (req, res) => {
+  try {
+    const { handle, platform } = req.query;
+    if (!handle || !platform) return sendError(res, 400, "MISSING", "handle and platform are required");
+    res.json({ plan_context: await geDb.getPlanContext(req.user.id, String(handle), String(platform)) });
+  } catch (err) { sendError(res, 500, "CONTEXT_ERROR", err.message); }
+});
+router.put("/account/plan-context", authMiddleware, async (req, res) => {
+  try {
+    const { handle, platform } = req.body;
+    if (!handle || !platform) return sendError(res, 400, "MISSING", "handle and platform are required");
+    const ctx = cleanPlanContext(req.body.plan_context);
+    if (!ctx) return sendError(res, 400, "INVALID_CONTEXT", "No valid answers");
+    res.json({ plan_context: await geDb.setPlanContext(req.user.id, String(handle), String(platform), ctx) });
+  } catch (err) { sendError(res, 500, "CONTEXT_ERROR", err.message); }
+});
+
 router.post("/evaluate/social-snapshot", optionalAuth, validateEvaluationRequest, async (req, res) => {
   try {
-    const { handle, platform, category, email } = req.body;
+    const { handle, platform, category } = req.body;
+    const email = req.body.email || req.user?.email || null;
     // Optional competitor handles from the form. Stored with the job; the
     // comparison itself is a Growth Plan feature and runs after the report.
     const competitors = (Array.isArray(req.body.competitors) ? req.body.competitors : [])
@@ -243,12 +286,17 @@ router.post("/evaluate/social-snapshot", optionalAuth, validateEvaluationRequest
       }
     }
 
+    // Paid runs carry the creator's intake answers (sent now, or saved earlier).
+    const plan_context = tier !== "social_snapshot" ? await resolvePlanContext(req, accountId, handle, platform) : null;
+    const input = { handle, platform, category, email, competitors, plan_context };
+    if (req.body.rerun_of && typeof req.body.rerun_of === "string") input.rerun_of = req.body.rerun_of.slice(0, 60);
+
     // Create job in database
-    const jobResult = await geDb.createJob(accountId, tier, { handle, platform, category, email, competitors });
+    const jobResult = await geDb.createJob(accountId, tier, input);
     const jobId = jobResult.jobId;
 
     // Process asynchronously (fire-and-forget)
-    jobQueue.processJob(jobId, accountId, tier, { handle, platform, category, email, competitors })
+    jobQueue.processJob(jobId, accountId, tier, input)
       .catch(err => console.error(`[Growth Engine] Async job ${jobId} error:`, err));
 
     res.json({ job_id: jobId, status: "queued", tier });
@@ -374,12 +422,50 @@ router.post("/reports/:reportId/unlock", authMiddleware, async (req, res) => {
     if (payment.status !== "succeeded" && !payment.mock) return res.status(402).json({ error: "Payment did not complete", code: "PAYMENT_INCOMPLETE", status: 402, payment });
 
     const b = report.business || {};
-    const input = { handle: b.handle, platform: b.platform, category: b.category, email: req.user.email || null, one_time_unlock: true, unlock_of: report.reportId, payment_id: payment.paymentId };
+    const plan_context = await resolvePlanContext(req, req.user.id, b.handle, b.platform);
+    const input = { handle: b.handle, platform: b.platform, category: b.category, email: req.user.email || null, one_time_unlock: true, unlock_of: report.reportId, payment_id: payment.paymentId, plan_context };
     const { jobId } = await geDb.createJob(req.user.id, "growth_plan", input);
     jobQueue.processJob(jobId, req.user.id, "growth_plan", input).catch((err) => console.error(`[Unlock] job ${jobId} failed:`, err.message));
     res.json({ job_id: jobId, status: "queued", tier: "growth_plan", one_time: true, payment: { id: payment.paymentId, amount: payment.amountFormatted } });
   } catch (err) {
     sendError(res, 500, "UNLOCK_ERROR", err.message);
+  }
+});
+
+// Phase check-in (day 30 / 60): "nothing changed" records the answer; "changed"
+// saves new answers and rewrites the plan. Also used to accept a nudge.
+router.post("/reports/:reportId/checkin", authMiddleware, async (req, res) => {
+  try {
+    const report = await geDb.getReport(req.params.reportId);
+    if (!report) return sendError(res, 404, "REPORT_NOT_FOUND", "Report not found");
+    if (report.accountId !== req.user.id) return sendError(res, 403, "NOT_YOUR_REPORT", "This report belongs to another account");
+    const body = report.reportBody || {};
+    if (!report.tier || report.tier === "social_snapshot" || body.one_time_unlock) return res.status(402).json({ error: "Check-ins and plan updates are part of the Growth Plan subscription.", code: "UPGRADE_REQUIRED", required_tier: "growth_plan", status: 402 });
+    const phase = Number(req.body.phase) || (body.nudge ? body.nudge.phase : 0);
+    const key = req.body.nudge ? `nudge_${String(req.body.nudge).slice(0, 30)}` : `p${phase}`;
+    const checkins = { ...(body.checkins || {}), [key]: { at: Date.now(), changed: !!req.body.changed } };
+    const patch = { checkins };
+    if (req.body.nudge) patch.nudge = null;
+    let ctx = null;
+    if (req.body.changed) {
+      const merged = { ...(body.plan_context || {}), ...(cleanPlanContext(req.body.plan_context) || {}), ...(req.body.nudge && body.nudge?.apply ? body.nudge.apply : {}) };
+      ctx = cleanPlanContext(merged);
+      if (ctx) await geDb.setPlanContext(req.user.id, body.business?.handle, body.business?.platform, ctx);
+    }
+    await geDb.patchReportBody(report.reportId, patch);
+    if (!req.body.changed || !ctx) return res.json({ ok: true, checkins });
+    // Rewrite the plan against the new answers. Counts as a paid run.
+    const limit = Number(process.env.PAID_RUNS_PER_DAY || 5);
+    const used = await geDb.getUsage(req.user.id, "eval");
+    if (used >= limit) return res.status(429).json({ error: `You've run ${used} evaluations today; the plan will pick up your answers at the next weekly refresh.`, code: "RUN_LIMIT_REACHED", status: 429, checkins });
+    await geDb.bumpUsage(req.user.id, "eval");
+    const b = body.business || {};
+    const input = { handle: b.handle, platform: b.platform, category: b.category, email: req.user.email || null, plan_context: ctx, rerun_of: report.reportId, checkins };
+    const { jobId } = await geDb.createJob(req.user.id, "growth_plan", input);
+    jobQueue.processJob(jobId, req.user.id, "growth_plan", input).catch((err) => console.error(`[Checkin] job ${jobId} failed:`, err.message));
+    res.json({ ok: true, checkins, job_id: jobId, status: "queued", tier: "growth_plan" });
+  } catch (err) {
+    sendError(res, 500, "CHECKIN_ERROR", err.message);
   }
 });
 

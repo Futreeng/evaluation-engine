@@ -257,6 +257,9 @@
     try {
       const body = { handle: payload.handle, platform: payload.platform, category: payload.category, email: payload.email };
       if (payload.competitors && payload.competitors.length) body.competitors = payload.competitors;
+      const ctx = payload.plan_context || sget('sc_plan_context', null);
+      if (ctx) body.plan_context = ctx;
+      if (payload.rerun_of) body.rerun_of = payload.rerun_of;
       const res = await api('/evaluate/social-snapshot', { method: 'POST', body: JSON.stringify(body) });
       sset('sc_job_' + res.job_id, { ...payload, submitted_at: Date.now() });
       go('#/evaluating/' + encodeURIComponent(res.job_id));
@@ -359,12 +362,12 @@
     const wk = [i * 4 + 1, i * 4 + 4];
     const moves = Array.isArray(p.moves) ? p.moves.filter(m => m && (m.action || m.title)) : [];
     const weeks = Array.isArray(p.calendar_weeks) ? p.calendar_weeks : [];
-    const firstLocked = i * (1 + count) + 2;
+    const firstLocked = i * 4 + 2; // openers are 01; moves run 02–13 across the three phases
     const teasers = Array.isArray(locked.items) && locked.items.length ? locked.items.map(it => it.meta || it.title || '') : [];
     return {
       key: 'p' + (i + 1), days, label: p.label || `Phase ${i + 1}`,
       action: p.visible_action || p.action || '', detail: p.detail || '',
-      moves, weeks, count, firstLocked, teasers, opener: p.opener || null,
+      moves, weeks, count, firstLocked, teasers, opener: p.opener || null, not_included: !!p.not_included,
       lockedHeader: /\d/.test(locked.teaser || '') ? locked.teaser : `${count} more moves + your weeks ${wk[0]}–${wk[1]} calendar`
     };
   }
@@ -472,6 +475,84 @@
   }
 
   // ------------------------------------------------------------ report
+  // ------------------------------------------------------------ plan setup (intake)
+  // Four taps and an optional line, asked once, between "start the plan" and
+  // payment. Saved on the account per handle; edited from the report.
+  const INTAKE = [
+    { key: 'horizon', q: 'Your next 90 days', opts: [['usual', 'Business as usual'], ['fewer_shoots', 'Fewer new shoots', 'no trips, off-season, injury, busy'], ['launch', 'Something launching', 'an event, a drop, a move']] },
+    { key: 'hours', q: 'Time you can give this each week', opts: [['lt2', 'Under 2 hours'], ['2_5', '2–5 hours'], ['5_10', '5–10 hours'], ['10plus', '10+ hours']] },
+    { key: 'goal', q: 'What you want from the next 90 days', opts: [['followers', 'More followers'], ['deals', 'Brand deals'], ['sell', 'Sell something', 'a guide, coaching, a product'], ['bookings', 'Bookings or clients'], ['consistency', 'Just get consistent']] },
+    { key: 'style', q: 'How you like to make content', opts: [['on_camera', 'On camera, talking'], ['behind', 'Behind the camera', 'voiceover, b-roll'], ['photos', 'Photos and carousels'], ['help', 'I have help', 'an editor or team']] },
+  ];
+  const ctxLabel = (k, v) => { const q = INTAKE.find(x => x.key === k); const o = q && q.opts.find(x => x[0] === v); return o ? o[1] : ''; };
+  function contextChips(ctx) {
+    if (!ctx) return '';
+    const parts = INTAKE.map(q => ctxLabel(q.key, ctx[q.key])).filter(Boolean);
+    return parts.map(t => h`<span class="chip">${t}</span>`).join('');
+  }
+  function viewPlanSetup() {
+    renderHeader('report');
+    const q = new URLSearchParams((location.hash.split('?')[1] || ''));
+    const reportId = q.get('report') || '';
+    const path = q.get('path') || 'subscribe';       // subscribe | once | edit | checkin
+    const phase = Number(q.get('phase')) || 0;
+    const report = reportId ? sget('sc_report_' + reportId, null) : null;
+    const biz = report?.business || sget('sc_form', {});
+    const saved = sget('sc_plan_context', null) || report?.plan_context || {};
+    const state = { ...saved };
+    const days = path === 'once' ? 60 : 90;
+    const heading = path === 'edit' ? 'Update your next 90 days' : path === 'checkin' ? `Phase ${phase} starts. What changed?` : `60 seconds so the plan fits your life.`;
+    const sub = path === 'once' ? 'Four taps. The 60-day plan is written around your answers.' : path === 'checkin' ? 'Change what changed. The plan is rewritten tonight.' : path === 'edit' ? 'The plan is rewritten against your new answers.' : 'Four taps. Every move and calendar slot is written around your answers, and we check back at day 30 and 60.';
+    const render = () => {
+      const needLink = state.goal === 'sell' || state.goal === 'bookings';
+      const needContact = state.goal === 'deals';
+      const complete = INTAKE.every(x => state[x.key]);
+      $view.innerHTML = h`
+        <div class="wrap narrow">
+          <div class="setup">
+            <div class="eyebrow">${biz.handle ? '@' + biz.handle + ' · ' : ''}${days}-day plan</div>
+            <h1>${heading}</h1>
+            <p class="sub">${sub}</p>
+            ${raw(INTAKE.map(x => h`<div class="qblock"><div class="q">${x.q.replace('90', String(days))}</div><div class="opts">${raw(x.opts.map(o => h`<button type="button" class="opt ${state[x.key] === o[0] ? 'on' : ''}" data-q="${x.key}" data-v="${o[0]}"><span>${o[1]}</span>${o[2] ? raw(h`<small>${o[2]}</small>`) : ''}</button>`).join(''))}</div></div>`).join(''))}
+            ${needLink ? raw(h`<div class="qblock"><div class="q">Where should the link go?</div><input type="url" id="ctxLink" class="txt" placeholder="yoursite.com/guide" value="${state.link || ''}"><div class="fine">The bio and CTA moves use this exact link instead of a placeholder.</div></div>`) : ''}
+            ${needContact ? raw(h`<div class="qblock"><div class="q">Email brands should use <span class="opt-note">optional</span></div><input type="email" id="ctxContact" class="txt" placeholder="collabs@you.com" value="${state.contact || ''}"><div class="fine">Goes into the bio and contact moves exactly as written.</div></div>`) : ''}
+            <div class="qblock"><div class="q">Anything else? <span class="opt-note">optional</span></div><input type="text" id="ctxNotes" class="txt" maxlength="140" placeholder="moving in November · just got a drone · off for three weeks" value="${state.notes || ''}"></div>
+            <button class="btn block" id="ctxGo" ${complete ? '' : 'disabled'}>${path === 'once' ? 'Continue to the $' + (sget('sc_once_price', 15)) + ' plan' : path === 'edit' || path === 'checkin' ? 'Rewrite my plan' : 'Continue to the plan'}</button>
+            ${path === 'checkin' ? raw(h`<a class="btn ghost block" href="#/report/${reportId}?checkin=${phase}&changed=0">Nothing changed — carry on</a>`) : path === 'edit' ? raw(h`<a class="btn ghost block" href="#/report/${reportId}">Cancel</a>`) : raw(h`<div class="fine center">You can change these any time from your report.</div>`)}
+          </div>
+        </div>${raw(footer())}`;
+      $view.querySelectorAll('.opt').forEach(b => b.addEventListener('click', () => { state[b.dataset.q] = b.dataset.v; const l = $view.querySelector('#ctxLink'); const n = $view.querySelector('#ctxNotes'); const c = $view.querySelector('#ctxContact'); if (l) state.link = l.value; if (n) state.notes = n.value; if (c) state.contact = c.value; render(); }));
+      $view.querySelector('#ctxGo').addEventListener('click', async e => {
+        const l = $view.querySelector('#ctxLink'); const n = $view.querySelector('#ctxNotes'); const c = $view.querySelector('#ctxContact');
+        const ctx = { horizon: state.horizon, hours: state.hours, goal: state.goal, style: state.style };
+        if (l && l.value.trim()) ctx.link = l.value.trim(); if (n && n.value.trim()) ctx.notes = n.value.trim().slice(0, 140); if (c && c.value.trim()) ctx.contact = c.value.trim();
+        sset('sc_plan_context', ctx);
+        const b = e.currentTarget; b.disabled = true; b.textContent = 'Saving…';
+        if (token() && biz.handle && biz.platform) { try { await api('/account/plan-context', { method: 'PUT', body: JSON.stringify({ handle: biz.handle, platform: biz.platform, plan_context: ctx }) }); } catch { } }
+        if (path === 'once') {
+          if (!token()) { sset('sc_next', '#/report/' + reportId); sset('sc_unlock_once', reportId); go('#/signup'); return; }
+          try {
+            const res = await api('/reports/' + encodeURIComponent(reportId) + '/unlock', { method: 'POST', body: JSON.stringify({ plan_context: ctx }) });
+            if (res.already_unlocked) { go('#/report/' + encodeURIComponent(res.report_id)); return; }
+            sset('sc_job_' + res.job_id, { handle: biz.handle, platform: biz.platform, category: biz.category, submitted_at: Date.now(), one_time: true });
+            toast(`Charged ${res.payment?.amount || ''} once. Writing your 60-day plan…`); go('#/evaluating/' + encodeURIComponent(res.job_id));
+          } catch (e2) { if (e2.status === 401) return; toast(e2.message || 'Unlock failed.'); b.disabled = false; b.textContent = 'Try again'; }
+          return;
+        }
+        if (path === 'edit' || path === 'checkin') {
+          try {
+            const res = await api('/reports/' + encodeURIComponent(reportId) + '/checkin', { method: 'POST', body: JSON.stringify({ phase: phase || undefined, changed: true, plan_context: ctx }) });
+            if (res.job_id) { sset('sc_job_' + res.job_id, { handle: biz.handle, platform: biz.platform, category: biz.category, submitted_at: Date.now(), rerun: true }); sessionStorage.removeItem('sc_report_' + reportId); toast('Rewriting your plan…'); go('#/evaluating/' + encodeURIComponent(res.job_id)); return; }
+            toast('Saved — the plan picks this up at the next refresh.'); go('#/report/' + reportId);
+          } catch (e2) { if (e2.status === 401) return; if (e2.status === 402) { sset('sc_intent_tier', 'growth_plan'); go('#/pricing'); return; } toast(e2.message || 'Could not save.'); b.disabled = false; b.textContent = 'Rewrite my plan'; }
+          return;
+        }
+        sset('sc_intent_tier', 'growth_plan'); go('#/pricing');
+      });
+    };
+    render();
+  }
+
   async function viewReport(reportId) {
     const isSample = reportId === 'sample';
     if (isSample && !SHIPPED) { renderHeader('report'); $view.innerHTML = h`<div class="center-msg"><h2>Score your own account to see a real one.</h2><a href="#/">Score my account</a></div>`; return; }
@@ -507,15 +588,30 @@
     const thisWeek = phases[0];
     const nextPhase = phases[1];
     const followers = biz.followers || report.followers || (report.post_insights && report.post_insights.followers) || null;
+    const qs = new URLSearchParams(location.hash.split('?')[1] || '');
+    const once = !!report.one_time_unlock;
+    const subscriber = paid && !once && !isSample;
+    const planDays = report.plan_days || (once ? 60 : 90);
+    const ctx = report.plan_context || null;
+    const ageDays = report.plan_started_at ? (Date.now() - report.plan_started_at) / 86400000 : 0;
+    const checkins = report.checkins || {};
+    // Phase check-in window: day 25–45 for phase 2, 55–75 for phase 3
+    const duePhase = subscriber ? ([[2, 25, 45], [3, 55, 75]].find(([ph, a, b]) => ageDays >= a && ageDays < b && !checkins['p' + ph]) || [])[0] : 0;
+    const nudge = subscriber && report.nudge ? report.nudge : null;
+    if (subscriber && qs.get('checkin') && qs.get('changed') === '1') { go(`#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=checkin&phase=${qs.get('checkin')}`); return; }
+    if (isSample) sset('sc_once_price', oneTime);
 
     renderHeader('report');
     $view.innerHTML = h`
       <div class="wrap">
         ${isSample ? raw(h`<div class="samplebar"><b>Sample report.</b> A real Growth Plan for a real account, scored ${fmtDate(report.created_at)}. Yours is written from your own posts. <a href="#/" data-scroll="evalForm">Score my account →</a></div>`) : ''}
         <div class="rhead">
-          <div class="l"><span class="h">@${biz.handle || ''}</span><span class="ctx">${platName(biz.platform)} · ${niche} · ${fmtDate(report.created_at)}</span>${paid ? raw(h`<span class="tag dark">${report.one_time_unlock ? 'UNLOCKED ONCE' : 'GROWTH PLAN'}</span>`) : ''}</div>
+          <div class="l"><span class="h">@${biz.handle || ''}</span><span class="ctx">${platName(biz.platform)} · ${niche} · ${fmtDate(report.created_at)}</span>${paid ? raw(h`<span class="tag dark">${once ? '60-DAY PLAN' : 'GROWTH PLAN'}</span>`) : ''}</div>
           <div class="r">${isSample ? '' : raw(h`<button class="btn ghost sm" data-action="email-report">Email me this report</button>`)}<button class="btn dark sm" data-action="share">${isSample ? 'Share this sample' : 'Share my score'}</button></div>
         </div>
+        ${paid ? raw(h`<div class="ctxrow">${ctx ? raw(contextChips(ctx) + (ctx.notes ? h`<span class="chip note">“${ctx.notes}”</span>` : '')) : raw(h`<span class="chip empty">Written without your answers</span>`)}${isSample ? '' : once ? '' : raw(h`<a class="edit" href="#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=edit">${ctx ? 'Plans changed? Update' : 'Tell us about your next 90 days'} →</a>`)}</div>`) : ''}
+        ${duePhase ? raw(h`<div class="checkin"><div class="t"><div class="eb">DAY ${Math.round(ageDays)} · CHECK-IN</div><h3>Phase ${duePhase} starts. Anything change?</h3><p>The next 30 days were written when you started. If your time, goal or next few weeks changed, the plan is rewritten tonight.</p></div><div class="acts"><button class="btn green" data-checkin="${duePhase}" data-changed="0">Nothing changed</button><a class="btn ghost" href="#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=checkin&phase=${duePhase}">Something changed</a></div></div>`) : ''}
+        ${nudge ? raw(h`<div class="checkin nudge" id="nudge"><div class="t"><div class="eb">FROM THIS WEEK'S RE-SCORE</div><h3>${nudge.title}</h3><p>${nudge.text}</p></div><div class="acts"><button class="btn" data-nudge="${nudge.key}" data-changed="1">${nudge.cta}</button><button class="btn ghost" data-nudge="${nudge.key}" data-changed="0">Keep the plan as is</button></div></div>`) : ''}
         <div class="report">
           <div class="toprow">
             <div class="card scorebox">
@@ -565,11 +661,11 @@
               const tone = ['var(--gold)', 'var(--green)', 'var(--purple)'][i % 3]; const toneT = ['var(--gold-t)', 'var(--green-t)', 'var(--c4t)'][i % 3];
               const total = 1 + p.moves.length; const doneN = (isDone(p.key + 'm1') ? 1 : 0) + p.moves.filter(m => isDone(p.key + 'm' + m.n)).length;
               return h`<div class="phase">
-                <div class="ph" style="background:${raw(tone)}"><span>${p.days} · ${p.label}</span>${paid && p.moves.length ? raw(h`<span class="prog" style="color:${raw(toneT)}">${doneN} of ${total} done</span>`) : ''}</div>
+                <div class="ph" style="background:${raw(tone)}"><span>${p.days} · ${p.label}</span>${paid && p.not_included ? raw(h`<span class="prog" style="color:${raw(toneT)}">Growth Plan only</span>`) : paid && p.moves.length ? raw(h`<span class="prog" style="color:${raw(toneT)}">${doneN} of ${total} done</span>`) : ''}</div>
                 <div class="pb">
                   ${paid && p.opener ? raw(h`<div class="mvrow opener ${isSample || i === 0 ? 'open' : ''} ${isDone(p.key + 'm1') ? 'on' : ''}" data-row="${p.key}m1"><button class="box" data-move="${p.key}m1" aria-label="Mark move 01 done">${isDone(p.key + 'm1') ? '✓' : ''}</button><div class="b"><div class="t">01 · ${p.label}</div><p>${p.action}</p>${p.detail ? raw(h`<p class="w">${p.detail}</p>`) : ''}${raw(moveDetailHTML(p.opener))}<span class="more" aria-hidden="true"></span></div></div>`)
                   : raw(h`<div class="move"><span class="n">01</span><p>${p.action}</p></div>`)}
-                  ${paid ? raw(p.moves.map(m => h`<div class="mvrow ${isSample || i === 0 ? 'open' : ''} ${isDone(p.key + 'm' + m.n) ? 'on' : ''}" data-row="${p.key}m${m.n}"><button class="box" data-move="${p.key}m${m.n}" aria-label="Mark move ${m.n} done">${isDone(p.key + 'm' + m.n) ? '✓' : ''}</button><div class="b"><div class="t">${String(m.n).padStart(2, '0')} · ${m.title || ''}</div><p>${m.action}</p>${m.why ? raw(h`<p class="w">Why: ${m.why}</p>`) : ''}${raw(moveDetailHTML(m))}<span class="more" aria-hidden="true"></span></div></div>`).join(''))
+                  ${paid && !p.not_included ? raw(p.moves.map(m => h`<div class="mvrow ${isSample || i === 0 ? 'open' : ''} ${isDone(p.key + 'm' + m.n) ? 'on' : ''}" data-row="${p.key}m${m.n}"><button class="box" data-move="${p.key}m${m.n}" aria-label="Mark move ${m.n} done">${isDone(p.key + 'm' + m.n) ? '✓' : ''}</button><div class="b"><div class="t">${String(m.n).padStart(2, '0')} · ${m.title || ''}</div><p>${m.action}</p>${m.why ? raw(h`<p class="w">Why: ${m.why}</p>`) : ''}${raw(moveDetailHTML(m))}<span class="more" aria-hidden="true"></span></div></div>`).join(''))
                   : raw(h`<div class="locked"><div class="rows">${raw((p.teasers.length ? p.teasers : Array.from({ length: p.count }, (_, k) => `MOVE ${String(p.firstLocked + k).padStart(2, '0')}`)).slice(0, 4).map((t, k) => h`<div>${String(p.firstLocked + k).padStart(2, '0')} · ${t.replace(/^MOVE \d+\s*·?\s*/i, '')}${/…$/.test(t) ? '' : '…'}</div>`).join(''))}
                       <div class="grid">${raw(Array.from({ length: 28 }, (_, k) => `<span style="${[0, 2, 4, 6].includes(k % 7) ? `background:var(--c${(Math.floor(k / 7) % 4) + 1})` : ''}"></span>`).join(''))}</div></div>
                     <div class="lk"><i>🔒</i>${p.lockedHeader}</div></div>`)}
@@ -577,10 +673,10 @@
           </details>`) : ''}
 
           ${paid && calWeeks.length ? raw(h`<details class="card acc" open>
-            <summary>Your 12-week calendar</summary>
+            <summary>Your ${calWeeks.length}-week calendar</summary>
             <div class="body" style="gap:8px">${raw(calWeeks.map((w, i) => h`<details class="week" ${i === 0 ? 'open' : ''}>
               <summary><span class="wk">WEEK ${w.week} · DAYS ${(w.week - 1) * 7 + 1}–${w.week * 7}</span><span class="sl">${(w.slots || []).map(sl => `${String(sl.day).slice(0, 3)} ${sl.format}`).join(' · ')}</span></summary>
-              <div class="slots">${raw((w.slots || []).map((sl, k) => h`<div class="slot bd${(k % 4) + 1}"><div class="d">${String(sl.day).slice(0, 3).toUpperCase()} · ${String(sl.format).toUpperCase()}</div><div class="a">${sl.angle}</div>${sl.prompt ? raw(h`<div class="p">${sl.prompt}</div>`) : ''}</div>`).join(''))}</div>
+              <div class="slots">${raw((w.slots || []).map((sl, k) => h`<div class="slot bd${(k % 4) + 1}"><div class="d">${String(sl.day).slice(0, 3).toUpperCase()} · ${String(sl.format).toUpperCase()}${sl.source ? raw(h`<span class="src ${sl.source}">${sl.source === 'new' ? 'NEW SHOOT' : sl.source === 'archive' ? 'FROM ARCHIVE' : 'NO CAMERA'}</span>`) : ''}</div><div class="a">${sl.angle}</div>${sl.prompt ? raw(h`<div class="p">${sl.prompt}</div>`) : ''}</div>`).join(''))}</div>
             </details>`).join(''))}</div>
           </details>`) : ''}
 
@@ -598,12 +694,14 @@
 
           ${!paid && sget('sc_limit_msg', null) ? raw(h`<div class="notice">${sget('sc_limit_msg', '')} <a href="#/pricing">See the plan →</a></div>`) : ''}
           ${isSample ? raw(h`<div class="refresh"><div class="t"><h3>This is what $${price} a month gets you</h3><p>Every move with the reason behind it, a 12-week calendar written from the account's own posts, competitors scored the same way, and a fresh score every week. Yours starts with a free Snapshot.</p></div><a class="btn green" href="#/" data-scroll="evalForm">Score my account free</a></div>`)
-          : paid && report.one_time_unlock ? raw(h`<div class="refresh once"><div class="t"><h3>Yours to keep</h3><p>You unlocked this report once. It won't refresh — start the Growth Plan to be re-scored every week and see what each move changed.</p></div><button class="btn green" data-action="unlock">Start the plan · $${price}/mo</button></div>`)
+          : paid && once ? raw(h`<div class="notin"><div class="hd"><h3>Not in your 60-day plan</h3><p>Yours to keep, as bought. This is what the Growth Plan adds, for $${price} a month — less than the $${oneTime} you paid once.</p></div>
+              <div class="rows">${raw(['Days 61–90 — phase 3, moves 10 through 13', 'Re-scored every week, with what each move changed', 'Day-30 and day-60 check-ins that reshape the plan', 'Up to 5 competitors, scored the same way', 'Score and follower history', 'A fresh plan every 90 days'].map(t => h`<div><i>🔒</i>${t}</div>`).join(''))}</div>
+              <button class="btn green" data-action="unlock">Start the plan · $${price}/mo</button></div>`)
           : paid ? raw(h`<div class="refresh"><div class="t"><h3>This plan refreshes weekly</h3><p>${Object.keys(done).length ? `You did ${Object.keys(done).length} move${Object.keys(done).length === 1 ? '' : 's'} — we'll re-score you and tell you what changed.` : 'Run it again any time — the moves and calendar are rewritten against your latest posts.'}</p></div><a class="btn green" href="#/" data-scroll="evalForm">Run a fresh evaluation</a></div>`)
           : raw(h`<div class="upsell"><h3>Unlock your full Growth Plan</h3><p>${report.upsell?.unlock_count || 12} locked items: the remaining moves and your week-by-week calendar, written from your own posts.</p>
               <div class="paths">
-                <div class="path main"><div class="pn">Growth Plan · <b>$${price}/mo</b></div><div class="pd">Re-scored every week. See what each move changed.</div><button class="btn" data-action="unlock">Start the plan →</button></div>
-                <div class="path"><div class="pn">Just this report · <b>$${oneTime}</b></div><div class="pd">Every move and the calendar, once. No subscription.</div><button class="btn light" data-action="unlock-once">Unlock once</button></div>
+                <div class="path main"><div class="pn">Growth Plan · <b>$${price}/mo</b></div><div class="pd">All 90 days, written around your life. Re-scored every week with check-ins at day 30 and 60.</div><button class="btn" data-action="unlock">Start the plan →</button></div>
+                <div class="path"><div class="pn">60-day plan · <b>$${oneTime} once</b></div><div class="pd">Phases 1 and 2 — moves 01–09 and 8 weeks of calendar, written once. No subscription.</div><button class="btn light" data-action="unlock-once">Get the 60-day plan</button></div>
               </div>
               <div class="fine">Cancel anytime. Keep the report either way.</div></div>`)}
 
@@ -625,18 +723,22 @@
       $view.querySelectorAll('.phase').forEach((ph, i) => { const p = phases[i]; if (!p || !paid) return; const total = 1 + p.moves.length; const dn = (isDone(p.key + 'm1') ? 1 : 0) + p.moves.filter(m => isDone(p.key + 'm' + m.n)).length; const el = ph.querySelector('.prog'); if (el) el.textContent = `${dn} of ${total} done`; });
     }));
     $view.querySelector('[data-action=share]').addEventListener('click', () => openShareSheet(report));
-    $view.querySelector('[data-action=unlock]')?.addEventListener('click', () => { sset('sc_intent_tier', 'growth_plan'); go('#/pricing'); });
-    $view.querySelector('[data-action=unlock-once]')?.addEventListener('click', async e => {
-      if (!token()) { sset('sc_next', location.hash); sset('sc_unlock_once', report.report_id); go('#/signup'); return; }
-      const b = e.currentTarget; b.disabled = true; b.textContent = 'Unlocking…';
+    // Both paid paths go through the 60-second intake first.
+    $view.querySelector('[data-action=unlock]')?.addEventListener('click', () => { sset('sc_intent_tier', 'growth_plan'); sset('sc_form', { handle: biz.handle, platform: biz.platform, category: biz.category, email: sget('sc_form', {}).email || report.email || '' }); go(`#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=subscribe`); });
+    $view.querySelector('[data-action=unlock-once]')?.addEventListener('click', () => { sset('sc_once_price', oneTime); go(`#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=once`); });
+    // Check-in "nothing changed" and nudge answers
+    const answer = async (b, body, doneMsg) => {
+      b.disabled = true;
       try {
-        const res = await api('/reports/' + encodeURIComponent(report.report_id) + '/unlock', { method: 'POST', body: JSON.stringify({}) });
-        if (res.already_unlocked) { go('#/report/' + encodeURIComponent(res.report_id)); return; }
-        sset('sc_job_' + res.job_id, { handle: biz.handle, platform: biz.platform, category: biz.category, submitted_at: Date.now(), one_time: true });
-        toast(`Charged ${res.payment?.amount || '$9'} once. Writing your full plan…`);
-        go('#/evaluating/' + encodeURIComponent(res.job_id));
-      } catch (e2) { if (e2.status === 401) return; toast(e2.message || 'Unlock failed.'); b.disabled = false; b.textContent = 'Unlock once'; }
-    });
+        const res = await api('/reports/' + encodeURIComponent(report.report_id) + '/checkin', { method: 'POST', body: JSON.stringify(body) });
+        if (res.job_id) { sset('sc_job_' + res.job_id, { handle: biz.handle, platform: biz.platform, category: biz.category, submitted_at: Date.now(), rerun: true }); sessionStorage.removeItem('sc_report_' + report.report_id); toast('Rewriting your plan…'); go('#/evaluating/' + encodeURIComponent(res.job_id)); return; }
+        report.checkins = res.checkins || report.checkins; if (body.nudge) report.nudge = null; sset('sc_report_' + report.report_id, report); toast(doneMsg); route();
+      } catch (e2) { if (e2.status === 401) return; toast(e2.message || 'Could not save.'); b.disabled = false; }
+    };
+    $view.querySelectorAll('[data-checkin]').forEach(b => b.addEventListener('click', () => answer(b, { phase: Number(b.dataset.checkin), changed: false }, 'Carrying on. We\'ll check in again next phase.')));
+    $view.querySelectorAll('[data-nudge]').forEach(b => b.addEventListener('click', () => answer(b, { nudge: b.dataset.nudge, changed: b.dataset.changed === '1' }, 'Kept as is.')));
+    if (subscriber && qs.get('checkin') && qs.get('changed') === '0' && !checkins['p' + qs.get('checkin')]) { const b = $view.querySelector('[data-checkin]'); if (b) b.click(); else answer({ disabled: false }, { phase: Number(qs.get('checkin')), changed: false }, 'Carrying on.'); }
+    if (qs.get('nudge')) document.getElementById('nudge')?.scrollIntoView({ behavior: 'smooth' });
     $view.querySelector('#compForm')?.addEventListener('submit', async e => {
       e.preventDefault(); const f = e.currentTarget; const btn = f.querySelector('button'); const out = $view.querySelector('#compResult');
       const handles = f.handles.value.split(/[,\s]+/).map(x => x.replace(/^@/, '').trim()).filter(Boolean).slice(0, 5);
@@ -709,7 +811,7 @@
               <button type="button" class="prohead" data-expand><div><div class="n">${pro.name}</div><div class="note">$${annual ? yr(pro) + '/yr' : pro.monthlyPrice + '/mo'} · all platforms together</div></div><span class="caret">${proOpen ? '–' : '+'}</span></button>
               ${proOpen ? raw(h`<div class="probody"><div class="feats">${raw((pro.features || []).map(f => h`<div>${f}</div>`).join(''))}</div><button type="button" class="btn ghost block" data-subscribe="growth_plan_pro" ${cur('growth_plan_pro') ? 'disabled' : ''}>${cur('growth_plan_pro') ? 'Current plan' : 'Choose Pro'}</button></div>`) : ''}
             </div>`) : ''}
-            ${raw((pricing.one_time || []).map(o => h`<div class="card tier once"><div class="th"><span class="n">${o.name}</span><span class="tag fair">ONE-TIME</span></div><div class="price"><span class="p">$${o.price}</span><span class="per">once</span></div><div class="note">${o.description}</div><div class="feats">${raw((o.features || []).map(f => h`<div>${f}</div>`).join(''))}</div><a class="btn ghost" href="${token() ? '#/reports' : '#/'}" ${token() ? '' : raw('data-scroll="evalForm"')}>${token() ? 'Pick a report to unlock' : 'Score first, then unlock'}</a></div>`).join(''))}
+            ${raw((pricing.one_time || []).map(o => h`<div class="card tier once"><div class="th"><span class="n">${o.name}</span><span class="tag fair">ONE-TIME</span></div><div class="price"><span class="p">$${o.price}</span><span class="per">once</span></div><div class="note">${o.description}</div><div class="feats">${raw((o.features || []).map(f => h`<div>${f}</div>`).join(''))}</div>${(o.not_included || []).length ? raw(h`<div class="notfeats"><div class="l">Not included</div>${raw(o.not_included.map(f => h`<div>${f}</div>`).join(''))}</div>`) : ''}<a class="btn ghost" href="${token() ? '#/reports' : '#/'}" ${token() ? '' : raw('data-scroll="evalForm"')}>${token() ? 'Pick a report to unlock' : 'Score first, then unlock'}</a></div>`).join(''))}
             <div class="quote">
               <div class="m">[REVIEW — replace before launch]</div>
               <p class="q">“One-line quote placeholder about what changed after six weeks.”</p>
@@ -728,7 +830,7 @@
           await api('/billing/subscribe', { method: 'POST', body: JSON.stringify({ tier: b.dataset.subscribe, billingCycle: billing }) });
           sessionStorage.removeItem('sc_intent_tier'); sessionStorage.removeItem('sc_limit_msg');
           const last = sget('sc_form', {});
-          if (last.handle && last.platform && last.category && last.email) { toast(`You're on. Writing the full plan for @${last.handle}…`); await submitEvaluation(last, null); return; }
+          if (last.handle && last.platform && last.category) { toast(`You're on. Writing the full plan for @${last.handle}…`); await submitEvaluation(last, null); return; }
           toast("You're on. Score an account to get the full plan."); go('#/');
         } catch (e) { if (e.status === 401) return; toast(e.message || 'Subscription failed.'); b.disabled = false; b.textContent = label; }
       }));
@@ -823,7 +925,7 @@
         const t = res.token || res.access_token; if (!t) throw new Error('No token in response');
         setToken(t); sessionStorage.removeItem('sc_next');
         const pendingUnlock = sget('sc_unlock_once', null);
-        if (pendingUnlock) { sessionStorage.removeItem('sc_unlock_once'); go('#/report/' + encodeURIComponent(pendingUnlock)); toast('Signed up — tap "Unlock once" again to finish.'); return; }
+        if (pendingUnlock) { sessionStorage.removeItem('sc_unlock_once'); go(`#/plan-setup?report=${encodeURIComponent(pendingUnlock)}&path=once`); toast('Signed up — one more step to your 60-day plan.'); return; }
         go(next && !/signin|signup/.test(next) ? next : '#/');
       } catch (e2) { err.textContent = e2.body?.code === 'EMAIL_EXISTS' ? 'That email already has an account — sign in instead.' : (e2.message || 'Sign-up failed.'); err.hidden = false; btn.disabled = false; btn.textContent = 'Create account'; }
     });
@@ -965,6 +1067,7 @@
     if (parts[0] === 'evaluating' && parts[1]) return viewEvaluating(decodeURIComponent(parts[1]));
     if (parts[0] === 'report' && parts[1]) return viewReport(decodeURIComponent(parts[1]));
     if (parts[0] === 'pricing') return viewPricing();
+    if (parts[0] === 'plan-setup') return viewPlanSetup();
     if (parts[0] === 'business') return viewBusiness();
     if (parts[0] === 'signin') return viewSignin();
     if (parts[0] === 'signup') return viewSignup();

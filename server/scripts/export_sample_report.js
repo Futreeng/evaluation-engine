@@ -13,7 +13,7 @@ const fs = require("fs");
 require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 const geDb = require("../growth_engine_db_select");
 
-const DROP = ["email", "account_id", "accountId", "one_time_unlock", "moves_done", "refresh_due_at", "raw_personas", "history", "upsell", "competitor_handles"];
+const DROP = ["email", "account_id", "accountId", "one_time_unlock", "moves_done", "refresh_due_at", "raw_personas", "history", "upsell", "competitor_handles", "checkins", "nudge", "nudges_sent", "emails_sent", "plan_started_at"];
 
 async function main() {
   const id = process.argv[2];
@@ -28,8 +28,11 @@ async function main() {
   body.created_at = body.created_at || body.generated_at || rep.generatedAt || rep.generated_at || Date.now();
   body.business = { ...(rep.business || body.business || {}) };
   delete body.business.email;
+  if (body.plan_context) delete body.plan_context.updated_at;
   if (body.competitors && body.competitors.you) body.competitors.you = { handle: body.business.handle, overall: body.scores?.overall };
   body.sample = true;
+  const strip = (arr) => Array.isArray(arr) ? arr.map((x) => String(x).replace(/^\s*(?:step\s*)?\d+[.)]\s*/i, "").trim()) : arr;
+  (body.growth_path?.phases || []).forEach((p) => { if (p.opener) p.opener.how = strip(p.opener.how); (p.moves || []).forEach((m) => { m.how = strip(m.how); }); });
   // Moves read 02–13 in order (01 is each phase's opener).
   (body.growth_path?.phases || []).forEach((p, i) => (p.moves || []).forEach((m, k) => { m.n = i * 4 + k + 2; }));
   // The LLM occasionally echoes a literal "null" from the profile data
