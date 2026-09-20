@@ -364,7 +364,7 @@
     return {
       key: 'p' + (i + 1), days, label: p.label || `Phase ${i + 1}`,
       action: p.visible_action || p.action || '', detail: p.detail || '',
-      moves, weeks, count, firstLocked, teasers,
+      moves, weeks, count, firstLocked, teasers, opener: p.opener || null,
       lockedHeader: /\d/.test(locked.teaser || '') ? locked.teaser : `${count} more moves + your weeks ${wk[0]}–${wk[1]} calendar`
     };
   }
@@ -531,6 +531,7 @@
               <div class="mv">MOVE 01</div>
               <p class="a">${thisWeek.action}</p>
               ${thisWeek.detail ? raw(h`<p class="w">${thisWeek.detail}</p>`) : ''}
+              ${paid && thisWeek.opener ? raw(moveDetailHTML(thisWeek.opener, true)) : ''}
               <button class="done ${isDone('p1m1') ? 'on' : ''}" data-move="p1m1"><span class="box">${isDone('p1m1') ? '✓' : ''}</span>Mark this move done</button>
               ${nextPhase ? raw(h`<div class="next">Next: Day 31 — ${nextPhase.label}</div>`) : ''}
             </div>`) : ''}
@@ -566,8 +567,9 @@
               return h`<div class="phase">
                 <div class="ph" style="background:${raw(tone)}"><span>${p.days} · ${p.label}</span>${paid && p.moves.length ? raw(h`<span class="prog" style="color:${raw(toneT)}">${doneN} of ${total} done</span>`) : ''}</div>
                 <div class="pb">
-                  <div class="move"><span class="n">01</span><p>${p.action}</p></div>
-                  ${paid ? raw(p.moves.map(m => h`<button class="mvrow ${isDone(p.key + 'm' + m.n) ? 'on' : ''}" data-move="${p.key}m${m.n}"><span class="box">${isDone(p.key + 'm' + m.n) ? '✓' : ''}</span><div class="b"><div class="t">${String(m.n).padStart(2, '0')} · ${m.title || ''}</div><p>${m.action}</p>${m.why ? raw(h`<p class="w">Why: ${m.why}</p>`) : ''}</div></button>`).join(''))
+                  ${paid && p.opener ? raw(h`<div class="mvrow opener ${isSample || i === 0 ? 'open' : ''} ${isDone(p.key + 'm1') ? 'on' : ''}" data-row="${p.key}m1"><button class="box" data-move="${p.key}m1" aria-label="Mark move 01 done">${isDone(p.key + 'm1') ? '✓' : ''}</button><div class="b"><div class="t">01 · ${p.label}</div><p>${p.action}</p>${p.detail ? raw(h`<p class="w">${p.detail}</p>`) : ''}${raw(moveDetailHTML(p.opener))}<span class="more" aria-hidden="true"></span></div></div>`)
+                  : raw(h`<div class="move"><span class="n">01</span><p>${p.action}</p></div>`)}
+                  ${paid ? raw(p.moves.map(m => h`<div class="mvrow ${isSample || i === 0 ? 'open' : ''} ${isDone(p.key + 'm' + m.n) ? 'on' : ''}" data-row="${p.key}m${m.n}"><button class="box" data-move="${p.key}m${m.n}" aria-label="Mark move ${m.n} done">${isDone(p.key + 'm' + m.n) ? '✓' : ''}</button><div class="b"><div class="t">${String(m.n).padStart(2, '0')} · ${m.title || ''}</div><p>${m.action}</p>${m.why ? raw(h`<p class="w">Why: ${m.why}</p>`) : ''}${raw(moveDetailHTML(m))}<span class="more" aria-hidden="true"></span></div></div>`).join(''))
                   : raw(h`<div class="locked"><div class="rows">${raw((p.teasers.length ? p.teasers : Array.from({ length: p.count }, (_, k) => `MOVE ${String(p.firstLocked + k).padStart(2, '0')}`)).slice(0, 4).map((t, k) => h`<div>${String(p.firstLocked + k).padStart(2, '0')} · ${t.replace(/^MOVE \d+\s*·?\s*/i, '')}${/…$/.test(t) ? '' : '…'}</div>`).join(''))}
                       <div class="grid">${raw(Array.from({ length: 28 }, (_, k) => `<span style="${[0, 2, 4, 6].includes(k % 7) ? `background:var(--c${(Math.floor(k / 7) % 4) + 1})` : ''}"></span>`).join(''))}</div></div>
                     <div class="lk"><i>🔒</i>${p.lockedHeader}</div></div>`)}
@@ -610,11 +612,14 @@
       </div>${raw(footer())}`;
 
     // move done toggles
-    $view.querySelectorAll('[data-move]').forEach(b => b.addEventListener('click', async () => {
+    $view.querySelectorAll('.mvrow .b').forEach(b => b.addEventListener('click', e => { if (e.target.closest('a')) return; b.closest('.mvrow').classList.toggle('open'); }));
+    $view.querySelectorAll('[data-move]').forEach(b => b.addEventListener('click', async e => {
+      e.stopPropagation();
       const k = b.dataset.move; const now = !isDone(k);
       if (now) done[k] = Date.now(); else delete done[k];
       if (!isSample) lset(doneKey, done);
-      b.classList.toggle('on', now); b.querySelector('.box').textContent = now ? '✓' : '';
+      const row = b.closest('.mvrow, .done') || b; row.classList.toggle('on', now); (b.classList.contains('box') ? b : b.querySelector('.box')).textContent = now ? '✓' : '';
+      $view.querySelectorAll(`[data-move="${k}"]`).forEach(o => { if (o === b) return; const r = o.closest('.mvrow, .done') || o; r.classList.toggle('on', now); (o.classList.contains('box') ? o : o.querySelector('.box')).textContent = now ? '✓' : ''; });
       if (token() && paid && !isSample) { try { await api('/reports/' + encodeURIComponent(report.report_id) + '/moves', { method: 'POST', body: JSON.stringify({ key: k, done: now }) }); } catch { } }
       if (!isSample) { report.moves_done = done; sset('sc_report_' + report.report_id, report); }
       $view.querySelectorAll('.phase').forEach((ph, i) => { const p = phases[i]; if (!p || !paid) return; const total = 1 + p.moves.length; const dn = (isDone(p.key + 'm1') ? 1 : 0) + p.moves.filter(m => isDone(p.key + 'm' + m.n)).length; const el = ph.querySelector('.prog'); if (el) el.textContent = `${dn} of ${total} done`; });
@@ -642,6 +647,15 @@
       btn.disabled = false; btn.textContent = 'Re-run';
     });
     if (!paid) api('/billing/pricing', {}, { allow401: true }).then(p => { const t = (p.tiers || []).find(x => x.tier === 'growth_plan'); if (t && t.monthlyPrice != null) { const el = $view.querySelector('.upsell p'); if (el) el.textContent = el.textContent.replace(/\$\d+\/mo or \$\d+\/yr/, `$${t.monthlyPrice}/mo or $${t.annualPrice ?? Math.round(t.monthlyPrice * 9)}/yr`); } }).catch(() => { });
+  }
+  // The "how" under a move: numbered steps, paste-ready example, done-when, time.
+  function moveDetailHTML(d, dark) {
+    if (!d || (!(d.how || []).length && !d.example && !d.done_when)) return '';
+    return h`<div class="mvdetail ${dark ? 'dark' : ''}">
+      ${(d.how || []).length ? raw(h`<ol class="how">${raw(d.how.map(x => h`<li>${x}</li>`).join(''))}</ol>`) : ''}
+      ${d.example ? raw(h`<div class="ex"><div class="exl">Starting point — make it yours</div><div class="ext">${d.example}</div></div>`) : ''}
+      <div class="dw">${d.done_when ? raw(h`<span><b>Done when:</b> ${d.done_when}</span>`) : ''}${d.time ? raw(h`<span class="tm">${d.time}</span>`) : ''}</div>
+    </div>`;
   }
   function competitorRows(c) {
     const rows = [...c.competitors.filter(x => x.ok !== false).map(x => ({ ...x, you: false })), { handle: c.you.handle, overall: c.you.overall, you: true }].sort((a, b) => b.overall - a.overall);

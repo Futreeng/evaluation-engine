@@ -87,8 +87,13 @@ Finally, after the report, output a machine-readable block on its own lines, exa
   },
 };
 
-// Tier 1: everything the free report locked, written from the same data.
-const PLAN_MOVES_PROMPT = `You are the Plan Writer for Scalecraft. A small-business owner has paid for their Growth Plan. You have their public account data, category benchmarks, and the free snapshot (scores + the first move of each 30-day phase). Write the remaining moves. Be specific to THIS account: use its real posting days, formats, gaps, bio wording, caption themes, best/worst posts and numbers. Every move must cite a specific post, number, day or bio line from the data. No generic advice (no "run a giveaway", "engage with your audience").
+// One call per 30-day phase, run in parallel. Each move carries the how,
+// a ready-to-paste example, a done-when check and a time cost — the part a
+// creator actually needs to act. Three smaller calls keep each response
+// inside the output budget of the fallback models.
+const PLAN_PHASE_PROMPT = `You are the Plan Writer for Scalecraft. A creator has paid for their Growth Plan. You have their public account data, category benchmarks, and the free snapshot (scores + the first move of each 30-day phase). Write phase {{PHASE_RANGE}} ("{{PHASE_LABEL}}") in full: implementation detail for its first move, then the {{MOVE_COUNT}} remaining moves (numbered {{MOVE_FIRST}} to {{MOVE_LAST}}).
+
+Be specific to THIS account: use its real posting days, formats, gaps, bio wording, caption themes, best/worst posts and numbers. Every move must cite a specific post, number, day or bio line from the data. No generic advice (no "run a giveaway", "engage with your audience"). Where the profile data shows a field as null or missing, say "empty" or "missing" — never write the word null.
 
 Handle: {{HANDLE}} ({{PLATFORM}})
 Category: {{CATEGORY}}
@@ -96,15 +101,20 @@ Account data: {{RECENT_POST_SUMMARY}}
 Best and worst recent posts: {{POST_INSIGHTS}}
 Category benchmarks: {{CATEGORY_BENCHMARKS}}
 Snapshot (already shown to the owner): {{SNAPSHOT_JSON}}
+This phase's first move (already written — do not repeat it as a numbered move): {{FIRST_MOVE}}
+{{OTHER_PHASES}}
+
+Field rules:
+- "how": 3 to 5 numbered steps, each under 20 words, concrete to {{PLATFORM}}'s actual screens ("Edit profile → Links → Add external link") and to this account's own posts and wording.
+- "example": ready-to-paste copy the creator can use as a starting point — the literal bio line, highlight names, hook sentence, caption closer, DM script. Written in this account's own voice, taken from its captions. Under 60 words. Use null only when a move has nothing to paste (e.g. a scheduling habit).
+- "done_when": one check the creator can verify on their own profile in ten seconds, under 15 words.
+- "time": effort in plain words, e.g. "20 min, once", "10 min per post, ongoing", "1 hour this week".
 
 Produce ONLY a JSON object, no prose, no markdown fences:
 {"posting_days":["Mon","Wed","Sat"],"posting_time":"7:15am",
- "phases":[
-  {"range":"1-30","moves":[{"n":2,"title":"under 6 words","action":"one imperative sentence, under 25 words","why":"one sentence under 25 words tied to a number, post or bio line from the data"},{"n":3,...},{"n":4,...},{"n":5,...}]},
-  {"range":"31-60","moves":[{"n":6,...},{"n":7,...},{"n":8,...},{"n":9,...}]},
-  {"range":"61-90","moves":[{"n":10,...},{"n":11,...},{"n":12,...},{"n":13,...}]}
- ]}
-posting_days must match the snapshot's first move if it names days. Moves must not repeat the snapshot's first moves. Valid JSON only.`;
+ "first_move":{"how":["step","step","step"],"example":"…or null","done_when":"…","time":"…"},
+ "moves":[{"n":{{MOVE_FIRST}},"title":"under 6 words","action":"one imperative sentence, under 25 words","why":"one sentence under 25 words tied to a number, post or bio line from the data","how":["…","…","…"],"example":"…or null","done_when":"…","time":"…"}, … {{MOVE_COUNT}} moves total]}
+posting_days must match the snapshot's first moves if they name days. Valid JSON only.`;
 
 const PLAN_CALENDAR_PROMPT = `You are the Plan Writer for Scalecraft. Write a 12-week posting calendar for this account, built from its own best-performing formats and subjects.
 
@@ -190,7 +200,7 @@ function formatInstagramDataForAnalysis(instagramData) {
     following_count: instagramData.following_count,
     post_count: instagramData.post_count,
     biography: instagramData.biography || null,
-    website: instagramData.website || null,
+    website: instagramData.website || "empty (no link in bio)",
     metrics: instagramData.analysis,
     recent_activity: instagramData.recent_posts.slice(0, 12).map((p) => ({
       date: p.timestamp.split("T")[0],
@@ -700,26 +710,34 @@ async function evaluateTier1(accountId, inputParams, onStage = () => {}) {
     return null;
   };
 
-  // Two smaller calls instead of one big one: the combined plan ran past the
-  // output limits of the fallback models and came back truncated.
-  let moves = await askJson(interpolateTemplate(PLAN_MOVES_PROMPT, baseVars), "Plan Writer: moves", 6144);
-  const movesCount = (m) => {
-    if (!m) return 0;
-    if (Array.isArray(m.moves)) return m.moves.length;
-    const ph = Array.isArray(m.phases) ? m.phases : m.phases && typeof m.phases === "object" ? Object.values(m.phases) : [];
-    return ph.reduce((n, p) => n + (Array.isArray(p) ? p.length : Array.isArray(p?.moves) ? p.moves.length : 0), 0);
-  };
-  if (moves && movesCount(moves) === 0) {
-    console.warn("[Growth Engine] Plan Writer: moves parsed but empty, retrying once");
-    moves = (await askJson(interpolateTemplate(PLAN_MOVES_PROMPT, baseVars), "Plan Writer: moves (retry)", 6144)) || moves;
-  }
-  if (!moves) throw new Error("Plan Writer returned no usable plan");
-  if (movesCount(moves) === 0) {
-    // Don't throw the whole paid report away over one flaky call; ship the
-    // snapshot + calendar and mark it for an early refresh.
-    console.warn("[Growth Engine] Plan Writer: no moves after retry — shipping partial plan");
+  // One call per phase, in parallel. Each phase's moves carry how / example /
+  // done_when / time, which is too much output for one call on the fallback
+  // models; splitting also means one flaky call loses a phase, not the plan.
+  const snapPhases = reportBody.growth_path?.phases ?? [];
+  const MOVES_PER_PHASE = 4;
+  const phaseResults = await Promise.all(snapPhases.slice(0, 3).map((p, i) => {
+    const first = i * MOVES_PER_PHASE + 2;
+    const others = snapPhases.filter((_, k) => k !== i).map((q) => `${q.range}: ${q.label} — first move: ${q.visible_action}`);
+    return askJson(interpolateTemplate(PLAN_PHASE_PROMPT, {
+      ...baseVars,
+      PHASE_RANGE: p.range, PHASE_LABEL: p.label || `Phase ${i + 1}`, FIRST_MOVE: p.visible_action || "",
+      MOVE_COUNT: MOVES_PER_PHASE, MOVE_FIRST: first, MOVE_LAST: first + MOVES_PER_PHASE - 1,
+      OTHER_PHASES: others.length ? `Other phases (do not overlap with them):\n${others.join("\n")}` : "",
+    }), `Plan Writer: phase ${i + 1}`, 6144).then((r) => (r && Array.isArray(r.moves) && r.moves.length ? r : null));
+  }));
+  const gotPhases = phaseResults.filter(Boolean);
+  if (!gotPhases.length) throw new Error("Plan Writer returned no usable plan");
+  if (gotPhases.length < snapPhases.slice(0, 3).length) {
+    // Don't throw the whole paid report away over one flaky call; ship what
+    // came back and mark it for an early refresh.
+    console.warn(`[Growth Engine] Plan Writer: ${gotPhases.length} of ${snapPhases.length} phases written — shipping partial plan`);
     reportBody.plan_incomplete = true;
   }
+  const lead = phaseResults[0] || gotPhases[0];
+  const moves = {
+    posting_days: lead.posting_days, posting_time: lead.posting_time,
+    phases: snapPhases.slice(0, 3).map((p, i) => ({ range: p.range, moves: phaseResults[i]?.moves || [], first_move: phaseResults[i]?.first_move || null })),
+  };
   const calendarRaw = await askJson(interpolateTemplate(PLAN_CALENDAR_PROMPT, {
     ...baseVars,
     POSTING_DAYS: (moves.posting_days || []).join(", ") || "Mon, Wed, Fri",
@@ -755,10 +773,16 @@ async function evaluateTier1(accountId, inputParams, onStage = () => {}) {
   if (!reportBody.growth_path) reportBody.growth_path = { phases: [] };
   reportBody.growth_path.phases = reportBody.growth_path.phases.map((p, i) => {
     const extra = planPhases.find((x) => x.range === normRange(p.range)) || planPhases[i] || { moves: [] };
+    const detail = (m) => ({
+      how: Array.isArray(m.how) ? m.how.map((x) => String(x)).filter(Boolean).slice(0, 6) : [],
+      example: m.example && String(m.example).trim() && !/^null$/i.test(String(m.example).trim()) ? String(m.example).trim() : null,
+      done_when: m.done_when ? String(m.done_when) : "", time: m.time ? String(m.time) : "",
+    });
     const moves = (Array.isArray(extra.moves) ? extra.moves : []).map((m, k) => ({
-      n: Number(m.n) || i * 4 + k + 2, title: String(m.title || ""), action: String(m.action || ""), why: String(m.why || ""),
+      n: i * MOVES_PER_PHASE + k + 2, title: String(m.title || ""), action: String(m.action || ""), why: String(m.why || ""), ...detail(m),
     }));
-    return { ...p, moves, locked: { count: 0, teaser: "" }, calendar_weeks: weeks.filter((w) => w.phase === i + 1) };
+    const opener = extra.first_move && typeof extra.first_move === "object" ? detail(extra.first_move) : null;
+    return { ...p, moves, opener, locked: { count: 0, teaser: "" }, calendar_weeks: weeks.filter((w) => w.phase === i + 1) };
   });
   reportBody.growth_path.unlocked_steps = reportBody.growth_path.phases.reduce((n, p) => n + 1 + p.moves.length, 0);
   reportBody.growth_path.total_steps = reportBody.growth_path.unlocked_steps;

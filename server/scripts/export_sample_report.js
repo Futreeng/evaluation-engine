@@ -30,6 +30,8 @@ async function main() {
   delete body.business.email;
   if (body.competitors && body.competitors.you) body.competitors.you = { handle: body.business.handle, overall: body.scores?.overall };
   body.sample = true;
+  // Moves read 02–13 in order (01 is each phase's opener).
+  (body.growth_path?.phases || []).forEach((p, i) => (p.moves || []).forEach((m, k) => { m.n = i * 4 + k + 2; }));
   // The LLM occasionally echoes a literal "null" from the profile data
   // ("website is set to null"). Read it as a person would.
   const scrub = (v) => typeof v === "string" ? v.replace(/\b(set to|shows|is|currently) null\b/gi, (m, w) => `${w} empty`).replace(/\bnull\b/g, "empty") : Array.isArray(v) ? v.map(scrub) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, scrub(x)])) : v;

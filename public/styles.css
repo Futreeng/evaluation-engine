@@ -313,7 +313,28 @@ p { margin: 0; }
 .mvrow .b .t { font-size: 15px; font-weight: 600; }
 .mvrow .b p { margin-top: 6px; font-size: 14px; line-height: 1.5; color: var(--body); }
 .mvrow .b .w { font-size: 13px; color: var(--muted); }
-.mvrow.on .b p, .mvrow.on .b .w { display: none; }
+.mvrow .box { cursor: pointer; background: transparent; color: var(--ink); padding: 0; }
+.mvrow .b { cursor: pointer; position: relative; padding-right: 22px; }
+.mvrow .b .more { position: absolute; right: 0; top: 4px; width: 10px; height: 10px; border-right: 2px solid var(--muted2); border-bottom: 2px solid var(--muted2); transform: rotate(45deg); transition: transform .15s; }
+.mvrow.open .b .more { transform: rotate(-135deg); top: 9px; }
+.mvrow .mvdetail { display: none; }
+.mvrow.open .mvdetail { display: block; }
+.mvrow.on .b p, .mvrow.on .b .w, .mvrow.on .mvdetail, .mvrow.on .b .more { display: none; }
+.mvrow.opener { background: var(--card); border: 1px solid var(--line); }
+.mvdetail { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line2); font-size: 14px; line-height: 1.5; color: var(--body); }
+.mvdetail .how { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
+.mvdetail .how li::marker { color: var(--muted2); font-weight: 600; }
+.mvdetail .ex { margin-top: 12px; padding: 12px 14px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
+.mvdetail .exl { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.mvdetail .ext { margin-top: 6px; font-family: var(--display); font-size: 15px; line-height: 1.45; color: var(--ink); white-space: pre-wrap; }
+.mvdetail .dw { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 12px; font-size: 13px; color: var(--muted); }
+.mvdetail .dw b { color: var(--ink); font-weight: 600; }
+.mvdetail .dw .tm { margin-left: auto; padding: 2px 9px; border-radius: 999px; background: var(--track2); color: var(--body); font-weight: 600; }
+.mvdetail.dark { border-top-color: rgba(255,255,255,.3); color: var(--on-dark); }
+.mvdetail.dark .how li::marker { color: rgba(255,255,255,.7); }
+.mvdetail.dark .ex { background: var(--act-deep); border-color: transparent; }
+.mvdetail.dark .exl { color: rgba(255,255,255,.7); } .mvdetail.dark .ext { color: var(--on-dark); }
+.mvdetail.dark .dw, .mvdetail.dark .dw b { color: var(--on-dark); } .mvdetail.dark .dw .tm { background: var(--act-deep); color: var(--on-dark); }
 .week { padding: 14px 16px; background: var(--ground); border-radius: var(--r-in); }
 .week summary { list-style: none; cursor: pointer; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
 .week summary::-webkit-details-marker { display: none; }
