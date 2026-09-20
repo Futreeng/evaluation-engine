@@ -165,6 +165,8 @@ function initSchema() {
 
   // Cancel-at-period-end: tier stays until this timestamp, then reads as free.
   try { db.run(`ALTER TABLE entitlements ADD COLUMN cancel_at INTEGER`); } catch { /* exists */ }
+  // "Pause these emails": check-ins, score changes and plan-ended stop; reset + report-ready still send.
+  try { db.run(`ALTER TABLE users ADD COLUMN email_paused INTEGER DEFAULT 0`); } catch { /* exists */ }
 
   // Password reset tokens: sha256 of the emailed token, single use, 1h.
   db.run(`
@@ -858,6 +860,7 @@ async function getUserByEmail(email) {
     companyName: row[columns.indexOf("company_name")],
     createdAt: row[columns.indexOf("created_at")],
     updatedAt: row[columns.indexOf("updated_at")],
+    emailPaused: columns.includes("email_paused") ? !!row[columns.indexOf("email_paused")] : false,
   };
 }
 
@@ -883,7 +886,19 @@ async function getUserById(userId) {
     companyName: row[columns.indexOf("company_name")],
     createdAt: row[columns.indexOf("created_at")],
     updatedAt: row[columns.indexOf("updated_at")],
+    emailPaused: columns.includes("email_paused") ? !!row[columns.indexOf("email_paused")] : false,
   };
+}
+
+async function setEmailPaused(userId, paused) {
+  if (!db) throw new Error("Database not initialized");
+  db.run(`UPDATE users SET email_paused = ?, updated_at = ? WHERE user_id = ?`, [paused ? 1 : 0, Date.now(), userId]);
+  saveDb();
+  return getUserById(userId);
+}
+async function isEmailPaused(email) {
+  const u = await getUserByEmail(String(email || "").toLowerCase());
+  return !!(u && u.emailPaused);
 }
 
 async function updateUserPassword(userId, passwordHash) {
@@ -945,4 +960,6 @@ module.exports = {
   getUserByEmail,
   getUserById,
   updateUserPassword,
+  setEmailPaused,
+  isEmailPaused,
 };

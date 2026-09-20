@@ -7,6 +7,10 @@ const JobQueue = require("../growth_engine_job_queue");
 const { compareCompetitors, MAX_COMPETITORS } = require("../growth_engine_competitors");
 const { signup, login, verifyJWT, requestPasswordReset, resetPassword } = require("../auth");
 const mailer = require("../mailer");
+const rateLimit = require("express-rate-limit");
+// Sign-in, sign-up and reset: 20 attempts per IP per 15 minutes. The router
+// already sits under the general 120/min limiter; this is the brute-force one.
+const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false, message: { error: "Too many attempts. Try again in 15 minutes.", code: "RATE_LIMITED", status: 429 } });
 const {
   sendError,
   validateAuthRequest,
@@ -37,6 +41,10 @@ const authMiddleware = async (req, res, next) => {
 
   const user = await verifyJWT(token);
   if (!user) return sendError(res, 401, "INVALID_TOKEN", "Invalid or expired token");
+  // A JWT outlives the account it was issued for (deleted, or password
+  // reset elsewhere) unless we check the account still exists.
+  try { const row = await geDb.getUserById(user.id); if (!row) return sendError(res, 401, "INVALID_TOKEN", "This account no longer exists"); }
+  catch { /* DB hiccup: fall through on the signed token */ }
 
   req.user = user;
   next();
@@ -78,7 +86,7 @@ router.get("/health", async (req, res) => {
 // ===================== AUTH ENDPOINTS =====================
 
 // POST /auth/signup
-router.post("/auth/signup", validateAuthRequest, async (req, res) => {
+router.post("/auth/signup", authLimiter, validateAuthRequest, async (req, res) => {
   try {
     const { email, password, company_name } = req.body;
     const result = await signup(email, password, company_name);
@@ -94,7 +102,7 @@ router.post("/auth/signup", validateAuthRequest, async (req, res) => {
 // Password reset. Same reply whether or not the email exists; 5 requests
 // per email per hour, in-process (enough to blunt abuse of the mailer).
 const resetHits = new Map();
-router.post("/auth/forgot", async (req, res) => {
+router.post("/auth/forgot", authLimiter, async (req, res) => {
   try {
     const email = String(req.body?.email || "").trim().toLowerCase();
     const ok = { ok: true, message: "If that email has an account, a reset link is on its way." };
@@ -108,7 +116,7 @@ router.post("/auth/forgot", async (req, res) => {
     res.json(ok);
   } catch (err) { console.error("[Auth] forgot failed:", err.message); res.json({ ok: true, message: "If that email has an account, a reset link is on its way." }); }
 });
-router.post("/auth/reset", async (req, res) => {
+router.post("/auth/reset", authLimiter, async (req, res) => {
   try {
     const password = String(req.body?.password || "");
     if (password.length < 6) return sendError(res, 400, "INVALID_PASSWORD", "Password must be at least 6 characters");
@@ -119,7 +127,7 @@ router.post("/auth/reset", async (req, res) => {
 });
 
 // POST /auth/login
-router.post("/auth/login", validateAuthRequest, async (req, res) => {
+router.post("/auth/login", authLimiter, validateAuthRequest, async (req, res) => {
   try {
     const { email, password } = req.body;
     const result = await login(email, password);
@@ -181,10 +189,29 @@ router.get("/account/subscription-status", authMiddleware, async (req, res) => {
       billing_period_end: ent.billingPeriodEnd,
       cancel_at: ent.cancelAt || null,
       status: ent.currentTier === "social_snapshot" ? "free" : ent.cancelAt ? "cancel_pending" : "active",
+      email_paused: !!(await geDb.getUserById(req.user.id))?.emailPaused,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// "Pause these emails" from an email footer: signed link, no login. Report-
+// ready and password-reset emails still send; check-ins and score changes stop.
+router.get("/email/pause", async (req, res) => {
+  const u = String(req.query.u || ""), sig = String(req.query.s || "");
+  const ok = u && sig && sig === mailer.pauseSig(u);
+  if (ok) { try { await geDb.setEmailPaused(u, true); } catch { /* fall through */ } }
+  const app = (process.env.APP_URL || "").replace(/\/$/, "") || "";
+  res.type("html").send(`<!DOCTYPE html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Scalecraft</title>
+<body style="margin:0;background:#FFF6E9;font-family:Helvetica,Arial,sans-serif;color:#2A2118"><div style="max-width:520px;margin:48px auto;padding:28px;background:#FFFDF8;border:1px solid #EADFCB;border-radius:24px">
+<h1 style="margin:0;font-size:26px">${ok ? "Paused." : "That link didn't work."}</h1>
+<p style="font-size:16px;line-height:1.6;color:#5B4C3B">${ok ? "Check-ins and score updates are off. Your plan keeps running and your reports stay. Resume any time from your reports page." : "It may have been altered. Sign in and use the plan card on your reports page instead."}</p>
+<a href="${app}/#/reports" style="display:inline-block;margin-top:8px;padding:12px 18px;border-radius:12px;background:#D2603A;color:#FFF6E9;text-decoration:none;font-weight:700">Your reports</a></div>`);
+});
+router.post("/account/email/pause", authMiddleware, async (req, res) => {
+  try { const u = await geDb.setEmailPaused(req.user.id, !!req.body.paused); res.json({ email_paused: !!u.emailPaused }); }
+  catch (err) { sendError(res, 500, "PAUSE_ERROR", err.message); }
 });
 
 // Cancel at period end — one call, no questions. Reports and history stay.
@@ -333,8 +360,9 @@ router.post("/evaluate/social-snapshot", optionalAuth, validateEvaluationRequest
       }
     }
 
-    // Paid runs carry the creator's intake answers (sent now, or saved earlier).
-    const plan_context = tier !== "social_snapshot" ? await resolvePlanContext(req, accountId, handle, platform) : null;
+    // Intake answers: the free form may send just the 90-day horizon; paid
+    // runs carry the full set (sent now, or saved earlier).
+    const plan_context = await resolvePlanContext(req, accountId, handle, platform);
     const input = { handle, platform, category, email, competitors, plan_context };
     if (req.body.rerun_of && typeof req.body.rerun_of === "string") input.rerun_of = req.body.rerun_of.slice(0, 60);
 
@@ -651,6 +679,9 @@ router.post("/billing/webhook", async (req, res) => {
 
 // Queue stats (admin endpoint)
 router.get("/admin/queue-stats", async (req, res) => {
+  const want = process.env.ADMIN_TOKEN;
+  const got = req.get("x-admin-token") || req.query.token;
+  if (!want || got !== want) return sendError(res, want ? 401 : 404, want ? "UNAUTHORIZED" : "NOT_FOUND", want ? "Admin token required" : "Not found");
   try {
     const stats = jobQueue.getStats();
     res.json(stats);

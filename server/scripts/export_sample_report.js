@@ -26,7 +26,8 @@ async function main() {
   body.report_id = "sample";
   body.tier = rep.tier || body.tier || "growth_plan";
   body.created_at = body.created_at || body.generated_at || rep.generatedAt || rep.generated_at || Date.now();
-  body.business = { ...(rep.business || body.business || {}) };
+  body.business = { ...(body.business || {}), ...(rep.business || {}) };
+  if (body.business.followers == null && Number.isFinite(body.followers)) body.business.followers = body.followers;
   delete body.business.email;
   if (body.plan_context) delete body.plan_context.updated_at;
   if (body.competitors && body.competitors.you) body.competitors.you = { handle: body.business.handle, overall: body.scores?.overall };

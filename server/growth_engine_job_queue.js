@@ -239,7 +239,7 @@ class JobQueue {
           const h = reportBody.history;
           const biggest = (h.delta_dimensions || []).filter((d) => d.delta != null).sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))[0];
           if (h.delta_overall !== 0 || reportBody.nudge) {
-            await mailer.scoreChanged({ to, handle: inputParams.handle, reportId, oldScore: h.previous.overall, newScore: reportBody.scores.overall, dimension: biggest?.label || "Overall", delta: biggest?.delta ?? h.delta_overall, movesDone: (h.moves_done_since || []).length, nudge: reportBody.nudge || null });
+            await mailer.scoreChanged({ to, userId: accountId, handle: inputParams.handle, reportId, oldScore: h.previous.overall, newScore: reportBody.scores.overall, dimension: biggest?.label || "Overall", delta: biggest?.delta ?? h.delta_overall, movesDone: (h.moves_done_since || []).length, nudge: reportBody.nudge || null });
           }
         } else if (!inputParams.rerun_of && reportBody.scores) {
           await mailer.reportReady({ to, handle: inputParams.handle, reportId, overall: reportBody.scores.overall, grade, summary: reportBody.scores.summary, firstMove, paid: tier !== "social_snapshot" });

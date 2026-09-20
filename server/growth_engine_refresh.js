@@ -49,7 +49,7 @@ async function sendScheduledEmails() {
     if (body.one_time_unlock) {
       if (age >= 60 && !done.has("plan_ended")) {
         const price = billing.TIER_PRICING?.growth_plan ? billing.TIER_PRICING.growth_plan / 100 : 12;
-        await mailer.planEnded({ to, handle: r.business.handle, reportId: r.reportId, overall: body.scores?.overall, price });
+        await mailer.planEnded({ to, userId: r.accountId, handle: r.business.handle, reportId: r.reportId, overall: body.scores?.overall, price });
         await mark("plan_ended");
       }
       continue;
@@ -57,7 +57,7 @@ async function sendScheduledEmails() {
     for (const [phase, day] of [[2, 28], [3, 58]]) {
       if (age >= day && age < day + 14 && !done.has(`checkin_p${phase}`) && !(body.checkins || {})[`p${phase}`]) {
         const p = phases[phase - 1];
-        await mailer.checkin({ to, handle: r.business.handle, reportId: r.reportId, phase, phaseLabel: p?.label, firstMove: p ? { action: p.visible_action, why: p.detail } : null, doneCount, totalCount });
+        await mailer.checkin({ to, userId: r.accountId, handle: r.business.handle, reportId: r.reportId, phase, phaseLabel: p?.label, firstMove: p ? { action: p.visible_action, why: p.detail } : null, doneCount, totalCount });
         await mark(`checkin_p${phase}`);
       }
     }

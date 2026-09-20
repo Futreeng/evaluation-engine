@@ -327,6 +327,7 @@ class BillingManager {
       ],
       // Business tiers are phase 2. Until the business pipeline exists they are
       // listed for the page but not purchasable (see /billing/subscribe).
+      support_email: process.env.SUPPORT_EMAIL || null,
       business_checkout_enabled: process.env.ENABLE_BUSINESS_CHECKOUT === "true",
       business: [
         {

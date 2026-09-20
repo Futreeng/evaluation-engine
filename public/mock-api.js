@@ -159,6 +159,7 @@
     if (t < QUEUED_MS + STAGE_MS * STAGES.length) return running(job, t);
     if (!job.report) {
       job.report = sampleReport(job.handle, job.platform, job.category);
+      job.report.plan_context = job.plan_context || null;
       if (job.paid || entitlement.current_tier !== 'social_snapshot') { job.report.tier = 'growth_plan'; job.report.growth_path.phases.forEach((p, i) => { p.moves = (p.locked.items || []).map((it, k) => ({ n: i * 5 + k + 2, title: it.meta.replace(/^MOVE \d+ · /, '').split(' · ')[0], action: it.meta.split(' · ').slice(1).join(' · '), why: '', how: ['Open Instagram → your profile → Edit profile.', 'Make the change described above; keep the wording in your own voice.', 'Post or save, then check it from a logged-out browser.'], example: k === 0 ? 'Coach on camera, one cue per reel.\nNew class times every Monday → link below.' : null, done_when: 'You can see the change on your public profile.', time: k === 0 ? '20 min, once' : '10 min per post, ongoing' })); p.opener = { how: ['Pick the two days you already post most.', 'Put them in your calendar as recurring reminders.', 'Film both reels in one session on Sunday.'], example: null, done_when: 'Two reels published on the fixed days this week.', time: '1 hour this week' }; p.locked = { count: 0, teaser: '' }; if (job.oneTime && i === 2) { p.moves = []; p.opener = null; p.locked = { count: 4, teaser: 'Days 61–90 unlock with the Growth Plan' }; p.not_included = true; } }); const nWeeks = job.oneTime ? 8 : 12; job.report.calendar = { posting_days: ['Mon', 'Wed', 'Sat'], posting_time: '7:15am', weeks: Array.from({ length: nWeeks }, (_, w) => ({ week: w + 1, phase: Math.floor(w / 4) + 1, slots: ['Mon', 'Wed', 'Sat'].map((d, k) => ({ day: d, format: k === 1 ? 'carousel' : 'reel', source: ['new', 'archive', 'no_camera'][(w + k) % 3], angle: 'Coach on camera, one cue', prompt: 'Film in one take; open with the cue in the first two seconds.' })) })) }; job.report.plan_days = job.oneTime ? 60 : 90; job.report.plan_started_at = Date.now() - (job.rerun ? 27 * 86400000 : 0); job.report.plan_context = job.plan_context || null; if (job.oneTime) job.report.one_time_unlock = { of: null, payment_id: 'pay_mock', days: 60 }; }
       reports.set(job.report.report_id, job.report);
     }
@@ -201,7 +202,7 @@
       if (!paid && prior) return json(402, { error: `@${handle} has already been scored for free. Open that report, or start a Growth Plan to score it again and watch it change.`, code: 'FREE_LIMIT_REACHED', report_id: prior.report.report_id, generated_at: prior.report.created_at, upgrade_tier: 'growth_plan' });
       const id = 'job_' + Math.random().toString(36).slice(2, 10);
       jobs.set(id, { paid: !!paid,
-        id, handle, platform: body.platform, category: body.category, email: body.email,
+        id, handle, platform: body.platform, category: body.category, email: body.email, plan_context: body.plan_context || (paid ? savedContext : null),
         started: Date.now(), fail: handle.toLowerCase().includes(FAIL_KEY),
         ref: (Math.random().toString(16).slice(2, 4) + '-' + Math.floor(1000 + Math.random() * 9000)).toUpperCase()
       });

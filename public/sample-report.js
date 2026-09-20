@@ -6,7 +6,9 @@ window.SCALECRAFT_SAMPLE = {
  "business": {
   "handle": "talon__wilson",
   "platform": "instagram",
-  "category": "travel"
+  "category": "travel",
+  "business_name": null,
+  "followers": 1669
  },
  "generated_at": 1789935741548,
  "posts_last_14d": 2,

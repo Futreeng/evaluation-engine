@@ -614,3 +614,16 @@ p { margin: 0; }
 .plancard p { margin-top: 6px; font-size: 14px; line-height: 1.55; color: var(--body); }
 .plancard.pending { border: 1.5px solid var(--gold-t2); }
 .lightform .sub { margin: 8px 0 14px; font-size: 15px; line-height: 1.55; color: var(--body); }
+
+/* ---- optional question on the free form ---- */
+.optq { margin-top: 4px; }
+.optq .ql { font-size: 13px; font-weight: 600; color: var(--on-dark); letter-spacing: .02em; }
+.optq .ql span { margin-left: 6px; font-weight: 500; opacity: .6; }
+.optq .chips { margin-top: 8px; }
+.optq .hint { margin-top: 8px; font-size: 12px; line-height: 1.45; color: var(--on-dark); opacity: .65; }
+/* free-report explainer */
+.ctxrow.free .ex { flex: 1 1 300px; font-size: 13px; line-height: 1.5; color: var(--body); }
+/* email pause toggle on the plan card */
+.pausetog { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 4px; padding-top: 12px; border-top: 1px dashed var(--line2); font-size: 14px; color: var(--body); cursor: pointer; }
+.pausetog input { width: 18px; height: 18px; accent-color: var(--act); }
+.pausetog .fine { flex-basis: 100%; margin-left: 26px; }

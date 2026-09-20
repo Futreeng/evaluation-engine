@@ -105,9 +105,11 @@
         </nav>
       </div></div>`;
   }
+  // Support address comes from the server (SUPPORT_EMAIL); hidden until set.
+  const supportEmail = () => (CFG.supportEmail || sget('sc_support', '') || '');
   const footer = () => h`<div class="wrap"><div class="footer">
     <a href="#/how">How the score works</a><a href="#/business">For businesses</a><a href="#/pricing">Pricing</a>
-    <a href="#/legal/terms">Terms</a><a href="#/legal/privacy">Privacy</a><a href="#/legal/cookies">Cookies</a>
+    <a href="#/legal/terms">Terms</a><a href="#/legal/privacy">Privacy</a><a href="#/legal/cookies">Cookies</a>${supportEmail() ? raw(h`<a href="mailto:${supportEmail()}">Contact</a>`) : ''}
     <span style="margin-left:auto">© ${new Date().getFullYear()} Scalecraft</span>
   </div></div>`;
 
@@ -146,6 +148,7 @@
   // ------------------------------------------------------------ landing
   function viewLanding() {
     renderHeader('landing');
+    if (!sget('sc_support', null)) api('/billing/pricing', {}, { allow401: true }).then(p => { if (p.support_email) { sset('sc_support', p.support_email); const f = $view.querySelector('.footer'); if (f && !f.querySelector('a[href^=mailto]')) (f.querySelector('span') || f).insertAdjacentHTML(f.querySelector('span') ? 'beforebegin' : 'beforeend', h`<a href="mailto:${p.support_email}">Contact</a>`); } }).catch(() => { });
     const last = sget('sc_form', {});
     const platform = supported(last.platform) ? last.platform : 'instagram';
     const niche = last.category || 'fitness_creator';
@@ -168,6 +171,9 @@
                 ${raw(SOON.map(([k, n]) => h`<button type="button" class="chip soon" data-soon="${k}">${n} · soon</button>`).join(''))}
               </div>
               <div id="waitSlot"></div>
+              <div class="optq"><div class="ql">Your next 90 days <span>optional</span></div>
+                <div class="chips" role="radiogroup" aria-label="Your next 90 days">${raw([['usual', 'Business as usual'], ['fewer_shoots', 'Fewer new shoots'], ['launch', 'Something launching']].map(([k, n]) => h`<button type="button" class="chip ${last.horizon === k ? 'on' : ''}" data-horizon="${k}" role="radio" aria-checked="${last.horizon === k}">${n}</button>`).join(''))}</div>
+                <div class="hint">Shapes your first three moves. The Growth Plan asks four more so the whole plan fits.</div></div>
               <div class="field"><input type="email" name="email" placeholder="you@email.com — where to send it" autocomplete="email" value="${last.email || ''}" aria-label="Email"></div>
               <div class="form-error" id="formError" hidden></div>
               <div class="cta">
@@ -200,6 +206,11 @@
 
     const form = $view.querySelector('#evalForm');
     let chosenPlatform = platform;
+    let chosenHorizon = last.horizon || null;
+    form.querySelectorAll('[data-horizon]').forEach(b => b.addEventListener('click', () => {
+      chosenHorizon = chosenHorizon === b.dataset.horizon ? null : b.dataset.horizon; // tap again to clear
+      form.querySelectorAll('[data-horizon]').forEach(x => { const on = x.dataset.horizon === chosenHorizon; x.classList.toggle('on', on); x.setAttribute('aria-checked', on); });
+    }));
     form.querySelectorAll('[data-platform]').forEach(b => b.addEventListener('click', () => {
       chosenPlatform = b.dataset.platform;
       form.querySelectorAll('[data-platform]').forEach(x => { x.classList.toggle('on', x === b); x.setAttribute('aria-checked', x === b); });
@@ -232,8 +243,10 @@
         platform: chosenPlatform,
         category: form.category.value === 'other' ? (otherText ? otherText.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40) || 'other' : 'other') : form.category.value,
         email: form.email.value.trim(),
-        other: otherText
+        other: otherText,
+        horizon: chosenHorizon || undefined,
       };
+      if (chosenHorizon) { payload.plan_context = { ...(sget('sc_plan_context', null) || {}), horizon: chosenHorizon }; sset('sc_plan_context', payload.plan_context); }
       const problems = [];
       if (!/^[A-Za-z0-9._-]{1,60}$/.test(payload.handle)) problems.push('a handle (letters, numbers, dots or underscores)');
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.email)) problems.push('an email we can send the report to');
@@ -609,7 +622,8 @@
           <div class="l"><span class="h">@${biz.handle || ''}</span><span class="ctx">${platName(biz.platform)} · ${niche} · ${fmtDate(report.created_at)}</span>${paid ? raw(h`<span class="tag dark">${once ? '60-DAY PLAN' : 'GROWTH PLAN'}</span>`) : ''}</div>
           <div class="r">${isSample ? '' : raw(h`<button class="btn ghost sm" data-action="email-report">Email me this report</button>`)}<button class="btn dark sm" data-action="share">${isSample ? 'Share this sample' : 'Share my score'}</button></div>
         </div>
-        ${paid ? raw(h`<div class="ctxrow">${ctx ? raw(contextChips(ctx) + (ctx.notes ? h`<span class="chip note">“${ctx.notes}”</span>` : '')) : raw(h`<span class="chip empty">Written without your answers</span>`)}${isSample ? '' : once ? '' : raw(h`<a class="edit" href="#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=edit">${ctx ? 'Plans changed? Update' : 'Tell us about your next 90 days'} →</a>`)}</div>`) : ''}
+        ${paid ? raw(h`<div class="ctxrow">${ctx ? raw(contextChips(ctx) + (ctx.notes ? h`<span class="chip note">“${ctx.notes}”</span>` : '')) : raw(h`<span class="chip empty">Written without your answers</span>`)}${isSample ? '' : once ? '' : raw(h`<a class="edit" href="#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=edit">${ctx ? 'Plans changed? Update' : 'Tell us about your next 90 days'} →</a>`)}</div>`)
+        : raw(h`<div class="ctxrow free">${ctx && ctx.horizon ? raw(h`<span class="chip">${ctxLabel('horizon', ctx.horizon)}</span><span class="ex">Your three first moves were written around this. The Growth Plan asks four more — time, goal, how you make content — so every move and calendar slot fits.</span>`) : raw(h`<span class="chip empty">Written as business as usual</span><span class="ex">The Growth Plan asks four short questions — your next 90 days, time, goal, how you make content — so every move and calendar slot fits your life.</span>`)}</div>`)}
         ${duePhase ? raw(h`<div class="checkin"><div class="t"><div class="eb">DAY ${Math.round(ageDays)} · CHECK-IN</div><h3>Phase ${duePhase} starts. Anything change?</h3><p>The next 30 days were written when you started. If your time, goal or next few weeks changed, the plan is rewritten tonight.</p></div><div class="acts"><button class="btn green" data-checkin="${duePhase}" data-changed="0">Nothing changed</button><a class="btn ghost" href="#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=checkin&phase=${duePhase}">Something changed</a></div></div>`) : ''}
         ${nudge ? raw(h`<div class="checkin nudge" id="nudge"><div class="t"><div class="eb">FROM THIS WEEK'S RE-SCORE</div><h3>${nudge.title}</h3><p>${nudge.text}</p></div><div class="acts"><button class="btn" data-nudge="${nudge.key}" data-changed="1">${nudge.cta}</button><button class="btn ghost" data-nudge="${nudge.key}" data-changed="0">Keep the plan as is</button></div></div>`) : ''}
         <div class="report">
@@ -698,7 +712,7 @@
               <div class="rows">${raw(['Days 61–90 — phase 3, moves 10 through 13', 'Re-scored every week, with what each move changed', 'Day-30 and day-60 check-ins that reshape the plan', 'Up to 5 competitors, scored the same way', 'Score and follower history', 'A fresh plan every 90 days'].map(t => h`<div><i>🔒</i>${t}</div>`).join(''))}</div>
               <button class="btn green" data-action="unlock">Start the plan · $${price}/mo</button></div>`)
           : paid ? raw(h`<div class="refresh"><div class="t"><h3>This plan refreshes weekly</h3><p>${Object.keys(done).length ? `You did ${Object.keys(done).length} move${Object.keys(done).length === 1 ? '' : 's'} — we'll re-score you and tell you what changed.` : 'Run it again any time — the moves and calendar are rewritten against your latest posts.'}</p></div><a class="btn green" href="#/" data-scroll="evalForm">Run a fresh evaluation</a></div>`)
-          : raw(h`<div class="upsell"><h3>Unlock your full Growth Plan</h3><p>${report.upsell?.unlock_count || 12} locked items: the remaining moves and your week-by-week calendar, written from your own posts.</p>
+          : raw(h`<div class="upsell"><h3>Unlock your full Growth Plan</h3><p>${report.upsell?.unlock_count || 12} locked items: the remaining moves and your week-by-week calendar, written from your own posts — and around four quick answers about your next 90 days, so it's a plan you can actually do.</p>
               <div class="paths">
                 <div class="path main"><div class="pn">Growth Plan · <b>$${price}/mo</b></div><div class="pd">All 90 days, written around your life. Re-scored every week with check-ins at day 30 and 60.</div><button class="btn" data-action="unlock">Start the plan →</button></div>
                 <div class="path"><div class="pn">60-day plan · <b>$${oneTime} once</b></div><div class="pd">Phases 1 and 2 — moves 01–09 and 8 weeks of calendar, written once. No subscription.</div><button class="btn light" data-action="unlock-once">Get the 60-day plan</button></div>
@@ -748,7 +762,7 @@
       catch (e2) { if (e2.status === 401) return; if (e2.status === 402) { sset('sc_intent_tier', 'growth_plan'); go('#/pricing'); return; } out.innerHTML = h`<div class="form-error">${e2.message}</div>`; }
       btn.disabled = false; btn.textContent = 'Re-run';
     });
-    if (!paid) api('/billing/pricing', {}, { allow401: true }).then(p => { const t = (p.tiers || []).find(x => x.tier === 'growth_plan'); if (t && t.monthlyPrice != null) { const el = $view.querySelector('.upsell p'); if (el) el.textContent = el.textContent.replace(/\$\d+\/mo or \$\d+\/yr/, `$${t.monthlyPrice}/mo or $${t.annualPrice ?? Math.round(t.monthlyPrice * 9)}/yr`); } }).catch(() => { });
+    if (!paid) api('/billing/pricing', {}, { allow401: true }).then(p => { if (p.support_email) sset('sc_support', p.support_email); const t = (p.tiers || []).find(x => x.tier === 'growth_plan'); if (t && t.monthlyPrice != null) { const el = $view.querySelector('.upsell p'); if (el) el.textContent = el.textContent.replace(/\$\d+\/mo or \$\d+\/yr/, `$${t.monthlyPrice}/mo or $${t.annualPrice ?? Math.round(t.monthlyPrice * 9)}/yr`); } }).catch(() => { });
   }
   // The "how" under a move: numbered steps, paste-ready example, done-when, time.
   function moveDetailHTML(d, dark) {
@@ -769,7 +783,7 @@
     renderHeader('pricing');
     $view.innerHTML = h`<div class="center-msg">Loading pricing…</div>`;
     let pricing, ent = null;
-    try { pricing = await api('/billing/pricing', {}, { allow401: true }); }
+    try { pricing = await api('/billing/pricing', {}, { allow401: true }); if (pricing.support_email) sset('sc_support', pricing.support_email); }
     catch (e) { $view.innerHTML = h`<div class="center-msg"><h2>Pricing is unavailable right now.</h2>${e.message}</div>`; return; }
     if (token()) { try { ent = await api('/account/subscription-status', {}, { allow401: true }); } catch { } }
     const discM = /(\d+)\s*%/.exec(pricing.discount?.annual || ''); const disc = discM ? Number(discM[1]) / 100 : 0.25;
@@ -819,7 +833,7 @@
             </div>
           </div>
         </div>
-        <div class="pfoot"><div>All tiers keep your report history. Cancel in two clicks.</div><div>${pricing.refund || 'Not useful in the first 7 days? Reply to any email and we refund it.'}</div><div class="fine">Business accounts are priced separately — $39 and $99. <a href="#/business">For businesses →</a></div></div>
+        <div class="pfoot"><div>All tiers keep your report history. Cancel in two clicks.</div><div>${pricing.refund || 'Not useful in the first 7 days? Reply to any email and we refund it.'}${supportEmail() ? raw(h` Or write to <a href="mailto:${supportEmail()}">${supportEmail()}</a>.`) : ''}</div><div class="fine">Business accounts are priced separately — $39 and $99. <a href="#/business">For businesses →</a></div></div>
       </div></div>${raw(footer())}`;
       $view.querySelectorAll('[data-billing]').forEach(b => b.addEventListener('click', () => { billing = b.dataset.billing; sset('sc_billing', billing); render(); }));
       $view.querySelector('[data-expand]')?.addEventListener('click', () => { sset('sc_pro_open', !proOpen); render(); });
@@ -949,7 +963,8 @@
       const pending = subn.status === 'cancel_pending';
       return h`<div class="card plancard ${pending ? 'pending' : ''}"><div class="t"><div class="n">Your plan</div><h2>${subn.tier_name || 'Free Snapshot'}${free ? '' : raw(h` <span class="pr">· $${subn.monthly_price}/mo</span>`)}</h2>
         <p>${free ? 'One free score per account. The Growth Plan writes the whole 90 days and re-scores you weekly.' : pending ? `Cancelled. You keep everything until ${fmtDate(subn.cancel_at)}, then the weekly refresh stops. Your reports stay.` : subn.billing_period_end ? `Renews ${fmtDate(subn.billing_period_end)}. Cancel any time — you keep the plan to the end of the period and every report after.` : 'Cancel any time — you keep the plan to the end of the period and every report after.'}</p></div>
-        <div class="acts">${free ? raw(h`<a class="btn" href="#/pricing">See the plan</a>`) : pending ? raw(h`<button type="button" class="btn green" data-action="resume-plan">Resume the plan</button>`) : raw(h`<button type="button" class="btn ghost" data-action="cancel-plan">Cancel plan</button>`)}</div></div>`;
+        <div class="acts">${free ? raw(h`<a class="btn" href="#/pricing">See the plan</a>`) : pending ? raw(h`<button type="button" class="btn green" data-action="resume-plan">Resume the plan</button>`) : raw(h`<button type="button" class="btn ghost" data-action="cancel-plan">Cancel plan</button>`)}</div>
+        ${free ? '' : raw(h`<label class="pausetog"><input type="checkbox" data-action="email-pause" ${subn.email_paused ? 'checked' : ''}> Pause check-in and score emails${subn.email_paused ? ' — paused' : ''}<span class="fine">Report-ready and password emails still send.</span></label>`)}</div>`;
     };
     const reports = (list.reports || []).map(r => ({ id: r.reportId || r.report_id, tier: r.tier, at: r.generatedAt || r.generated_at, handle: r.business?.handle, platform: r.business?.platform, category: r.business?.category, overall: r.reportBody?.scores?.overall ?? null, known: r.reportBody?.scores?.niche_known !== false })).sort((a, b) => b.at - a.at);
     const byHandle = {}; for (const r of reports) (byHandle[`${r.platform}:${r.handle}`] ||= []).push(r);
@@ -972,6 +987,11 @@
     </div></div>${raw(footer())}`;
     $view.querySelector('[data-action=delete-account]').addEventListener('click', () => openDeleteDialog(reports.length));
     $view.querySelector('[data-action=cancel-plan]')?.addEventListener('click', () => openCancelDialog(subn));
+    $view.querySelector('[data-action=email-pause]')?.addEventListener('change', async e => {
+      const on = e.currentTarget.checked;
+      try { await api('/account/email/pause', { method: 'POST', body: JSON.stringify({ paused: on }) }); toast(on ? 'Paused. Your plan keeps running.' : 'Emails back on.'); }
+      catch (e2) { if (e2.status === 401) return; toast(e2.message); e.currentTarget.checked = !on; }
+    });
     $view.querySelector('[data-action=resume-plan]')?.addEventListener('click', async e => {
       e.currentTarget.disabled = true;
       try { await api('/billing/resume', { method: 'POST', body: '{}' }); toast('Welcome back. The plan carries on.'); viewReports(); }
@@ -1084,7 +1104,7 @@
       ['Eligibility', 'You must be 18 or over to use Scalecraft. You may score an account you hold, or one you have the account holder’s consent to score.'],
       ['Your account', 'Keep your password to yourself. You are responsible for what happens under your account. Tell us at once if you think someone else has access to it.'],
       ['Free tier limits', 'One free Snapshot per email address. A second evaluation requires an account and a paid plan.'],
-      ['Subscriptions, billing and refunds', 'Paid plans renew monthly or annually until cancelled. Billing is handled by Stripe; we never see your full card details. You can cancel in two clicks from your settings and keep access until the end of the period you paid for. If the plan is not useful in the first seven days, reply to any email from us and we refund it.'],
+      ['Subscriptions, billing and refunds', 'Paid plans renew monthly or annually until cancelled. Billing is handled by Stripe; we never see your full card details. You can cancel in two clicks from your settings and keep access until the end of the period you paid for. If the plan is not useful in the first seven days, reply to any email from us and we refund it.' + (supportEmail() ? ` Questions about billing: ${supportEmail()}.` : '')],
       ['Acceptable use', 'Do not score an account you intend to harass. Do not scrape, resell or redistribute our scores, plans or calendars. Do not attempt to reverse the engine or use the service to build a competing dataset.'],
       ['Intellectual property', 'Your content and your data stay yours. The scores, plans and calendars we produce are licensed to you for your own use for as long as your account exists.'],
       ['Disclaimers', 'Recommendations are suggestions, not instructions, and results vary. We are not affiliated with, endorsed by or operated by Instagram, TikTok or any other platform.'],

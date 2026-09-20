@@ -634,6 +634,7 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
     generated_at: Date.now(),
     refresh_due_at: null,
     posts_last_14d: postsLast14d,
+    plan_context: inputParams.plan_context || null,
     data_confidence: structured ? "full" : "narrative_only",
     narrative,
     raw_personas: {

@@ -136,6 +136,7 @@ async function initSchema() {
         created_at BIGINT NOT NULL
       )`);
     await client.query(`ALTER TABLE entitlements ADD COLUMN IF NOT EXISTS cancel_at BIGINT`);
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_paused BOOLEAN DEFAULT FALSE`);
     await client.query(`
       CREATE TABLE IF NOT EXISTS growth_engine_password_resets (
         token_hash TEXT PRIMARY KEY,
@@ -191,7 +192,7 @@ async function createUser(email, passwordHash, companyName = null) {
 
 function userRow(row) {
   return row
-    ? { userId: row.user_id, email: row.email, passwordHash: row.password_hash, companyName: row.company_name, createdAt: Number(row.created_at), updatedAt: Number(row.updated_at) }
+    ? { userId: row.user_id, email: row.email, passwordHash: row.password_hash, companyName: row.company_name, createdAt: Number(row.created_at), updatedAt: Number(row.updated_at), emailPaused: !!row.email_paused }
     : null;
 }
 async function getUserByEmail(email) {
@@ -199,6 +200,14 @@ async function getUserByEmail(email) {
 }
 async function getUserById(userId) {
   return userRow((await q(`SELECT * FROM users WHERE user_id = $1`, [userId])).rows[0]);
+}
+async function setEmailPaused(userId, paused) {
+  await q(`UPDATE users SET email_paused = $1, updated_at = $2 WHERE user_id = $3`, [!!paused, Date.now(), userId]);
+  return getUserById(userId);
+}
+async function isEmailPaused(email) {
+  const u = await getUserByEmail(String(email || "").toLowerCase());
+  return !!(u && u.emailPaused);
 }
 async function updateUserPassword(userId, passwordHash) {
   await q(`UPDATE users SET password_hash = $1, updated_at = $2 WHERE user_id = $3`, [passwordHash, Date.now(), userId]);
@@ -545,6 +554,8 @@ module.exports = {
   getUserByEmail,
   getUserById,
   updateUserPassword,
+  setEmailPaused,
+  isEmailPaused,
   // Jobs
   createJob,
   getJob,
