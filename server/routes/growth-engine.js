@@ -200,19 +200,24 @@ router.post("/evaluate/social-snapshot", optionalAuth, validateEvaluationRequest
     const accountId = req.user?.id || "demo-account";
     const tier = await evaluationTierFor(accountId);
 
-    // The free Social Snapshot is one per email. Paid accounts are unlimited.
-    if (tier === "social_snapshot") {
-      const limit = Number(process.env.FREE_SNAPSHOTS_PER_EMAIL || 1);
-      const used = await geDb.countFreeSnapshotsByEmail(email);
-      if (used >= limit) {
+    // The free Snapshot is one per account (handle + platform), not per email —
+    // an email is free to invent, a handle is the thing that costs us money.
+    // If it's already been scored we point at that report instead of a wall.
+    if (tier === "social_snapshot" && process.env.FREE_SNAPSHOTS_PER_EMAIL !== "unlimited") {
+      const existing = await geDb.findFreeSnapshotForHandle(handle, platform);
+      if (existing && existing.reportId) {
         return res.status(402).json({
-          error: "You've used your free evaluation for this email. Sign in and start a Growth Plan for unlimited audits.",
+          error: `@${handle} has already been scored for free. Open that report, or start a Growth Plan to score it again and watch it change.`,
           code: "FREE_LIMIT_REACHED",
           status: 402,
-          used,
-          limit,
+          report_id: existing.reportId,
+          generated_at: existing.generatedAt,
           upgrade_tier: "growth_plan",
         });
+      }
+      if (existing && existing.jobId) {
+        // Same account is being scored right now — hand back that job.
+        return res.json({ job_id: existing.jobId, status: "queued", tier, deduplicated: true });
       }
     }
 
@@ -375,7 +380,7 @@ router.get("/baselines", async (req, res) => {
 });
 router.get("/baselines/:category", async (req, res) => {
   try {
-    const base = await geDb.getCategoryBaseline(req.params.category);
+    const base = await geDb.getCategoryBaseline(req.params.category, { platform: req.query.platform || null });
     res.json(base || { n: 0, min_n: 20, ready: false });
   } catch (err) {
     res.status(500).json({ error: err.message });

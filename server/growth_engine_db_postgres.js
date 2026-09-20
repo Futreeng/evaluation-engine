@@ -213,6 +213,29 @@ async function updateJobStatus(jobId, status, updates = {}) {
   return getJob(jobId);
 }
 
+async function findFreeSnapshotForHandle(handle, platform) {
+  const r = await q(`SELECT report_id, generated_at, created_at FROM growth_engine_reports
+     WHERE tier = 'social_snapshot' AND lower(handle) = $1 AND platform = $2 ORDER BY created_at DESC LIMIT 1`, [String(handle).toLowerCase(), platform]);
+  if (r.rows[0]) return { reportId: r.rows[0].report_id, generatedAt: Number(r.rows[0].generated_at || r.rows[0].created_at) };
+  const j = await q(`SELECT job_id FROM growth_engine_jobs WHERE tier = 'social_snapshot' AND status IN ('queued','running')
+     AND lower(input_params->>'handle') = $1 AND input_params->>'platform' = $2 ORDER BY created_at DESC LIMIT 1`, [String(handle).toLowerCase(), platform]);
+  if (j.rows[0]) return { jobId: j.rows[0].job_id };
+  return null;
+}
+
+async function adoptAnonymousReports(accountId, email) {
+  const e = String(email).trim().toLowerCase();
+  const now = Date.now();
+  const jobs = await q(`SELECT job_id, result_payload FROM growth_engine_jobs WHERE account_id = 'demo-account' AND lower(input_params->>'email') = $1`, [e]);
+  let adopted = 0;
+  for (const row of jobs.rows) {
+    await q(`UPDATE growth_engine_jobs SET account_id = $1, updated_at = $2 WHERE job_id = $3`, [accountId, now, row.job_id]);
+    const rid = parseJson(row.result_payload)?.report_id;
+    if (rid) { const u = await q(`UPDATE growth_engine_reports SET account_id = $1, updated_at = $2 WHERE report_id = $3 AND account_id = 'demo-account'`, [accountId, now, rid]); adopted += u.rowCount || 0; }
+  }
+  return { adopted };
+}
+
 // Free-tier quota: non-failed snapshot jobs for an email.
 async function countFreeSnapshotsByEmail(email) {
   const r = await q(
@@ -365,8 +388,10 @@ async function recordBaseline({ category, platform, handle, overall, dimensions 
     [key, category, platform, String(handle).toLowerCase(), Math.round(overall), JSON.stringify(dims), Date.now()]
   );
 }
-async function getCategoryBaseline(category, { minN = 20 } = {}) {
-  const r = await q(`SELECT overall, dimensions FROM growth_engine_baselines WHERE category = $1`, [category]);
+async function getCategoryBaseline(category, { minN = 20, platform = null } = {}) {
+  const r = platform
+    ? await q(`SELECT overall, dimensions FROM growth_engine_baselines WHERE category = $1 AND platform = $2`, [category, platform])
+    : await q(`SELECT overall, dimensions FROM growth_engine_baselines WHERE category = $1`, [category]);
   const rows = r.rows;
   if (!rows.length) return null;
   if (rows.length < minN) return { n: rows.length, min_n: minN, ready: false };
@@ -383,11 +408,11 @@ async function getCategoryBaseline(category, { minN = 20 } = {}) {
   };
 }
 async function getBaselineSummary() {
-  const r = await q(`SELECT category, COUNT(*) AS n FROM growth_engine_baselines GROUP BY category`);
-  const by_category = {};
+  const r = await q(`SELECT category, platform, COUNT(*) AS n FROM growth_engine_baselines GROUP BY category, platform`);
+  const by_category = {}; const by_platform = {};
   let total = 0;
-  for (const row of r.rows) { by_category[row.category] = Number(row.n); total += Number(row.n); }
-  return { total, by_category };
+  for (const row of r.rows) { by_category[row.category] = (by_category[row.category] || 0) + Number(row.n); by_platform[`${row.category}:${row.platform}`] = Number(row.n); total += Number(row.n); }
+  return { total, by_category, by_platform };
 }
 // Aliases for the first Postgres draft's names.
 async function createBaseline(category, platform, handle, overall, dimensions) {
@@ -411,6 +436,8 @@ module.exports = {
   getJob,
   updateJobStatus,
   countFreeSnapshotsByEmail,
+  findFreeSnapshotForHandle,
+  adoptAnonymousReports,
   addWaitlist,
   deleteAccount,
   // Reports

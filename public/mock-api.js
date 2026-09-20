@@ -125,6 +125,7 @@
     audience: 'creators',
     discount: { annual: '25% off', note: 'Annual billing includes 25% discount' },
     refund: 'Not useful in the first 7 days? Reply to any email and we refund it.',
+    business_checkout_enabled: false,
     tiers: [
       { tier: 'social_snapshot', name: 'Snapshot', monthlyPrice: 0, annualPrice: 0, note: 'One report per email', features: ['Your score and the four dimensions', 'Why each one landed where it did', 'Your best and worst posts', 'The first move of each phase'], cta: 'Score my account' },
       { tier: 'growth_plan', name: 'Growth Plan', monthlyPrice: 12, annualPrice: 108, popular: true, features: ['Every move, 01 through 13', 'Your 12-week posting calendar', 'Competitor comparison, up to 5 handles', 'Weekly refresh and score history'], cta: 'Unlock the plan' },
@@ -192,8 +193,8 @@
       const handle = String(body.handle || '').replace(/^@/, '').trim();
       if (!handle || !body.platform || !body.category || !body.email) return json(400, { error: 'handle, platform, category and email are required', code: 'INVALID_HANDLE' });
       const paid = entitlement.current_tier !== 'social_snapshot' && (init.headers || {}).Authorization;
-      const priorFree = [...jobs.values()].filter(j => !j.paid && !j.fail && j.email.toLowerCase() === String(body.email).toLowerCase()).length;
-      if (!paid && priorFree >= 1) return json(402, { error: "You've used your free evaluation for this email. Sign in and start a Growth Plan for unlimited audits.", code: 'FREE_LIMIT_REACHED', used: priorFree, limit: 1, upgrade_tier: 'growth_plan' });
+      const prior = [...jobs.values()].find(j => !j.paid && !j.fail && j.report && j.handle === handle.toLowerCase() && j.platform === body.platform);
+      if (!paid && prior) return json(402, { error: `@${handle} has already been scored for free. Open that report, or start a Growth Plan to score it again and watch it change.`, code: 'FREE_LIMIT_REACHED', report_id: prior.report.report_id, generated_at: prior.report.created_at, upgrade_tier: 'growth_plan' });
       const id = 'job_' + Math.random().toString(36).slice(2, 10);
       jobs.set(id, { paid: !!paid,
         id, handle, platform: body.platform, category: body.category, email: body.email,

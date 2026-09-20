@@ -258,6 +258,7 @@
       if (e.status === 402 && e.body?.code === 'FREE_LIMIT_REACHED') {
         sset('sc_intent_tier', e.body.upgrade_tier || 'growth_plan');
         sset('sc_limit_msg', e.body.message || e.message);
+        if (e.body.report_id) { toast(`@${payload.handle} was scored on ${fmtDate(e.body.generated_at)} — here it is.`); go('#/report/' + encodeURIComponent(e.body.report_id)); return; }
         go(token() ? '#/pricing' : '#/signin');
         return;
       }
@@ -583,6 +584,7 @@
 
           <div class="datawindow">${report.data_window || `Based on your last ${pi?.sample || 12} posts. We can't see saves, reach or story views.`}</div>
 
+          ${!paid && sget('sc_limit_msg', null) ? raw(h`<div class="notice">${sget('sc_limit_msg', '')} <a href="#/pricing">See the plan →</a></div>`) : ''}
           ${paid ? raw(h`<div class="refresh"><div class="t"><h3>This plan refreshes weekly</h3><p>${Object.keys(done).length ? `You did ${Object.keys(done).length} move${Object.keys(done).length === 1 ? '' : 's'} — we'll re-score you and tell you what changed.` : 'Run it again any time — the moves and calendar are rewritten against your latest posts.'}</p></div><a class="btn green" href="#/" data-scroll="evalForm">Run a fresh evaluation</a></div>`)
           : raw(h`<div class="upsell"><h3>Unlock your full Growth Plan</h3><p>${report.upsell?.unlock_count || 12} locked items: the remaining moves and your week-by-week calendar, written from your own posts. $${price}/mo or $${Math.round(price * 9)}/yr.</p>
               <div class="row"><button class="btn" data-action="unlock">Unlock the plan →</button><span class="fine">Cancel anytime. Keep the report either way.</span></div></div>`)}
@@ -696,8 +698,8 @@
   // ------------------------------------------------------------ for businesses (batch 3)
   async function viewBusiness() {
     renderHeader('business');
-    let biz = [];
-    try { biz = (await api('/billing/pricing', {}, { allow401: true })).business || []; } catch { }
+    let biz = [], checkout = false;
+    try { const p = await api('/billing/pricing', {}, { allow401: true }); biz = p.business || []; checkout = !!p.business_checkout_enabled; } catch { }
     const b39 = biz.find(t => t.tier === 'business_growth') || { monthlyPrice: 39 }; const b99 = biz.find(t => t.tier === 'business_evaluator') || { monthlyPrice: 99 };
     $view.innerHTML = h`<div class="wrap"><div class="bizpage">
       <div class="eyebrow">For businesses</div>
@@ -711,9 +713,17 @@
       <div class="tiers">
         <div class="card tier"><div class="n">Business</div><div class="p">$${b39.monthlyPrice}<span class="per"> /mo</span></div><div class="feats">${raw(['One business account, scored against its category', 'The booking-led plan and calendar', 'Weekly refresh'].map(f => h`<div>${f}</div>`).join(''))}</div></div>
         <div class="tier dark"><div class="n">Business Pro</div><div class="p">$${b99.monthlyPrice}<span class="per"> /mo</span></div><div class="feats">${raw(['Up to five locations or accounts', 'Category benchmarks and competitor set', 'Priority refresh'].map(f => h`<div>${f}</div>`).join(''))}</div></div>
-        <div class="tier gold"><a class="btn" href="#/?biz=1" data-scroll="evalForm">Score a business account</a><div class="fine">Public data only. No login to your account. Cancel in two clicks.</div></div>
+        <div class="tier gold">${checkout
+          ? raw(h`<a class="btn" href="#/" data-scroll="evalForm">Score a business account</a><div class="fine">Public data only. No login to your account. Cancel in two clicks.</div>`)
+          : raw(h`<form id="bizForm" class="bizlead"><div class="n">Business plans open soon</div><input type="email" name="email" placeholder="you@business.com" aria-label="Email"><input type="text" name="handle" placeholder="@yourbusiness" aria-label="Business handle"><button class="btn" type="submit">Put me on the list</button><div class="fine">We'll email you the day business scoring opens. Score your account free in the meantime.</div></form>`)}</div>
       </div>
     </div></div>${raw(footer())}`;
+    $view.querySelector('#bizForm')?.addEventListener('submit', async e => {
+      e.preventDefault(); const f = e.currentTarget; const email = f.email.value.trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast('Add an email first.'); return; }
+      try { await api('/waitlist', { method: 'POST', body: JSON.stringify({ email, platform: 'business' }) }); } catch { }
+      f.innerHTML = h`<div class="waitdone">You're on the list. We'll email you when business scoring opens.</div>`;
+    });
   }
 
   // ------------------------------------------------------------ auth

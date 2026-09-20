@@ -98,7 +98,7 @@ class JobQueue {
             category: inputParams.category, platform: inputParams.platform, handle: inputParams.handle,
             overall: sc.overall, dimensions: sc.dimensions,
           });
-          const base = await geDb.getCategoryBaseline(inputParams.category);
+          const base = await geDb.getCategoryBaseline(inputParams.category, { platform: inputParams.platform });
           if (base && base.ready) {
             sc.category_avg = base.overall;
             sc.category_top_quartile = base.top_quartile;

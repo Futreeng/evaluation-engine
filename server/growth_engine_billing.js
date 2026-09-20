@@ -277,7 +277,7 @@ class BillingManager {
           ],
           cta: "Start Growth Plan",
         },
-        {
+        ...(process.env.ENABLE_GROWTH_PLAN_PRO === "true" ? [{
           tier: "growth_plan_pro",
           name: "Growth Plan Pro",
           description: "Every platform you're on, scored together.",
@@ -290,8 +290,11 @@ class BillingManager {
             "Priority refresh",
           ],
           cta: "Start Pro",
-        },
+        }] : []),
       ],
+      // Business tiers are phase 2. Until the business pipeline exists they are
+      // listed for the page but not purchasable (see /billing/subscribe).
+      business_checkout_enabled: process.env.ENABLE_BUSINESS_CHECKOUT === "true",
       business: [
         {
           tier: "business_growth",

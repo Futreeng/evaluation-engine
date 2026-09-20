@@ -202,9 +202,11 @@ async function recordBaseline({ category, platform, handle, overall, dimensions 
 }
 
 // Average scores for a category (any platform). Returns null below min_n.
-async function getCategoryBaseline(category, { minN = 20 } = {}) {
+async function getCategoryBaseline(category, { minN = 20, platform = null } = {}) {
   if (!db) throw new Error("Database not initialized");
-  const result = db.exec(`SELECT overall, dimensions FROM growth_engine_baselines WHERE category = ?`, [category]);
+  const result = platform
+    ? db.exec(`SELECT overall, dimensions FROM growth_engine_baselines WHERE category = ? AND platform = ?`, [category, platform])
+    : db.exec(`SELECT overall, dimensions FROM growth_engine_baselines WHERE category = ?`, [category]);
   if (!result.length) return null;
   const rows = result[0].values;
   if (rows.length < minN) return { n: rows.length, min_n: minN, ready: false };
@@ -224,11 +226,11 @@ async function getCategoryBaseline(category, { minN = 20 } = {}) {
 // Totals for the landing page: profiles scored overall and per category.
 async function getBaselineSummary() {
   if (!db) throw new Error("Database not initialized");
-  const result = db.exec(`SELECT category, COUNT(*) FROM growth_engine_baselines GROUP BY category`);
-  const by_category = {};
+  const result = db.exec(`SELECT category, platform, COUNT(*) FROM growth_engine_baselines GROUP BY category, platform`);
+  const by_category = {}; const by_platform = {};
   let total = 0;
-  if (result.length) for (const [c, n] of result[0].values) { by_category[c] = Number(n); total += Number(n); }
-  return { total, by_category };
+  if (result.length) for (const [c, p, n] of result[0].values) { by_category[c] = (by_category[c] || 0) + Number(n); by_platform[`${c}:${p}`] = Number(n); total += Number(n); }
+  return { total, by_category, by_platform };
 }
 
 // GDPR/CCPA: remove the account and everything written for it.
@@ -245,6 +247,27 @@ async function deleteAccount(accountId) {
   return { deleted: true, reports };
 }
 
+// (7) A free report is written under demo-account with the email in the job
+// params. When that email signs up, the reports become theirs — so history,
+// then-vs-now and the upsell all know about the first score.
+async function adoptAnonymousReports(accountId, email) {
+  if (!db) throw new Error("Database not initialized");
+  const needle = `%"email":${JSON.stringify(String(email).trim().toLowerCase())}%`;
+  const jobs = db.exec(`SELECT job_id FROM growth_engine_jobs WHERE account_id = 'demo-account' AND lower(input_params) LIKE ?`, [needle]);
+  const jobIds = jobs.length ? jobs[0].values.map((r) => r[0]) : [];
+  if (!jobIds.length) return { adopted: 0 };
+  const now = Date.now();
+  let adopted = 0;
+  for (const jobId of jobIds) {
+    const j = db.exec(`SELECT result_payload FROM growth_engine_jobs WHERE job_id = ?`, [jobId]);
+    let rid = null; try { rid = JSON.parse(j[0].values[0][0] || "null")?.report_id || null; } catch { /* no payload */ }
+    db.run(`UPDATE growth_engine_jobs SET account_id = ?, updated_at = ? WHERE job_id = ?`, [accountId, now, jobId]);
+    if (rid) { db.run(`UPDATE growth_engine_reports SET account_id = ?, updated_at = ? WHERE report_id = ? AND account_id = 'demo-account'`, [accountId, now, rid]); adopted++; }
+  }
+  saveDb();
+  return { adopted };
+}
+
 async function addWaitlist(email, platform) {
   if (!db) throw new Error("Database not initialized");
   db.run(`INSERT OR REPLACE INTO growth_engine_waitlist (id, email, platform, created_at) VALUES (?, ?, ?, ?)`,
@@ -252,9 +275,29 @@ async function addWaitlist(email, platform) {
   saveDb();
 }
 
-// Free-tier quota: completed or in-flight snapshot jobs for an email
-// (input_params is JSON; the LIKE keeps this index-free but cheap enough
-// for the table sizes involved).
+// Free-tier quota by account: has this handle on this platform already been
+// scored for free? Returns the latest such report id so the UI can show it
+// instead of a wall. (Email-keyed limits were trivially bypassed.)
+async function findFreeSnapshotForHandle(handle, platform) {
+  if (!db) throw new Error("Database not initialized");
+  const r = db.exec(
+    `SELECT report_id, generated_at FROM growth_engine_reports
+     WHERE tier = 'social_snapshot' AND lower(business_handle) = ? AND business_platform = ?
+     ORDER BY generated_at DESC LIMIT 1`,
+    [String(handle).toLowerCase(), platform]
+  );
+  if (r.length && r[0].values.length) return { reportId: r[0].values[0][0], generatedAt: Number(r[0].values[0][1]) };
+  // In-flight (queued/running) job counts too, so a double-submit doesn't double-bill.
+  const j = db.exec(
+    `SELECT job_id FROM growth_engine_jobs WHERE tier = 'social_snapshot' AND status IN ('queued','running')
+       AND lower(input_params) LIKE ? AND lower(input_params) LIKE ? ORDER BY created_at DESC LIMIT 1`,
+    [`%"handle":${JSON.stringify(String(handle).toLowerCase())}%`, `%"platform":${JSON.stringify(platform)}%`]
+  );
+  if (j.length && j[0].values.length) return { jobId: j[0].values[0][0] };
+  return null;
+}
+
+// (kept for callers that still count by email)
 async function countFreeSnapshotsByEmail(email) {
   if (!db) throw new Error("Database not initialized");
   const needle = `%"email":${JSON.stringify(String(email).trim().toLowerCase())}%`;
@@ -665,6 +708,8 @@ async function updateUserPassword(userId, passwordHash) {
 
 module.exports = {
   countFreeSnapshotsByEmail,
+  findFreeSnapshotForHandle,
+  adoptAnonymousReports,
   addWaitlist,
   deleteAccount,
   recordBaseline,
