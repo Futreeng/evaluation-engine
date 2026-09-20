@@ -1,0 +1,46 @@
+# Scalecraft — handoff to Joe (2026-09-20)
+
+Everything Haron's side built since PR #1 lives on two branches. Merge in this order:
+
+1. **PR #2 `fix/railway-postgres` → `main`** — unbreaks Railway (Postgres wired through every module, app.js parse fix). Nothing works in prod until this lands.
+2. **PR #3 `redesign/field-guide` → `main`** — the product as it stands now. Stacked on #2; GitHub retargets it to `main` once #2 merges.
+
+After both: Railway redeploys from `main`, and `scalecraft-demo.vercel.app` (mock) can be repointed or retired.
+
+## What's on `redesign/field-guide`
+
+| Area | State |
+|---|---|
+| Frontend | Full "Field Guide" redesign in `public/` — landing, evaluating, free/paid report (phone-first, checkable moves, 12-week calendar, canvas share card), pricing, business lead form, history, how-it-scores, legal, auth. Vanilla hash router, no build step. |
+| Platforms | **Instagram** (`instagram_apify_fetcher.js`, ~$0.003/pull) and **TikTok** (`tiktok_apify_fetcher.js`, 15 videos ≈ $0.06/pull) live. 8 others show "coming soon" + waitlist (`POST /waitlist`). |
+| Scoring | Deterministic (`growth_engine_scoring.js`): four dimensions, per-niche targets, creator vs business checklists, TikTok branches. LLM only explains and writes moves — never sets numbers. |
+| Pricing | Free Snapshot → **$12/mo Growth Plan** → **$15 one-time unlock** (`POST /reports/:id/unlock`). $29 Pro and business tiers exist but are hidden behind `ENABLE_GROWTH_PLAN_PRO` / `ENABLE_BUSINESS_CHECKOUT`. |
+| Cost controls | Free limit is per handle+platform (402 returns the existing `report_id`); `PAID_RUNS_PER_DAY`, `COMPETITOR_PULLS_PER_DAY`, `FREE_RUNS_PER_DAY_GLOBAL`; 24h DB profile cache; in-process weekly refresh sweeper (`growth_engine_refresh.js`). |
+| Evidence | `growth_engine_outcomes` — moves done → score/follower delta; `GET /outcomes`. |
+| Emails | Templates in `server/emails/` (report ready, move due, score changed). **No sender wired.** |
+| Tests | `node server/growth_engine_db_postgres.test.js` (pg-mem, no DB needed). |
+
+`server/.env.example` lists every variable. Verified live locally against real Apify + Gemini/Groq: `@humansofny` IG 53 / TikTok 49, `@nike` TikTok 35, one-time unlock end-to-end.
+
+## Your part (needs you or your accounts)
+
+1. **Merge #2, then #3.** Railway env needs `DATABASE_URL`, `JWT_SECRET`, `ENCRYPTION_KEY`, `APIFY_TOKEN`, ≥1 LLM key. Optional knobs are commented in `.env.example`.
+2. **Stripe for real.** `growth_engine_billing.js` is mock unless `STRIPE_API_KEY` is set; `purchaseOneTime` uses a PaymentIntent, subscriptions use Subscriptions. The webhook handler (`POST /billing/webhook`) is a stub — payment-failed → downgrade isn't implemented. Stripe Tax is worth turning on (SaaS is taxable in several states). Annual pricing is shown but `subscribe` only takes monthly — wire it or drop the toggle.
+3. **Cancel.** `cancelSubscription()` exists in billing; there's no route and no button. FTC click-to-cancel applies — needed before charging anyone.
+4. **Email sender.** Resend (or whatever you prefer) behind `server/emails/README.md`. Unblocks report-ready, weekly score-changed, password reset, receipts.
+5. **Password reset.** The "Forgot?" link toasts "not wired." Needs 4.
+6. **`GET /admin/queue-stats`** has no auth — one-line fix.
+7. **Meta OAuth "connect your account."** Your Graph API fetcher only reads owner-connected accounts; the scorer doesn't consume that data yet (deliberately parked until the connect flow exists). Needs a Meta app + review.
+
+## Cheap wins anyone can do
+
+- Seed creator baselines: `server/scripts/seed_baselines.js`, 16 niches × 2 platforms × 20 accounts ≈ $2–4 in Apify. Until then "your niche averages" is blank.
+- Frontend analytics (Plausible/PostHog script tag) — we can't see funnel drop-off yet.
+- Lower free cap for TikTok specifically (20× the per-pull cost of Instagram).
+- Domain + lawyer pass on `#/legal/*` (drafted, marked for review). Name stays Scalecraft for now; "Uptrend" was liked and `uptrend.app` / `uptrend.io` / `getuptrend.com` were free on 2026-09-19.
+
+## Rules we've been keeping
+
+- Never push to `main` directly — branch + PR, even hotfixes. Railway deploys from `main`.
+- Scores stay deterministic. If the LLM ever sets a number, that's a bug.
+- API keys go in `server/.env` (gitignored), never in chat or commits.

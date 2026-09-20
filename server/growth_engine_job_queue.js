@@ -10,7 +10,8 @@
 
 const { Worker } = require("worker_threads");
 const path = require("path");
-const geDb = require("./growth_engine_db");
+const geDb = require("./growth_engine_db_select");
+const { compareCompetitors } = require("./growth_engine_competitors");
 const { saveReportAsMarkdown } = require("./report_saver");
 
 class JobQueue {
@@ -72,10 +73,13 @@ class JobQueue {
       const evaluator = require("./growth_engine_evaluator");
       let reportBody;
 
+      const onStage = async (stage, step) => {
+        try { await geDb.updateJobStatus(jobId, "running", { stage: `${stage}:${step}` }); } catch { /* cosmetic */ }
+      };
       if (tier === "social_snapshot") {
-        reportBody = await evaluator.evaluateTier0(accountId, inputParams);
+        reportBody = await evaluator.evaluateTier0(accountId, inputParams, onStage);
       } else if (tier === "growth_plan") {
-        reportBody = await evaluator.evaluateTier1(accountId, inputParams);
+        reportBody = await evaluator.evaluateTier1(accountId, inputParams, onStage);
       } else if (tier === "business_evaluator") {
         reportBody = await evaluator.evaluateTier2(accountId, inputParams);
       } else {
@@ -94,7 +98,7 @@ class JobQueue {
             category: inputParams.category, platform: inputParams.platform, handle: inputParams.handle,
             overall: sc.overall, dimensions: sc.dimensions,
           });
-          const base = await geDb.getCategoryBaseline(inputParams.category);
+          const base = await geDb.getCategoryBaseline(inputParams.category, { platform: inputParams.platform });
           if (base && base.ready) {
             sc.category_avg = base.overall;
             sc.category_top_quartile = base.top_quartile;
@@ -109,7 +113,20 @@ class JobQueue {
         console.warn("[Growth Engine] Baseline update failed:", err.message);
       }
 
-      // Score history: compare with this account's last report for the handle.
+      // One-time unlock: full plan, but it never refreshes and says so.
+      if (inputParams.one_time_unlock) {
+        reportBody.refresh_due_at = null;
+        reportBody.one_time_unlock = { of: inputParams.unlock_of || null, payment_id: inputParams.payment_id || null };
+      }
+
+      // (6) Followers on every report — the number a creator checks first.
+      if (reportBody.business && reportBody.business.followers == null) {
+        const f = reportBody.followers ?? reportBody.raw_followers;
+        if (Number.isFinite(f)) reportBody.business.followers = f;
+      }
+
+      // Score history: compare with this account's last report for the handle,
+      // and record what they did in between — the evidence the plan works.
       try {
         if (accountId && accountId !== "demo-account" && reportBody.scores) {
           const prior = await geDb.listScoreHistory(accountId, inputParams.handle, inputParams.platform);
@@ -117,17 +134,48 @@ class JobQueue {
           if (prev) {
             const dims = {};
             for (const d of prev.dimensions || []) dims[d.label] = d.score;
+            let movesDone = [];
+            try { const prevReport = await geDb.getReport(prev.report_id); movesDone = Object.keys(prevReport?.reportBody?.moves_done || {}); } catch { /* fine */ }
+            const followerDelta = Number.isFinite(prev.followers) && Number.isFinite(reportBody.business?.followers) ? reportBody.business.followers - prev.followers : null;
             reportBody.history = {
               runs: prior.length + 1,
-              previous: { report_id: prev.report_id, generated_at: prev.generated_at, overall: prev.overall },
+              previous: { report_id: prev.report_id, generated_at: prev.generated_at, overall: prev.overall, followers: prev.followers ?? null },
               delta_overall: reportBody.scores.overall - prev.overall,
+              delta_followers: followerDelta,
               delta_dimensions: (reportBody.scores.dimensions || []).map((d) => ({ label: d.label, delta: dims[d.label] != null ? d.score - dims[d.label] : null })),
-              series: [...prior.map((r) => ({ generated_at: r.generated_at, overall: r.overall })), { generated_at: Date.now(), overall: reportBody.scores.overall }],
+              moves_done_since: movesDone,
+              series: [...prior.map((r) => ({ generated_at: r.generated_at, overall: r.overall, followers: r.followers ?? null })), { generated_at: Date.now(), overall: reportBody.scores.overall, followers: reportBody.business?.followers ?? null }],
             };
+            // Evidence row: what they did → what changed. Aggregated later for
+            // "creators who did ≥3 moves gained N points" and the review cards.
+            try { await geDb.recordOutcome({ accountId, handle: inputParams.handle, platform: inputParams.platform, category: inputParams.category, movesDone: movesDone.length, scoreDelta: reportBody.history.delta_overall, followerDelta, days: Math.round((Date.now() - prev.generated_at) / 86400000) }); } catch { /* best-effort */ }
           }
         }
       } catch (err) {
         console.warn("[Growth Engine] History lookup failed:", err.message);
+      }
+
+      // Paid tiers: competitor handles given on the form are compared now, so
+      // the report arrives complete. Free tier keeps them for the teaser.
+      const wanted = Array.isArray(inputParams.competitors) ? inputParams.competitors : [];
+      if (wanted.length) {
+        reportBody.competitor_handles = wanted;
+        if (tier !== "social_snapshot") {
+          try {
+            await geDb.updateJobStatus(jobId, "running", { stage: "comparing competitors" });
+            const comparison = await compareCompetitors({ handle: inputParams.handle, platform: inputParams.platform, category: inputParams.category, handles: wanted });
+            const own = reportBody.scores;
+            if (own && Number.isFinite(own.overall)) {
+              comparison.you.overall = own.overall;
+              comparison.you.dimensions = (own.dimensions || []).map((d) => ({ label: d.label, score: d.score }));
+              const scored = comparison.competitors.filter((c) => c.ok);
+              comparison.rank = { position: [own.overall, ...scored.map((c) => c.overall)].sort((a, b) => b - a).indexOf(own.overall) + 1, of: scored.length + 1 };
+            }
+            reportBody.competitors = comparison;
+          } catch (err) {
+            console.warn("[Growth Engine] Competitor comparison failed:", err.message);
+          }
+        }
       }
 
       const { reportId } = await geDb.createReport(accountId, tier, inputParams, reportBody);

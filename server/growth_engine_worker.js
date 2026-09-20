@@ -8,7 +8,7 @@
  * consistent with the project's philosophy.
  */
 
-const geDb = require("./growth_engine_db");
+const geDb = require("./growth_engine_db_select");
 const evaluator = require("./growth_engine_evaluator");
 
 let isRunning = false;

@@ -1,7 +1,11 @@
 .vercel
-.env*
+.env
+.env.local
+.env.*.local
+!.env.example
 reports/
 
 # runtime state — never commit
 server/data/
 server.log
+.gstack/

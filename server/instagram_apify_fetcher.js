@@ -20,7 +20,8 @@ const ACTOR = "apify~instagram-profile-scraper";
 const RUN_TIMEOUT_SECS = 120;
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // a retry within a day shouldn't re-bill
 
-const cache = new Map(); // handle -> { at, data }
+const cache = new Map(); // in-process fallback; the DB cache is authoritative
+const geDb = require("./growth_engine_db_select");
 
 async function fetchProfileFromApify(handle) {
   const token = process.env.APIFY_TOKEN;
@@ -88,6 +89,10 @@ async function analyzeInstagramAccountViaApify(rawHandle) {
     console.log(`[Instagram/Apify] Cache hit for @${handle}`);
     return hit.data;
   }
+  try {
+    const c = await geDb.getCachedProfile("instagram", handle, CACHE_TTL_MS);
+    if (c) { console.log(`[Instagram/Apify] DB cache hit for @${handle}`); cache.set(handle, { at: c.fetchedAt, data: c.data }); return c.data; }
+  } catch { /* cache is best-effort */ }
 
   console.log(`[Instagram/Apify] Fetching @${handle}...`);
   const profile = await fetchProfileFromApify(handle);
@@ -123,6 +128,7 @@ async function analyzeInstagramAccountViaApify(rawHandle) {
   const bio = profile.biography || "";
   metrics.profile_clarity = {
     bio_length: bio.length,
+    bio_text: bio.slice(0, 300),
     bio_mentions_location: /\b(brooklyn|manhattan|queens|bronx|nyc|new york|[A-Z][a-z]+, [A-Z]{2}|📍)/i.test(bio) || !!posts.find((p) => p.location),
     bio_mentions_price: /\$\s?\d|\bfree\b|\btrial\b|\bintro\b/i.test(bio),
     bio_has_cta: /\b(book|sign up|join|dm|link below|tap|schedule|reserve)\b/i.test(bio),
@@ -160,6 +166,7 @@ async function analyzeInstagramAccountViaApify(rawHandle) {
     source: "apify/instagram-profile-scraper",
   };
   cache.set(handle, { at: Date.now(), data });
+  try { await geDb.putCachedProfile("instagram", handle, data); } catch { /* best-effort */ }
   return data;
 }
 

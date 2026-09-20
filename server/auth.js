@@ -1,6 +1,6 @@
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
-const geDb = require("./growth_engine_db");
+const geDb = require("./growth_engine_db_select");
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const TOKEN_EXPIRY = "7d";
@@ -37,6 +37,8 @@ async function signup(email, password, companyName) {
   const passwordHash = await bcrypt.hash(password, salt);
 
   const user = await geDb.createUser(email, passwordHash, companyName);
+  // Claim any free reports this email ran before signing up.
+  try { await geDb.adoptAnonymousReports(user.userId, email); } catch (err) { console.warn("[Auth] adopt reports failed:", err.message); }
 
   // Create default entitlement for new user
   await geDb.getOrCreateEntitlement(user.userId);

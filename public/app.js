@@ -1,5 +1,6 @@
-/* Scalecraft front end — single-page funnel over the Growth Engine API.
-   Routes: #/  #/evaluating/:jobId  #/report/:reportId  #/pricing  #/signin */
+/* Scalecraft — creator-first front end over the Growth Engine API.
+   Design: "Field Guide" (Claude Design batch 1).
+   Routes: #/  #/evaluating/:jobId  #/report/:reportId  #/pricing  #/signin  #/signup  #/reports  #/business */
 (function () {
   'use strict';
   const CFG = window.SCALECRAFT_CONFIG || {};
@@ -9,69 +10,58 @@
   const $header = document.getElementById('header');
 
   // ------------------------------------------------------------ data
-  const PLATFORMS = [
-    ['instagram', 'Instagram'], ['tiktok', 'TikTok'], ['youtube', 'YouTube'], ['x', 'X'], ['facebook', 'Facebook'], ['linkedin', 'LinkedIn']
-  ];
-  // Mock supports every platform; the real backend only what config lists.
-  const SUPPORTED = CFG.useMock ? PLATFORMS.map(p => p[0]) : (CFG.supportedPlatforms || PLATFORMS.map(p => p[0]));
+  const LIVE = [['instagram', 'Instagram'], ['tiktok', 'TikTok']];
+  const SOON = [['youtube', 'YouTube'], ['x', 'X'], ['facebook', 'Facebook'], ['linkedin', 'LinkedIn'], ['threads', 'Threads'], ['pinterest', 'Pinterest'], ['snapchat', 'Snapchat'], ['twitch', 'Twitch'], ['bluesky', 'Bluesky']];
+  const PLATFORMS = [...LIVE, ...SOON];
+  const SUPPORTED = CFG.useMock ? LIVE.map(p => p[0]) : (CFG.supportedPlatforms || LIVE.map(p => p[0]));
   const supported = k => SUPPORTED.includes(k);
-  const CATEGORIES = [
-    ['boutique_fitness', 'Boutique Fitness'], ['fitness', 'Fitness'], ['food_beverage', 'Food & Beverage'],
-    ['retail', 'Retail'], ['professional_services', 'Professional Services']
+  const NICHES = [
+    ['fitness_creator', 'Fitness'], ['food_cooking', 'Food & Cooking'], ['fashion', 'Fashion'], ['beauty_skincare', 'Beauty & Skincare'],
+    ['travel', 'Travel'], ['comedy_entertainment', 'Comedy & Entertainment'], ['education_howto', 'Education & How-to'], ['lifestyle_vlog', 'Lifestyle & Vlog'],
+    ['music', 'Music'], ['gaming', 'Gaming'], ['tech_gadgets', 'Tech & Gadgets'], ['finance_business', 'Finance & Business'],
+    ['parenting_family', 'Parenting & Family'], ['art_design', 'Art & Design'], ['sports', 'Sports'], ['pets', 'Pets'],
+    ['other', 'Other…']
   ];
-  const DIMENSIONS = ['Posting consistency', 'Content mix', 'Engagement quality', 'Profile clarity'];
-  const STAGE_COPY = {
-    'profile clarity': 'Reading your bio, link and highlights for a location, a price and a way to book.',
-    'posting consistency': 'Reading the dates on your last public posts and measuring the gaps between them.',
-    'content mix': 'Sorting your recent posts by what they are — schedules, coach voice, member results, behind the desk.',
-    'engagement quality': 'Counting who comments, how often the same accounts come back, and how many posts get saved or shared.'
+  // Business categories still resolve to a name on old reports.
+  const BUSINESS_CATS = [['boutique_fitness', 'Boutique Fitness'], ['fitness', 'Fitness'], ['food_beverage', 'Food & Beverage'], ['retail', 'Retail'], ['professional_services', 'Professional Services']];
+  const DIMS = [
+    { label: 'Posting Consistency', hue: 1, how: 'How often you post and how long the gaps get.' },
+    { label: 'Content Mix', hue: 2, how: 'The formats you use and what the posts are about.' },
+    { label: 'Engagement Quality', hue: 3, how: 'Comments and shares, not just likes.' },
+    { label: 'Profile Clarity', hue: 4, how: 'Whether a stranger gets what you’re about in four seconds.' }
+  ];
+  const STEPS = [
+    ['finding', 'Finding the account', 'Found the account'],
+    ['reading', 'Reading the last 12 posts', 'Read the last 12 posts'],
+    ['scoring', 'Scoring the four dimensions', 'Scored the four dimensions'],
+    ['writing', 'Writing your 30-60-90 plan', 'Wrote your 30-60-90 plan']
+  ];
+  const nicheName = k => {
+    const hit = NICHES.find(c => c[0] === k) || BUSINESS_CATS.find(c => c[0] === k);
+    if (hit) return hit[1].replace('…', '');
+    return String(k || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
   };
-  const catName = k => (CATEGORIES.find(c => c[0] === k) || [, k])[1];
   const platName = k => (PLATFORMS.find(p => p[0] === k) || [, k])[1];
+  const hueOf = label => (DIMS.find(d => d.label.toLowerCase() === String(label).toLowerCase()) || {}).hue || 1;
 
   // ------------------------------------------------------------ utils
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const h = (strings, ...vals) => strings.reduce((out, s, i) => out + s + (i < vals.length ? (vals[i] instanceof Raw ? vals[i].s : esc(vals[i])) : ''), '');
   class Raw { constructor(s) { this.s = s; } }
   const raw = s => new Raw(s);
+  const h = (strings, ...vals) => strings.reduce((out, s, i) => out + s + (i < vals.length ? (vals[i] instanceof Raw ? vals[i].s : esc(vals[i])) : ''), '');
   const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, Number(n) || 0));
-  const fmtDate = d => new Date(d || Date.now()).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }).toUpperCase();
-  const fmtTime = d => new Date(d || Date.now()).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }).toUpperCase();
-  const ordinal = n => ['first', 'second', 'third', 'fourth', 'fifth'][n - 1] || (n + 'th');
+  const fmtDate = d => new Date(d || Date.now()).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  const fmtShort = d => new Date(d || Date.now()).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  const fmtN = n => Number(n || 0).toLocaleString();
+  const ordinal = n => ['1st', '2nd', '3rd', '4th', '5th'][n - 1] || (n + 'th');
   const sget = (k, d) => { try { const v = sessionStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
   const sset = (k, v) => { try { sessionStorage.setItem(k, JSON.stringify(v)); } catch { } };
+  const lget = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
+  const lset = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { } };
   const token = () => { try { return localStorage.getItem('sc_token'); } catch { return null; } };
   const setToken = t => { try { t ? localStorage.setItem('sc_token', t) : localStorage.removeItem('sc_token'); } catch { } };
   const go = hash => { location.hash = hash; };
   const grade = s => s < 50 ? ['Weak', 'weak'] : s < 70 ? ['Fair', 'fair'] : ['Strong', 'strong'];
-
-  // Tiny markdown → HTML for the backend's narrative report (headings, bold, lists, paragraphs).
-  function md(src) {
-    const lines = String(src).replace(/\r/g, '').split('\n');
-    const out = []; let list = null; let para = [];
-    const inline = t => esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\*(.+?)\*/g, '<i>$1</i>').replace(/`(.+?)`/g, '<code>$1</code>');
-    const flushP = () => { if (para.length) { out.push('<p>' + inline(para.join(' ')) + '</p>'); para = []; } };
-    const flushL = () => { if (list) { out.push('</' + list + '>'); list = null; } };
-    for (const ln of lines) {
-      const t = ln.trim();
-      if (!t) { flushP(); continue; } // a blank line ends a paragraph, not a list — LLMs double-space list items
-      let m;
-      // A locked-teaser line (🔒 …) or an indented line belongs to the list item above it
-      if (list && !/^([-*•]|\d+[.)])\s/.test(t) && (/^🔒/.test(t) || /^\s{2,}/.test(ln))) {
-        out[out.length - 1] = out[out.length - 1].replace(/<\/li>$/, '') + '<div class="lock-note">' + inline(t) + '</div></li>';
-        continue;
-      }
-      if (list && !/^([-*•]|\d+[.)])\s/.test(t) && !/^#/.test(t)) flushL();
-      if ((m = /^(#{1,6})\s+(.*)$/.exec(t))) { flushP(); flushL(); const lvl = Math.min(4, m[1].length + 1); out.push(`<h${lvl}>${inline(m[2])}</h${lvl}>`); continue; }
-      if (/^(-{3,}|\*{3,})$/.test(t)) { flushP(); flushL(); out.push('<hr>'); continue; }
-      if ((m = /^[-*•]\s+(.*)$/.exec(t))) { flushP(); if (list !== 'ul') { flushL(); list = 'ul'; out.push('<ul>'); } out.push('<li>' + inline(m[1]) + '</li>'); continue; }
-      if ((m = /^\d+[.)]\s+(.*)$/.exec(t))) { flushP(); if (list !== 'ol') { flushL(); list = 'ol'; out.push('<ol>'); } out.push('<li>' + inline(m[1]) + '</li>'); continue; }
-      if (list) flushL();
-      para.push(t);
-    }
-    flushP(); flushL();
-    return out.join('');
-  }
 
   let toastTimer;
   function toast(msg) {
@@ -101,181 +91,174 @@
     return body;
   }
 
-  // ------------------------------------------------------------ header
-  function renderHeader(kind, ctx) {
-    if (kind === 'report') {
-      $header.innerHTML = h`
-        <div class="gradbar"></div>
-        <div class="topbar reportbar">
-          <div class="left">
-            <a class="brandname" href="#/">Scalecraft</a>
-            <div class="vsep"></div>
-            <div class="handle">@${ctx.handle}</div>
-            <div class="ctx">${ctx.ctx}</div>
-          </div>
-          <div class="right"><a class="plain" href="#" data-action="email-report">Email me this report</a></div>
-        </div>`;
-      return;
-    }
-    const active = kind === 'pricing' ? 'pricing' : '';
+  // ------------------------------------------------------------ header / footer
+  function renderHeader(kind) {
     $header.innerHTML = h`
-      <div class="gradbar"></div>
-      <div class="topbar">
-        <a class="brand" href="#/">
-          <div class="mark">S</div>
-          <div><div class="name">Scalecraft</div><div class="tag">Social evaluation</div></div>
-        </a>
+      <div class="wrap"><div class="topbar">
+        <a class="brand" href="#/">Scalecraft</a>
         <nav class="nav">
-          <a href="#/" data-scroll="how" class="${active === 'how' ? 'active' : ''}">How it scores</a>
-          <a href="#/" data-scroll="dimensions">Dimensions</a>
-          <a href="#/pricing" class="${active === 'pricing' ? 'active' : ''}">Pricing</a>
-        </nav>
-        <div class="right">
+          <a href="#/pricing" class="${kind === 'pricing' ? 'strong' : ''}">Pricing</a>
+          <a href="#/business">For businesses</a>
           ${token()
-            ? raw(h`<a class="plain" href="#/reports">Reports</a><a class="plain" href="#" data-action="signout">Sign out</a>`)
-            : raw(h`<a class="plain" href="#/signin">Sign in</a>`)}
-          <a class="btn sm" href="#/" data-scroll="form">Score my profile <span class="arrow">→</span></a>
-        </div>
-      </div>`;
+            ? raw(h`<a href="#/reports" class="${kind === 'reports' ? 'strong' : ''}">Reports</a><a href="#" data-action="signout">Sign out</a>`)
+            : raw(h`<a href="#/signin" class="strong">Sign in</a>`)}
+        </nav>
+      </div></div>`;
+  }
+  const footer = () => h`<div class="wrap"><div class="footer">
+    <a href="#/how">How the score works</a><a href="#/business">For businesses</a><a href="#/pricing">Pricing</a>
+    <a href="#/legal/terms">Terms</a><a href="#/legal/privacy">Privacy</a><a href="#/legal/cookies">Cookies</a>
+    <span style="margin-left:auto">© ${new Date().getFullYear()} Scalecraft</span>
+  </div></div>`;
+
+  // ------------------------------------------------------------ shared pieces
+  function dimRow(d, avg) {
+    const sc = clamp(d.score, 0, 100); const [gl] = grade(sc); const hue = hueOf(d.label);
+    return h`<div class="dimrow">
+      <div class="lbl"><span class="hue${hue}">${d.label}</span><b>${sc} · ${gl}</b></div>
+      <div class="bar"><div class="fill bg${hue}" style="width:${sc}%"></div>${avg != null ? raw(h`<div class="mark" style="left:${clamp(avg, 0, 100)}%"></div>`) : ''}</div>
+    </div>`;
+  }
+  const SAMPLE = {
+    handle: 'humansofny', platform: 'instagram', date: '2026-09-18T00:00:00Z', followers: 12640167, overall: 53,
+    dims: [{ label: 'Posting Consistency', score: 30, category_avg: 48 }, { label: 'Content Mix', score: 72, category_avg: 60 }, { label: 'Engagement Quality', score: 39, category_avg: 55 }, { label: 'Profile Clarity', score: 70, category_avg: 64 }],
+    summary: 'Posting Consistency and Engagement Quality are driving most of the gap.'
+  };
+  function scoreCardHTML(s) {
+    const [gl, gc] = grade(s.overall);
+    return h`<div class="card scorecard">
+      <div class="head"><b>@${s.handle}</b><span>${platName(s.platform)} · ${fmtDate(s.date)}</span></div>
+      <div class="bigrow"><span class="bignum">${s.overall}</span>
+        <div class="meta"><span class="tag ${gc}">${gl.toUpperCase()}</span><span class="f">${fmtN(s.followers)} followers</span></div></div>
+      <div class="dims">${raw(s.dims.map(d => dimRow(d, d.category_avg)).join(''))}</div>
+      <p class="why">${s.summary}</p>
+      <div class="foot"><span>Marker = niche average</span><a href="${s.link || '#/report/sample'}">See a real one →</a></div>
+    </div>`;
   }
 
   // ------------------------------------------------------------ landing
   function viewLanding() {
     renderHeader('landing');
     const last = sget('sc_form', {});
-    const prefill = CFG.useMock && !last.handle ? 'sunrisefitnessbk' : (last.handle || '');
     const platform = supported(last.platform) ? last.platform : 'instagram';
-    const category = last.category || 'boutique_fitness';
+    const niche = last.category || 'fitness_creator';
+    const sample = sget('sc_sample', null);
+    const hero = sample ? { ...sample, link: '#/report/' + sample.report_id } : SAMPLE;
     $view.innerHTML = h`
       <div class="wrap">
-        <div class="hero-band-wrap" id="how">
-          <div class="hero-band">
-            <div class="h">
-              <div class="eyebrow gold" id="scoredEyebrow" ${CFG.useMock ? '' : 'hidden'}><span class="sq"></span><span id="scoredCount">1,284 Boutique Fitness profiles scored</span></div>
-              <h2>Your feed, scored like a P&amp;L.</h2>
-            </div>
-            <div class="hero-cards">
-              <div class="hcard score">
-                <div class="k">Sample score</div>
-                <div class="big"><div class="n">47</div><div class="d">/100</div></div>
-                <div class="bar"><div style="width:47%"></div></div>
-                <div class="under">14 UNDER CATEGORY AVG</div>
+        <section class="hero">
+          <div class="l">
+            <h1>Score your account. See exactly why. Get the plan.</h1>
+            <p class="sub">Type your handle. About a minute later you'll know where you stand in your niche, what's working, and the first three things to change.</p>
+            <form class="darkform" id="evalForm" novalidate>
+              <div class="row">
+                <div class="field"><div class="handle"><span>@</span><input type="text" name="handle" placeholder="yourhandle" autocomplete="off" autocapitalize="none" spellcheck="false" value="${CFG.useMock && !last.handle ? 'humansofny' : (last.handle || '')}" aria-label="Your handle"></div></div>
+                <div class="field selwrap"><select name="category" aria-label="Niche">${raw(NICHES.map(([k, n]) => h`<option value="${k}" ${k === niche ? 'selected' : ''}>${n}</option>`).join(''))}</select></div>
               </div>
-              <div class="hcard time">
-                <div class="k">Delivered in</div>
-                <div class="t">~40s</div>
-                <div class="s">Four graded dimensions and a 30-60-90 day path.</div>
+              <div class="field" id="otherWrap" ${niche === 'other' ? '' : 'hidden'}><input type="text" name="other" placeholder="Your niche, in a word or two" value="${last.other || ''}" aria-label="Your niche"></div>
+              <div class="chips" role="radiogroup" aria-label="Platform">
+                ${raw(LIVE.map(([k, n]) => h`<button type="button" class="chip ${k === platform ? 'on' : ''}" data-platform="${k}" role="radio" aria-checked="${k === platform}">${n}</button>`).join(''))}
+                ${raw(SOON.map(([k, n]) => h`<button type="button" class="chip soon" data-soon="${k}">${n} · soon</button>`).join(''))}
               </div>
-            </div>
-          </div>
-        </div>
-        <div class="landing-grid">
-          <div class="pitch">
-            <div class="eyebrow accent"><span class="sq"></span>Free profile evaluation</div>
-            <h1>Find out what your feed is actually doing for the business.</h1>
-            <div class="sub">We score your profile against other businesses in your category and hand you a 30-60-90 day path. Takes about forty seconds. No card, no call.</div>
-            <div class="bullets" id="dimensions">
-              <div>One number, 0–100, next to your category average — so you know where you stand, not just how you feel.</div>
-              <div>Four graded dimensions with the actual reason for each grade.</div>
-              <div>The first move of each 30-day phase, in full, free.</div>
-            </div>
-            <div class="foot"><span id="scoredFoot" ${CFG.useMock ? '' : 'hidden'}>1,284 BOUTIQUE FITNESS PROFILES SCORED</span><span class="sl" id="scoredSep" ${CFG.useMock ? '' : 'hidden'}>/</span><span>NO POSTING ACCESS REQUIRED</span></div>
-          </div>
-          <div class="form-card" id="form">
-            <h3>Score my profile</h3>
-            <div class="sub">See how you stack up against competitors.</div>
-            <form id="evalForm" novalidate>
-              <div class="field">
-                <div class="label">Your handle</div>
-                <div class="handle-wrap"><div class="at">@</div><input type="text" name="handle" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="yourstudio" value="${prefill}"></div>
-              </div>
-              <div class="field">
-                <div class="label">Platform</div>
-                <div class="chips" role="radiogroup">
-                  ${raw(PLATFORMS.map(([k, n]) => h`<button type="button" class="chip ${k === platform ? 'on' : ''} ${supported(k) ? '' : 'soon'}" data-platform="${k}" role="radio" aria-checked="${k === platform}" title="${supported(k) ? '' : 'Coming soon'}">${n}${supported(k) ? '' : raw('<small>soon</small>')}</button>`).join(''))}
-                </div>
-              </div>
-              <div class="field">
-                <div class="label">Business category</div>
-                <div class="select-wrap">
-                  <select name="category">${raw(CATEGORIES.map(([k, n]) => h`<option value="${k}" ${k === category ? 'selected' : ''}>${n}</option>`).join(''))}</select>
-                  <span class="change">CHANGE</span>
-                </div>
-              </div>
-              <div class="field">
-                <div class="label">Competitor handles (optional)</div>
-                <div class="sub-label">Compare against 1-2 competitors. Same platform.</div>
-                <input type="text" name="competitor1" placeholder="@competitor1" autocapitalize="none" spellcheck="false">
-                <input type="text" name="competitor2" placeholder="@competitor2" autocapitalize="none" spellcheck="false" style="margin-top: 8px;">
-              </div>
-              <div class="field">
-                <div class="label">Where to send the report</div>
-                <input type="email" name="email" placeholder="maya@sunrisefitness.co" autocomplete="email" value="${last.email || ''}">
-              </div>
+              <div id="waitSlot"></div>
+              <div class="field"><input type="email" name="email" placeholder="you@email.com — where to send it" autocomplete="email" value="${last.email || ''}" aria-label="Email"></div>
               <div class="form-error" id="formError" hidden></div>
-              <button class="btn block" type="submit">Score my profile — free <span class="arrow">→</span></button>
-              <div class="fine">We read only what's public. No password, no posting access, and we don't email you again unless you ask.</div>
+              <div class="cta">
+                <button class="btn" type="submit">Score my account — free</button>
+                <div class="reassure">No login to your account · Public data only<br>Score in about a minute</div>
+              </div>
             </form>
           </div>
-        </div>
-      </div>`;
+          <div class="r">${raw(scoreCardHTML(hero))}</div>
+        </section>
+
+        <section class="howstrip" id="how">
+          ${raw(DIMS.map(d => h`<div class="it bd${d.hue}"><b class="hue${d.hue}">${d.label}</b><p>${d.how}</p></div>`).join(''))}
+        </section>
+
+        <section class="founders" id="founders">
+          <div class="t"><h3>Founding creators</h3><p>The first 50 accounts get the Growth Plan free for a month. Tell us what worked.</p></div>
+          <form id="foundersForm"><input type="email" name="email" placeholder="you@email.com" aria-label="Email"><button class="btn light" type="submit">Count me in</button></form>
+          <div class="mark">[REVIEW — replace before launch]</div>
+        </section>
+
+        <section class="card sharepromo">
+          <div class="mini"><canvas id="promoCard" width="1080" height="1920"></canvas></div>
+          <div class="t"><h3>Post your score</h3><p>Creators post their number. Then they post the one six weeks later.</p></div>
+        </section>
+      </div>
+      ${raw(footer())}`;
+
+    drawShareCard($view.querySelector('#promoCard'), hero, 'story');
 
     const form = $view.querySelector('#evalForm');
     let chosenPlatform = platform;
     form.querySelectorAll('[data-platform]').forEach(b => b.addEventListener('click', () => {
       chosenPlatform = b.dataset.platform;
       form.querySelectorAll('[data-platform]').forEach(x => { x.classList.toggle('on', x === b); x.setAttribute('aria-checked', x === b); });
+      form.querySelectorAll('[data-soon]').forEach(x => x.classList.remove('on'));
+      $view.querySelector('#waitSlot').innerHTML = '';
     }));
+    form.querySelectorAll('[data-soon]').forEach(b => b.addEventListener('click', () => {
+      const k = b.dataset.soon; const slot = $view.querySelector('#waitSlot');
+      const open = b.classList.contains('on');
+      form.querySelectorAll('[data-soon]').forEach(x => x.classList.remove('on'));
+      if (open) { slot.innerHTML = ''; return; }
+      b.classList.add('on');
+      slot.innerHTML = h`<div class="waitbox"><div class="t">Leave your email and we'll score ${platName(k)} first.</div>
+        <div class="row"><input type="email" placeholder="you@email.com" value="${form.email.value}" aria-label="Email for the ${platName(k)} waitlist"><button type="button" class="btn light">Notify me</button></div></div>`;
+      slot.querySelector('button').addEventListener('click', async () => {
+        const email = slot.querySelector('input').value.trim();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast('Add an email first.'); return; }
+        try { await api('/waitlist', { method: 'POST', body: JSON.stringify({ email, platform: k }) }); } catch { }
+        slot.innerHTML = h`<div class="waitdone">You're first in line for ${platName(k)}.</div>`;
+        if (!form.email.value) form.email.value = email;
+      });
+    }));
+    form.category.addEventListener('change', () => { $view.querySelector('#otherWrap').hidden = form.category.value !== 'other'; });
     form.addEventListener('submit', async e => {
       e.preventDefault();
       const err = form.querySelector('#formError');
-      const competitors = [form.competitor1.value.replace(/^@/, '').trim(), form.competitor2.value.replace(/^@/, '').trim()].filter(Boolean);
+      const otherText = (form.other.value || '').trim();
       const payload = {
         handle: form.handle.value.replace(/^@/, '').trim(),
         platform: chosenPlatform,
-        category: form.category.value,
+        category: form.category.value === 'other' ? (otherText ? otherText.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40) || 'other' : 'other') : form.category.value,
         email: form.email.value.trim(),
-        competitors: competitors.length > 0 ? competitors : null
+        other: otherText
       };
       const problems = [];
       if (!/^[A-Za-z0-9._-]{1,60}$/.test(payload.handle)) problems.push('a handle (letters, numbers, dots or underscores)');
-      if (!supported(payload.platform)) { err.textContent = platName(payload.platform) + " isn't scored yet — Instagram and X are live today."; err.hidden = false; return; }
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.email)) problems.push('an email we can send the report to');
-      if (competitors.length > 0 && competitors.some(c => !/^[A-Za-z0-9._-]{1,60}$/.test(c))) problems.push('valid competitor handles');
       if (problems.length) { err.textContent = 'We need ' + problems.join(' and ') + '.'; err.hidden = false; return; }
       err.hidden = true;
       sset('sc_form', payload);
       await submitEvaluation(payload, form.querySelector('button[type=submit]'));
     });
-
-    // Replace the sample count with what we've actually scored.
-    if (!CFG.useMock) api('/baselines', {}, { allow401: true }).then(b => {
-      const n = Number(b?.total) || 0;
-      if (n < 1) return;
-      const cats = Object.entries(b.by_category || {}).sort((a, c) => c[1] - a[1]);
-      const lead = cats[0] && cats[0][1] >= 5 ? `${cats[0][1].toLocaleString()} ${catName(cats[0][0])} profiles scored` : `${n.toLocaleString()} profile${n === 1 ? '' : 's'} scored so far`;
-      const eb = $view.querySelector('#scoredEyebrow'); const ec = $view.querySelector('#scoredCount');
-      if (eb && ec) { ec.textContent = lead; eb.hidden = false; }
-      const f = $view.querySelector('#scoredFoot'); const sep = $view.querySelector('#scoredSep');
-      if (f && sep) { f.textContent = lead.toUpperCase(); f.hidden = false; sep.hidden = false; }
-    }).catch(() => { });
-
+    $view.querySelector('#foundersForm').addEventListener('submit', async e => {
+      e.preventDefault(); const f = e.currentTarget; const email = f.email.value.trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast('Add an email first.'); return; }
+      try { await api('/waitlist', { method: 'POST', body: JSON.stringify({ email, platform: 'founders' }) }); } catch { }
+      f.innerHTML = h`<div class="waitdone" style="flex:1">You're in. We'll email you when your month starts.</div>`;
+    });
     const scrollTo = sget('sc_scroll', null);
     if (scrollTo) { sessionStorage.removeItem('sc_scroll'); document.getElementById(scrollTo)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
   }
 
   async function submitEvaluation(payload, btn) {
-    if (btn) { btn.disabled = true; btn.dataset.label = btn.innerHTML; btn.textContent = 'Queuing…'; }
+    if (btn) { btn.disabled = true; btn.dataset.label = btn.innerHTML; btn.textContent = 'Starting…'; }
     try {
-      const res = await api('/evaluate/social-snapshot', { method: 'POST', body: JSON.stringify(payload) });
+      const body = { handle: payload.handle, platform: payload.platform, category: payload.category, email: payload.email };
+      if (payload.competitors && payload.competitors.length) body.competitors = payload.competitors;
+      const res = await api('/evaluate/social-snapshot', { method: 'POST', body: JSON.stringify(body) });
       sset('sc_job_' + res.job_id, { ...payload, submitted_at: Date.now() });
       go('#/evaluating/' + encodeURIComponent(res.job_id));
     } catch (e) {
-      if (e.status === 401) return; // redirected to sign-in; form values are kept in sessionStorage
+      if (e.status === 401) return;
       if (e.status === 402 && e.body?.code === 'FREE_LIMIT_REACHED') {
-        // Free snapshot already used for this email: the paid tier is the way to run another.
         sset('sc_intent_tier', e.body.upgrade_tier || 'growth_plan');
         sset('sc_limit_msg', e.body.message || e.message);
+        if (e.body.report_id) { toast(`@${payload.handle} was scored on ${fmtDate(e.body.generated_at)} — here it is.`); go('#/report/' + encodeURIComponent(e.body.report_id)); return; }
         go(token() ? '#/pricing' : '#/signin');
         return;
       }
@@ -289,684 +272,692 @@
   function stopPolling() { if (pollHandle) { clearTimeout(pollHandle); pollHandle = null; } }
 
   function viewEvaluating(jobId) {
-    renderHeader('landing');
+    renderHeader('eval');
     const meta = sget('sc_job_' + jobId, sget('sc_form', {}));
-    const handle = meta.handle || 'your profile';
+    const handle = meta.handle || 'your account';
     const startedAt = meta.submitted_at || Date.now();
-    let lastStatus = null;
-
     const render = job => {
-      const status = job.status;
-      if (status === 'queued') {
+      const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+      let inner;
+      if (job.status === 'queued') {
         const ahead = job.queue_position;
-        const eta = job.eta_seconds;
-        $view.innerHTML = h`
-          <div class="wrap"><div class="eval">
-            <div class="main">
-              <div class="pill queued"><span class="dot"></span>Queued</div>
-              <h2>${ahead ? `You're ${ordinal(ahead + 1)} in line.` : "You're in line."}</h2>
-              <div class="lead">${ahead ? `We're finishing ${ahead === 1 ? 'one evaluation' : ahead + ' evaluations'} ahead of yours. ` : ''}Nothing has started on <b>@${handle}</b> yet — it usually takes under a minute from here. You can close this tab; the report lands in your inbox either way.</div>
-              <div class="progress"><div class="track"><div class="sweep"></div></div>
-                <div class="row"><span>${ahead != null ? `${ahead} AHEAD` : 'QUEUED'}${eta ? ` · EST. ${eta}S` : ''}</span><span>${Math.floor((Date.now() - startedAt) / 1000)}S ELAPSED</span></div>
-              </div>
-            </div>
-            <aside class="side">
-              <div class="label">What we'll examine</div>
-              <div class="checklist">${raw(DIMENSIONS.map(d => h`<div class="it"><div class="ring"></div><div class="t">${d}</div></div>`).join(''))}</div>
-              <div class="note">Scope: last 90 days of public posts, bio, and link. 1,284 ${catName(meta.category)} profiles for comparison.</div>
-            </aside>
-          </div></div>`;
-        return;
-      }
-      if (status === 'running') {
-        const stage = String(job.stage || '');
-        const stageKey = stage.toLowerCase();
-        const known = DIMENSIONS.map(d => d.toLowerCase());
-        const idx = known.indexOf(stageKey);
-        const total = job.total_steps || DIMENSIONS.length;
-        const step = job.step || (idx >= 0 ? idx + 1 : null);
-        const pct = job.percent != null ? clamp(job.percent, 0, 100) : step ? Math.round(((step - 0.5) / total) * 100) : null;
-        const elapsed = job.elapsed_seconds != null ? job.elapsed_seconds : Math.floor((Date.now() - startedAt) / 1000);
-        const heading = idx >= 0 ? `Evaluating ${stageKey}` : stage ? `Working: ${stage}` : 'Evaluating your profile';
-        const lead = STAGE_COPY[stageKey] || 'Reading your public posts, bio and link and scoring them against your category.';
-        // Order the checklist so completed stages read first, as in the design
-        const order = job.stage_order || (idx >= 0 ? ['Profile clarity', 'Posting consistency', 'Content mix', 'Engagement quality'] : DIMENSIONS);
-        const doneSet = new Set(job.completed_stages || (idx >= 0 ? order.slice(0, order.map(s => s.toLowerCase()).indexOf(stageKey)) : []));
+        inner = h`<div class="card evalbox gold"><div class="eyebrow">Queued</div><h2>${ahead ? `You're ${ordinal(ahead + 1)} in line` : "You're in line"}</h2>
+          <p>We'll start on @${handle} in a moment. You can close this — the report lands in your inbox either way.</p></div>`;
+      } else if (job.status === 'running') {
+        const step = clamp(job.step || 1, 1, 4);
+        const pct = job.percent != null ? clamp(job.percent, 0, 100) : [14, 42, 68, 91][step - 1];
         const stats = job.stats;
-        $view.innerHTML = h`
-          <div class="wrap"><div class="eval">
-            <div class="main">
-              <div class="pill running"><span class="dot"></span>Running</div>
-              <h2>${heading}</h2>
-              <div class="lead">${lead}</div>
-              <div class="progress">
-                <div class="track">${pct != null ? raw(h`<div class="fill" style="width:${pct}%"></div>`) : raw('<div class="sweep"></div>')}</div>
-                <div class="row"><span>${step ? `STEP ${step} OF ${total}` : 'IN PROGRESS'}${pct != null ? ` · ${pct}%` : ''}</span><span>${elapsed}S ELAPSED</span></div>
-                ${elapsed > 75 ? raw(h`<div class="slow">Taking longer than usual — the scoring service is busy. We keep trying for a few minutes, and the report lands in your inbox either way.</div>`) : ''}
-              </div>
-              ${stats ? raw(h`<div class="statchips">
-                ${stats.posts_found != null ? raw(h`<div><div class="k">POSTS FOUND</div><div class="v">${stats.posts_found}</div></div>`) : ''}
-                ${stats.window_days != null ? raw(h`<div><div class="k">WINDOW</div><div class="v">${stats.window_days} days</div></div>`) : ''}
-                ${stats.longest_gap_days != null ? raw(h`<div><div class="k">LONGEST GAP</div><div class="v">${stats.longest_gap_days} days</div></div>`) : ''}
-              </div>`) : ''}
-            </div>
-            <aside class="side">
-              <div class="label">Progress</div>
-              <div class="checklist">${raw(order.map(d => {
-                const k = d.toLowerCase();
-                const cls = doneSet.has(d) || [...doneSet].some(x => String(x).toLowerCase() === k) ? 'done' : k === stageKey ? 'now' : '';
-                return h`<div class="it ${cls}"><div class="ring"></div><div class="t">${d}</div>${cls === 'done' ? raw('<div class="st">done</div>') : cls === 'now' ? raw('<div class="st">now</div>') : ''}</div>`;
-              }).join(''))}</div>
-              ${job.note ? raw(h`<div class="note">${job.note}</div>`) : ''}
-            </aside>
-          </div></div>`;
-        return;
-      }
-      if (status === 'failed') {
-        const ref = job.ref || jobId.slice(-7).toUpperCase();
+        inner = h`<div class="card evalbox">
+          <div class="top"><h2 class="md">${STEPS[step - 1][1]}</h2><span class="pct">${pct}%</span></div>
+          <div class="sub">@${handle} · step ${step} of 4</div>
+          <div class="track"><div class="fill" style="width:${pct}%"></div></div>
+          ${stats ? raw(h`<div class="stats">${stats.posts_found != null ? raw(h`<span class="pill tone">POSTS ${stats.posts_found}</span>`) : ''}${stats.window_days != null ? raw(h`<span class="pill tone">WINDOW ${stats.window_days} d</span>`) : ''}${stats.longest_gap_days != null ? raw(h`<span class="pill tone">LONGEST GAP ${stats.longest_gap_days} d</span>`) : ''}</div>`) : ''}
+          <div class="steps">${raw(STEPS.map(([, now, done], i) => { const n = i + 1; const cls = n < step ? 'done' : n === step ? 'now' : ''; return h`<div class="st ${cls}"><span class="ring">${cls === 'done' ? '✓' : ''}</span>${cls === 'done' ? done : now}</div>`; }).join(''))}</div>
+          ${elapsed > 75 ? raw('<div class="slownote">This is taking longer than usual. Nothing is wrong — big accounts take a little more reading. We\'ll email you the second it\'s done.</div>') : ''}
+        </div>`;
+      } else if (job.status === 'failed') {
         const errText = String(job.error || '');
-        // Classify so the advice matches the cause: a private/missing profile is the
-        // owner's to fix; a data-source or scoring outage is ours.
-        const kind = /private|not found|no public|does not exist|404/i.test(errText) ? 'profile'
-          : /api key|configured|LLM|token|rate limit|quota|not yet supported|could not fetch/i.test(errText) ? 'ours'
-          : 'unknown';
-        const lead = kind === 'profile'
-          ? errText || `${platName(meta.platform)} returned the profile as private, so there are no public posts for us to score. Nothing was charged and nothing was saved.`
-          : kind === 'ours'
-            ? 'Our scoring service couldn’t complete this run. Nothing was charged and nothing was saved.'
-            : errText || 'The evaluation stopped before it could finish. Nothing was charged and nothing was saved.';
-        const boxLabel = kind === 'ours' ? 'What happens now' : 'Two ways forward';
-        const boxText = kind === 'ours'
-          ? 'This one is on our side, not yours. Retry in a few minutes — the same handle and link will work once the service is back. If it keeps happening, reply to the report email and we’ll run it by hand.'
-          : 'Switch the account to public for ten minutes and retry — or run the evaluation on a different handle. If the profile is public and this keeps happening, it’s on our side; the same link will work later.';
-        $view.innerHTML = h`
-          <div class="wrap"><div class="eval single"><div class="failwrap">
-            <div class="pill failed"><span class="dot"></span>Stopped</div>
-            <h2>${kind === 'ours' ? `We couldn't finish @${handle}.` : `We couldn't read @${handle}.`}</h2>
-            <div class="lead">${lead}</div>
-            <div class="failbox">
-              <div class="label">${boxLabel}</div>
-              <p>${boxText}</p>
-            </div>
-            <div class="actions">
-              <button class="btn md" data-action="retry">Retry evaluation</button>
-              <button class="btn md ghost" data-action="another">Use another handle</button>
-            </div>
-            <div class="ref">REF ${ref} · ${fmtTime()}${kind === 'ours' && errText ? raw(h` · <span title="${errText}">${errText.length > 60 ? errText.slice(0, 57) + '…' : errText}</span>`) : ''}</div>
-          </div></div></div>`;
-        $view.querySelector('[data-action=retry]').addEventListener('click', e => submitEvaluation(meta, e.currentTarget));
-        $view.querySelector('[data-action=another]').addEventListener('click', () => { sset('sc_scroll', 'form'); go('#/'); });
-        return;
+        const profile = /private|not found|no public|does not exist|not a valid/i.test(errText);
+        inner = profile
+          ? h`<div class="card evalbox warm"><div class="eyebrow" style="color:var(--weak)">Couldn't read the account</div>
+              <h2 class="fail">We couldn't read @${handle} — ${/private/i.test(errText) ? 'it looks private.' : 'we couldn\'t find it.'}</h2>
+              <p>${/private/i.test(errText) ? 'Make it public for ten minutes and retry. We only ever read what anyone can see.' : 'Check the spelling of the handle and the platform, then try again.'}</p>
+              <div class="actions"><button class="btn" data-action="retry">Retry</button><a class="btn ghost" href="#/" data-scroll="evalForm">Try another handle</a></div></div>`
+          : h`<div class="card evalbox"><div class="eyebrow">Our side</div>
+              <h2 class="fail">We couldn't finish. Nothing was charged.</h2>
+              <p>Retry in a few minutes. If it happens twice, reply to the email and we'll run it by hand.</p>
+              <div class="actions"><button class="btn dark" data-action="retry">Retry</button></div>
+              <div class="ref">REF ${(job.ref || jobId.slice(-7)).toUpperCase()}${errText ? ' · ' + errText.slice(0, 70) : ''}</div></div>`;
+      } else if (job.status === 'complete') {
+        inner = h`<div class="card evalbox green"><div class="eyebrow">Complete</div><h2>Your score is ${job.overall ?? '…'}</h2><p>Opening your report…</p></div>`;
       }
+      $view.innerHTML = h`<div class="wrap"><div class="evalwrap">${raw(inner || '')}</div></div>`;
+      $view.querySelector('[data-action=retry]')?.addEventListener('click', e => submitEvaluation(meta, e.currentTarget));
     };
-
     const tick = async () => {
       let job;
       try { job = await api('/job/' + encodeURIComponent(jobId)); }
       catch (e) {
         if (e.status === 401) return;
         if (e.status === 404) { $view.innerHTML = h`<div class="center-msg"><h2>That evaluation has expired.</h2><a href="#/">Start a new one</a></div>`; return; }
-        pollHandle = setTimeout(tick, POLL * 2); return; // transient — keep polling, slower
+        pollHandle = setTimeout(tick, POLL * 2); return;
       }
       if (job.status === 'complete') {
         const rawReport = job.resultPayload || job.result || null;
         const id = rawReport?.report_id || rawReport?.reportId || job.report_id;
-        if (rawReport && id) sset('sc_report_' + id, normalizeReport(rawReport, id));
-        if (id) { go('#/report/' + encodeURIComponent(id)); return; }
-        $view.innerHTML = h`<div class="center-msg"><h2>Finished, but no report came back.</h2><a href="#/">Try again</a></div>`;
+        const report = rawReport && id ? normalizeReport(rawReport, id) : null;
+        if (report) { sset('sc_report_' + id, report); rememberSample(report); }
+        render({ status: 'complete', overall: report?.scores?.overall });
+        setTimeout(() => { if (id) go('#/report/' + encodeURIComponent(id)); else $view.innerHTML = h`<div class="center-msg"><h2>Finished, but no report came back.</h2><a href="#/">Try again</a></div>`; }, 900);
         return;
       }
-      if (job.status !== lastStatus || job.status !== 'queued') render(job);
-      lastStatus = job.status;
+      render(job);
       if (job.status !== 'failed') pollHandle = setTimeout(tick, POLL);
     };
     render({ status: 'queued' });
     tick();
   }
+  // The landing hero shows the visitor's own latest report once they have one.
+  function rememberSample(r) {
+    if (!r.scores || r.scores.overall == null) return;
+    sset('sc_sample', { report_id: r.report_id, handle: r.business?.handle, platform: r.business?.platform, date: r.created_at, followers: r.business?.followers || r.followers || 0, overall: r.scores.overall, dims: (r.scores.dimensions || []).map(d => ({ label: d.label, score: d.score, category_avg: d.category_avg })), summary: r.scores.summary || '' });
+  }
 
-  // ------------------------------------------------------------ report
-  function normalizePhase(p, i, total) {
+  // ------------------------------------------------------------ report normalisation
+  function normalizePhase(p, i) {
     const range = p.range || p.days || `${i * 30 + 1}-${(i + 1) * 30}`;
     const days = /^\d+\s*[-–]\s*\d+$/.test(range) ? 'Days ' + range.replace(/\s*[-–]\s*/, '–') : range;
     const locked = p.locked || {};
-    const defaultSlots = [[0, 2, 5], [1, 3, 5], [0, 3, 6]][i % 3];
-    const calendar = Array.isArray(locked.calendar) && locked.calendar.length === 28
-      ? locked.calendar.map(Boolean)
-      : Array.from({ length: 28 }, (_, k) => defaultSlots.includes(k % 7));
-    const wk = [i * 4 + 1, i * 4 + 4];
     const count = locked.count ?? 4;
-    // Locked moves are numbered continuously across phases: phase 1 has
-    // MOVE 01 free + 02..(1+count) locked, phase 2 picks up from there.
-    const firstLocked = i * (1 + count) + 2;
-    const items = Array.isArray(locked.items) && locked.items.length ? locked.items : Array.from({ length: Math.min(3, Math.max(1, count - 1)) }, (_, k) => ({
-      meta: `MOVE ${String(firstLocked + k).padStart(2, '0')} · LOCKED`, w1: ['94%', '88%', '97%'][k], w2: ['61%', '44%', '72%'][k]
-    }));
+    const wk = [i * 4 + 1, i * 4 + 4];
     const moves = Array.isArray(p.moves) ? p.moves.filter(m => m && (m.action || m.title)) : [];
     const weeks = Array.isArray(p.calendar_weeks) ? p.calendar_weeks : [];
-    const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    // Paid tier: real calendar grid from the plan's weeks (4 rows × 7 days)
-    const planCalendar = weeks.length ? weeks.slice(0, 4).flatMap(w => DAYS.map(d => (w.slots || []).some(sl => String(sl.day).slice(0, 3).toLowerCase() === d.toLowerCase()))) : null;
+    const firstLocked = i * (1 + count) + 2;
+    const teasers = Array.isArray(locked.items) && locked.items.length ? locked.items.map(it => it.meta || it.title || '') : [];
     return {
-      days, label: p.label || `Phase ${i + 1}`,
-      action: p.visible_action || p.action || '',
-      detail: p.detail || '',
-      moves, weeks,
-      // Use the model's teaser only if it names a count; the design promises one.
-      lockedHeader: /\d/.test(locked.teaser || '') ? locked.teaser : `${count} specific moves + your weeks ${wk[0]}–${wk[1]} calendar`,
-      calendarLabel: locked.calendar_label || `WEEKS ${wk[0]}–${wk[1]} · ${(planCalendar || calendar).filter(Boolean).length} POST SLOTS`,
-      calendar: planCalendar && planCalendar.length === 28 ? planCalendar : calendar, items, count
+      key: 'p' + (i + 1), days, label: p.label || `Phase ${i + 1}`,
+      action: p.visible_action || p.action || '', detail: p.detail || '',
+      moves, weeks, count, firstLocked, teasers,
+      lockedHeader: /\d/.test(locked.teaser || '') ? locked.teaser : `${count} more moves + your weeks ${wk[0]}–${wk[1]} calendar`
     };
   }
-
-  // The backend's free-tier report is a narrative (markdown) plus the raw persona
-  // outputs; scores live inside that text. Pull what we can into the scored shape
-  // the report page renders, and keep the narrative for the sections we can't fill.
-  const DIM_KEYS = [
-    ['POSTING_CONSISTENCY', 'Posting Consistency'], ['CONTENT_MIX', 'Content Mix'],
-    ['ENGAGEMENT_RATE', 'Engagement Rate'], ['ENGAGEMENT_QUALITY', 'Engagement Quality'],
-    ['DISCOVERY_SIGNAL', 'Discovery Signal'], ['PROFILE_CLARITY', 'Profile Clarity']
-  ];
-  function num(re, text) { const m = re.exec(text || ''); return m ? clamp(m[1], 0, 100) : null; }
-  function normalizeReport(raw, reportId) {
-    const wrapped = raw && raw.reportBody && typeof raw.reportBody === 'object';
-    const body = wrapped ? raw.reportBody : (raw || {});
+  const DIM_KEYS = [['POSTING_CONSISTENCY', 'Posting Consistency'], ['CONTENT_MIX', 'Content Mix'], ['ENGAGEMENT_RATE', 'Engagement Quality'], ['ENGAGEMENT_QUALITY', 'Engagement Quality'], ['DISCOVERY_SIGNAL', 'Discovery Signal'], ['PROFILE_CLARITY', 'Profile Clarity']];
+  function normalizeReport(rawR, reportId) {
+    const wrapped = rawR && rawR.reportBody && typeof rawR.reportBody === 'object';
+    const body = wrapped ? rawR.reportBody : (rawR || {});
     const r = { ...body };
-    r.report_id = body.report_id || raw?.reportId || reportId;
-    r.tier = body.tier || raw?.tier;
-    r.business = body.business || raw?.business || {};
-    r.created_at = body.created_at || body.generated_at || raw?.generatedAt || Date.now();
-    r.narrative = typeof body.narrative === 'string' ? body.narrative : (typeof body === 'string' ? body : null);
+    r.report_id = body.report_id || rawR?.reportId || reportId;
+    r.tier = body.tier || rawR?.tier;
+    r.business = body.business || rawR?.business || {};
+    r.created_at = body.created_at || body.generated_at || rawR?.generatedAt || Date.now();
+    r.narrative = typeof body.narrative === 'string' ? body.narrative : null;
     if (!r.scores || r.scores.overall == null) {
-      const gap = body.raw_personas?.gap_auditor || '';
-      const text = (gap + '\n' + (r.narrative || '')).replace(/\*\*|__/g, '');
-      const overall = num(/OVERALL[_ ]SCORE\s*(?:\([^)]*\))?[^0-9]{0,40}(\d{1,3})(?:\s*\/\s*100)?/i, text);
-      // Only trust a category average that is an actual 0-100 figure, not a benchmark list
-      const avgM = /CATEGORY[_ ]AVG(?:ERAGE)?\s*(?:\([^)]*\))?[^0-9\n]{0,30}(\d{1,3})(?:\s*\/\s*100)?\b(?![^\n]*(?:posts|%|week))/i.exec(text);
-      const avg = avgM ? clamp(avgM[1], 0, 100) : null;
+      const gap = String(body.raw_personas?.gap_auditor || '').replace(/\*\*|__/g, '');
       const dims = [];
-      const plain = gap.replace(/\*\*|__|\\\[|\\\]|`/g, '').replace(/\r/g, '');
-      const glines = plain.split('\n');
       for (const [key, label] of DIM_KEYS) {
-        const keyRe = new RegExp(key.replace('_', '[_ ]'), 'i');
-        const idx = glines.findIndex(l => keyRe.test(l));
-        if (idx < 0) continue;
-        const line = glines[idx].replace(keyRe, '');
-        const sm = /(?:\(\s*0\s*[-–]\s*100\s*\)\s*)?[^0-9\n]{0,40}?(\d{1,3})(?:\s*\/\s*100)?/.exec(line);
-        if (!sm) continue;
-        let expl = line.slice(sm.index + sm[0].length).replace(/^[\s:—–\-]+/, '').trim();
-        if (expl.length < 20) {
-          const next = glines.slice(idx + 1).find(l => l.trim().length > 20 && !/^[-*#]/.test(l.trim()));
-          expl = next ? next.trim() : expl;
-        }
-        dims.push({ label, score: clamp(sm[1], 0, 100), explanation: expl });
+        const m = new RegExp(key.replace('_', '[_ ]') + '\\s*(?:\\([^)]*\\))?[^0-9\\n]{0,40}?(\\d{1,3})(?:\\s*\\/\\s*100)?\\s*[:—–-]?\\s*([^\\n]*)', 'i').exec(gap);
+        if (m && !dims.some(d => d.label === label)) dims.push({ label, score: clamp(m[1], 0, 100), explanation: (m[2] || '').trim() });
       }
-      if (overall != null || dims.length) r.scores = { overall: overall ?? (dims.length ? Math.round(dims.reduce((a, d) => a + d.score, 0) / dims.length) : null), category_avg: avg, dimensions: dims, parsed: true };
+      const om = /OVERALL[_ ]SCORE[^0-9]{0,40}(\d{1,3})/i.exec(gap);
+      if (om || dims.length) r.scores = { overall: om ? clamp(om[1], 0, 100) : Math.round(dims.reduce((a, d) => a + d.score, 0) / dims.length), dimensions: dims, parsed: true };
     }
     return r;
   }
 
-  function postCard(p, kind) {
-    const d = p.date ? new Date(p.date) : null;
-    return h`<div class="post ${kind}">
-      <div class="pm"><span class="fmt">${p.format}</span><span>${d ? d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : ''}${p.weekday ? ' · ' + p.weekday : ''}</span><span class="x ${p.vs_avg >= 1 ? 'g-strong' : 'g-weak'}">${p.vs_avg}× avg</span></div>
-      <div class="pc">${p.caption || '(no caption)'}</div>
-      <div class="pn">${Number(p.likes).toLocaleString()} likes · ${Number(p.comments).toLocaleString()} comments${p.views ? ` · ${Number(p.views).toLocaleString()} views` : ''}${p.url ? raw(h` · <a href="${p.url}" target="_blank" rel="noopener">open</a>`) : ''}</div>
-    </div>`;
+  // ------------------------------------------------------------ share card (canvas)
+  function drawShareCard(canvas, s, size, opts = {}) {
+    if (!canvas) return;
+    const W = 1080, H = size === 'square' ? 1080 : 1920;
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    const P = 84;
+    ctx.fillStyle = '#D2603A'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#FFF6E9';
+    const dsp = w => `700 ${w}px "Bricolage Grotesque", "Instrument Sans", system-ui, sans-serif`;
+    const sans = (w, wt = 500) => `${wt} ${w}px "Instrument Sans", system-ui, sans-serif`;
+    ctx.textBaseline = 'top';
+    ctx.font = sans(40, 600); ctx.globalAlpha = .9;
+    ctx.fillText(`@${s.handle}  ·  ${nicheName(s.niche || s.category) || platName(s.platform)}`.toUpperCase(), P, P);
+    ctx.globalAlpha = 1;
+    let y = size === 'square' ? 250 : 560;
+    if (opts.prev != null) {
+      ctx.font = dsp(200); ctx.globalAlpha = .55; ctx.fillText(String(opts.prev), P, y + 120); ctx.globalAlpha = 1;
+      const pw = ctx.measureText(String(opts.prev)).width;
+      ctx.font = dsp(120); ctx.fillText('→', P + pw + 40, y + 180);
+      ctx.font = dsp(360); ctx.fillText(String(s.overall), P + pw + 190, y);
+      y += 400;
+      ctx.font = sans(40, 600); ctx.fillText(opts.span || 'in six weeks', P, y); y += 90;
+    } else {
+      ctx.font = dsp(size === 'square' ? 420 : 520); ctx.fillText(String(s.overall), P - 14, y);
+      y += size === 'square' ? 420 : 520;
+      ctx.font = sans(48, 600); ctx.fillText('My Scalecraft score', P, y); y += 110;
+    }
+    const bw = W - P * 2;
+    for (const d of s.dims) {
+      ctx.font = sans(38, 600); ctx.fillText(d.label, P, y);
+      ctx.textAlign = 'right'; ctx.fillText(String(d.score), W - P, y); ctx.textAlign = 'left';
+      y += 58;
+      ctx.fillStyle = '#E9977B'; roundRect(ctx, P, y, bw, 28, 14); ctx.fill();
+      ctx.fillStyle = '#FFF6E9'; roundRect(ctx, P, y, bw * clamp(d.score, 0, 100) / 100, 28, 14); ctx.fill();
+      y += 78;
+    }
+    ctx.font = sans(34, 500); ctx.globalAlpha = .85;
+    ctx.fillText(`${fmtDate(s.date)}  ·  scored by scalecraft`, P, H - P - 30); ctx.globalAlpha = 1;
   }
-  function competitorTable(c) {
-    const rows = [{ ...c.you, you: true }, ...c.competitors];
-    return h`<div class="comprank">You rank <b>#${c.rank.position} of ${c.rank.of}</b></div>
-      <div class="comptable">${raw(rows.map(r => r.ok === false
-        ? h`<div class="crow err"><div class="ch">@${r.handle}</div><div class="cerr">${r.error}</div></div>`
-        : h`<div class="crow ${r.you ? 'you' : ''}">
-            <div class="ch">@${r.handle}${r.you ? raw(' <small>you</small>') : ''}${r.followers ? raw(h`<small>${Number(r.followers).toLocaleString()} followers</small>`) : ''}</div>
-            <div class="cs"><b>${r.overall}</b><div class="bar"><div style="width:${r.overall}%"></div></div></div>
-            <div class="cd">${raw((r.dimensions || []).map(d => h`<span title="${d.label}">${({ 'Posting Consistency': 'CONS', 'Content Mix': 'MIX', 'Engagement Quality': 'ENG', 'Profile Clarity': 'PROF' })[d.label] || d.label.slice(0, 4).toUpperCase()} ${d.score}</span>`).join(''))}</div>
-            <div class="cw">${r.you ? '' : (r.does_differently && r.does_differently.length ? raw(r.does_differently.map(t => h`<div>${t}</div>`).join('')) : raw('<div class="fine">Nothing they do better on these measures.</div>'))}</div>
-          </div>`).join(''))}</div>`;
-  }
-  function sparkline(vals) {
-    const w = 64, hgt = 18, n = vals.length; const lo = Math.min(...vals), hi = Math.max(...vals);
-    const pts = vals.map((v, i) => `${(i / (n - 1)) * w},${hgt - ((v - lo) / Math.max(1, hi - lo)) * (hgt - 2) - 1}`).join(' ');
-    return `<svg class="spark" viewBox="0 0 ${w} ${hgt}" width="${w}" height="${hgt}"><polyline fill="none" stroke="currentColor" stroke-width="1.5" points="${pts}"/></svg>`;
+  function roundRect(ctx, x, y, w, hh, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + hh, r); ctx.arcTo(x + w, y + hh, x, y + hh, r); ctx.arcTo(x, y + hh, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+
+  function openShareSheet(report) {
+    const s = { handle: report.business?.handle, platform: report.business?.platform, niche: report.business?.category, date: report.created_at, overall: report.scores.overall, dims: report.scores.dimensions };
+    const prev = report.history?.previous?.overall;
+    const el = document.createElement('div'); el.className = 'sheet';
+    el.innerHTML = h`<div class="panel" role="dialog" aria-label="Share your score"><div class="grab"></div>
+      <div class="row">
+        <div class="preview"><canvas id="shareCanvas"></canvas></div>
+        <div class="opts"><h3>Post your score</h3>
+          <div class="sizes"><button type="button" class="pill dark" data-size="story">Story 1080×1920</button><button type="button" class="pill" data-size="square">Square</button></div>
+          ${prev != null && prev !== s.overall ? raw(h`<label class="check"><input type="checkbox" id="thenNow" checked> Show ${prev} → ${s.overall}</label>`) : ''}
+          <button type="button" class="btn" data-share="post">Post your score</button>
+          <button type="button" class="btn ghost" data-share="save">Save image</button>
+          <button type="button" class="btn ghost" data-share="copy">Copy link</button>
+        </div></div></div>`;
+    document.body.appendChild(el);
+    const canvas = el.querySelector('#shareCanvas');
+    let size = 'story';
+    const redraw = () => { const tn = el.querySelector('#thenNow'); drawShareCard(canvas, s, size, tn && tn.checked ? { prev, span: report.history?.previous?.generated_at ? 'since ' + fmtShort(report.history.previous.generated_at) : 'in six weeks' } : {}); };
+    redraw();
+    el.querySelectorAll('[data-size]').forEach(b => b.addEventListener('click', () => { size = b.dataset.size; el.querySelectorAll('[data-size]').forEach(x => x.classList.toggle('dark', x === b)); redraw(); }));
+    el.querySelector('#thenNow')?.addEventListener('change', redraw);
+    const close = () => el.remove();
+    el.addEventListener('click', e => { if (e.target === el) close(); });
+    const toBlob = () => new Promise(r => canvas.toBlob(r, 'image/png'));
+    el.querySelector('[data-share=save]').addEventListener('click', async () => {
+      const blob = await toBlob(); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `scalecraft-${s.handle}-${size}.png`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    });
+    el.querySelector('[data-share=post]').addEventListener('click', async () => {
+      const blob = await toBlob(); const file = new File([blob], `scalecraft-${s.handle}.png`, { type: 'image/png' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file], text: `My account scored ${s.overall}/100 on Scalecraft` }); return; } catch { } }
+      el.querySelector('[data-share=save]').click(); toast('Saved — post it from your camera roll.');
+    });
+    el.querySelector('[data-share=copy]').addEventListener('click', async () => {
+      const url = location.origin + location.pathname + '#/report/' + report.report_id;
+      try { await navigator.clipboard.writeText(url); toast('Link copied.'); } catch { toast(url); }
+    });
   }
 
+  // ------------------------------------------------------------ report
   async function viewReport(reportId) {
+    if (reportId === 'sample') { renderHeader('report'); $view.innerHTML = h`<div class="center-msg"><h2>Score your own account to see a real one.</h2><a href="#/">Score my account</a></div>`; return; }
     let report = sget('sc_report_' + reportId, null);
     if (!report) {
-      renderHeader('landing');
+      renderHeader('report');
       $view.innerHTML = h`<div class="center-msg">Loading your report…</div>`;
       try { report = normalizeReport(await api('/reports/' + encodeURIComponent(reportId)), reportId); sset('sc_report_' + reportId, report); }
       catch (e) {
         if (e.status === 401) return;
-        $view.innerHTML = h`<div class="center-msg"><h2>We couldn't find that report.</h2><a href="#/">Score a profile</a></div>`; return;
+        if (e.status === 403) { $view.innerHTML = h`<div class="center-msg"><h2>This report belongs to another account.</h2><a href="#/reports">Your reports</a></div>`; return; }
+        $view.innerHTML = h`<div class="center-msg"><h2>We couldn't find that report.</h2><a href="#/">Score an account</a></div>`; return;
       }
     }
-    const hasScores = report.scores && report.scores.overall != null;
-    if (!hasScores && !report.narrative) {
-      renderHeader('landing');
-      $view.innerHTML = h`<div class="center-msg"><h2>This report came back empty.</h2><a href="#/">Score a profile</a></div>`; return;
-    }
     const s = report.scores || {};
+    if (s.overall == null) { renderHeader('report'); $view.innerHTML = h`<div class="center-msg"><h2>This report came back without a score.</h2><a href="#/">Score an account</a></div>`; return; }
     const biz = report.business || {};
-    const overall = clamp(s.overall, 0, 100);
-    const avg = s.category_avg != null ? clamp(s.category_avg, 0, 100) : null;
-    const top = s.category_top_quartile != null ? clamp(s.category_top_quartile, 0, 100) : null;
-    const sample = s.category_sample_size ? Number(s.category_sample_size).toLocaleString() : null;
-    const cat = biz.category_name || catName(biz.category) || 'your category';
-    const diff = avg != null ? overall - avg : null;
-    const chip = diff == null ? null : diff < 0 ? ['Below category', 'below'] : diff > 0 ? ['Above category', 'above'] : ['At category average', 'even'];
-    const phases = (report.growth_path?.phases || []).map((p, i, a) => normalizePhase(p, i, a.length));
-    const unlocked = report.growth_path?.unlocked_steps ?? phases.length;
-    const totalSteps = report.growth_path?.total_steps ?? phases.reduce((n, p) => n + 1 + p.count, 0);
-    const up = report.upsell || {};
-    let price = up.monthly_price || 39;
     const paid = !!report.tier && report.tier !== 'social_snapshot';
-    const cal = report.calendar || {};
-    const calWeeks = Array.isArray(cal.weeks) ? cal.weeks : [];
+    const overall = clamp(s.overall, 0, 100); const [gl, gc] = grade(overall);
+    const niche = nicheName(biz.category);
+    const nicheKnown = s.niche_known !== false;
+    const phases = (report.growth_path?.phases || []).map(normalizePhase);
     const pi = report.post_insights || null;
     const hist = report.history || null;
     const comp = report.competitors || null;
+    const calWeeks = Array.isArray(report.calendar?.weeks) ? report.calendar.weeks : [];
+    const pending = s.category_baseline_pending;
+    const doneKey = 'sc_done_' + report.report_id;
+    const done = { ...(lget(doneKey, {})), ...(report.moves_done || {}) };
+    const isDone = k => !!done[k];
+    const price = report.upsell?.monthly_price || 12;
+    const oneTime = report.upsell?.one_time_price || 15;
+    const thisWeek = phases[0];
+    const nextPhase = phases[1];
+    const followers = biz.followers || report.followers || (report.post_insights && report.post_insights.followers) || null;
 
-    renderHeader('report', { handle: biz.handle || '', ctx: [platName(biz.platform), cat, fmtDate(report.created_at), paid ? 'GROWTH PLAN' : ''].filter(Boolean).join(' · ').toUpperCase() });
-
-    let narrativeText = report.narrative || '';
-    if (phases.length) {
-      // The phase cards render the path; keep the prose from repeating it.
-      // Models mix hyphens (-, –, ‑) and heading styles; match loosely.
-      narrativeText = narrativeText.replace(/\n[*#\s]*YOUR 30[^\n]{0,4}60[^\n]{0,4}90[^\n]*\n[\s\S]*?(?=\n[*#\s]*WHAT THE FULL PLAN|\n[*#\s]*WHAT COMES NEXT|\n[*#\s]*REASONING SUMMARY|$)/i, '\n');
-      if (paid) narrativeText = narrativeText.replace(/\n[*#\s]*WHAT THE FULL PLAN ADDS[^\n]*\n[^\n]*\n?/i, '\n');
-    }
-    const narrativeHtml = narrativeText.trim() ? md(narrativeText) : '';
+    renderHeader('report');
     $view.innerHTML = h`
-      <div class="wrap"><div class="report">
-        ${hasScores ? raw(h`<section class="scorepanel">
-          <div>
-            <div class="eyebrow">Overall score</div>
-            <div class="big"><div class="n">${overall}</div><div class="d">/100</div></div>
-            ${chip ? raw(h`<div class="tagchip ${chip[1]}">${chip[0]}</div>`) : ''}
-            ${hist && hist.delta_overall != null ? raw(h`<div class="delta ${hist.delta_overall > 0 ? 'up' : hist.delta_overall < 0 ? 'down' : ''}">${hist.delta_overall === 0 ? 'unchanged' : (hist.delta_overall > 0 ? '+' : '') + hist.delta_overall} since ${fmtDate(hist.previous.generated_at)}${hist.series && hist.series.length > 2 ? raw(sparkline(hist.series.map(x => x.overall))) : ''}</div>`) : ''}
-          </div>
-          <div class="textcol">
-            <div class="summary">${diff != null ? raw(h`You're <b>${Math.abs(diff)} points ${diff < 0 ? 'under' : diff > 0 ? 'over' : 'from'}</b> the ${cat} average. `) : ''}${s.summary || ''}</div>
-            <div class="cmp">
-              <div><div class="row you"><span class="l">@${biz.handle || 'you'}</span><span class="n">${overall}</span></div><div class="bar you"><div style="width:${overall}%"></div></div></div>
-              ${avg == null && s.category_baseline_pending ? raw(h`<div class="pending">Your ${cat} average appears once ${s.category_baseline_pending.min_n} profiles are scored — ${s.category_baseline_pending.n} so far.</div>`) : ''}
-              ${avg != null ? raw(h`<div><div class="row"><span class="l">${cat} average ${sample ? raw(h`<small>(${sample} profiles)</small>`) : ''}</span><span class="n">${avg}</span></div><div class="bar avg"><div style="width:${avg}%"></div></div></div>`) : ''}
-              ${top != null ? raw(h`<div><div class="row"><span class="l">Top quartile in your category</span><span class="n">${top}</span></div><div class="bar top"><div style="width:${top}%"></div></div></div>`) : ''}
+      <div class="wrap">
+        <div class="rhead">
+          <div class="l"><span class="h">@${biz.handle || ''}</span><span class="ctx">${platName(biz.platform)} · ${niche} · ${fmtDate(report.created_at)}</span>${paid ? raw(h`<span class="tag dark">${report.one_time_unlock ? 'UNLOCKED ONCE' : 'GROWTH PLAN'}</span>`) : ''}</div>
+          <div class="r"><button class="btn ghost sm" data-action="email-report">Email me this report</button><button class="btn dark sm" data-action="share">Share my score</button></div>
+        </div>
+        <div class="report">
+          <div class="toprow">
+            <div class="card scorebox">
+              <div class="bigrow"><span class="bignum">${overall}</span>
+                <div class="meta"><span class="tag ${gc}">${gl.toUpperCase()}</span>
+                  ${followers ? raw(h`<span class="f">${fmtN(followers)} followers</span>`) : ''}
+                  ${hist && hist.delta_overall != null ? raw(h`<span class="delta ${hist.delta_overall > 0 ? 'up' : hist.delta_overall < 0 ? 'down' : 'flat'}">${hist.delta_overall === 0 ? `${overall} → ${overall} · unchanged since ${fmtShort(hist.previous.generated_at)}` : `${hist.delta_overall > 0 ? '+' : ''}${hist.delta_overall} since ${fmtShort(hist.previous.generated_at)}`}</span>`) : ''}
+                </div></div>
+              <p class="why">${s.summary || ''}</p>
             </div>
-          </div>
-        </section>`) : ''}
-
-        ${(s.dimensions || []).length ? raw(h`<section>
-          <h2 class="sec-h">${(s.dimensions || []).length === 4 ? 'Four dimensions' : 'Dimensions'}</h2>
-          <p class="sec-s">Each graded on the same 0–100 scale.${(s.dimensions || []).some(d => d.category_avg != null) ? ' The marker on every bar is your category average.' : ''}</p>
-          <div class="dims">${raw((s.dimensions || []).map(d => {
-            const sc = clamp(d.score, 0, 100); const [gl, gc] = grade(sc);
-            const da = d.category_avg != null ? clamp(d.category_avg, 0, 100) : null;
-            return h`<article class="dim">
-              <div class="head"><div class="t">${d.label}</div><div class="sc"><div class="n g-${gc}">${sc}</div><div class="g g-${gc}">${gl}</div></div></div>
-              <div class="bar"><div class="fill bg-${gc}" style="width:${sc}%"></div>${da != null ? raw(h`<div class="mark" style="left:${da}%"></div>`) : ''}</div>
-              <div class="avg">${da != null ? `${gl.toUpperCase()} · CATEGORY AVG ${da}` : gl.toUpperCase()}${(() => { const dd = hist?.delta_dimensions?.find(x => x.label === d.label); return dd && dd.delta != null && dd.delta !== 0 ? raw(h` · <span class="${dd.delta > 0 ? 'g-strong' : 'g-weak'}">${dd.delta > 0 ? '+' : ''}${dd.delta}</span>`) : ''; })()}</div>
-              <div class="why">${d.explanation || ''}</div>
-            </article>`;
-          }).join(''))}</div>
-        </section>`) : ''}
-
-
-        ${pi && pi.top && pi.top.length ? raw(h`<section class="posts">
-          <h2 class="sec-h">Your best and worst posts</h2>
-          <p class="sec-s">Ranked against your own average of ${Number(pi.avg_engagement).toLocaleString()} likes + comments per post${pi.patterns?.best_format ? raw(h`. Your <b>${pi.patterns.best_format.format}s</b> average ${pi.patterns.best_format.vs_avg}× your typical post`) : ''}${pi.patterns?.best_day ? raw(h`; <b>${pi.patterns.best_day.day}</b> is your strongest day`) : ''}.</p>
-          ${pi.note ? raw(h`<div class="postnote">${pi.note}</div>`) : ''}
-          <div class="postcols">
-            <div><div class="label">Top performers</div>${raw(pi.top.map(p => postCard(p, 'top')).join(''))}</div>
-            <div><div class="label">Fell flat</div>${raw(pi.bottom.map(p => postCard(p, 'low')).join(''))}</div>
-          </div>
-        </section>`) : ''}
-
-        <section class="competitors" id="competitors">
-          <div class="path-head">
-            <div><h2 class="sec-h">Against your competitors</h2><p class="sec-s">${paid ? 'Up to five accounts your customers also follow, scored the same way — and what each does that you don’t.' : 'See how you rank against five accounts your customers also follow, and exactly what they do that you don’t.'}</p></div>
-            ${paid ? '' : raw('<div class="unlockchip">GROWTH PLAN</div>')}
-          </div>
-          ${paid ? raw(h`
-            <form class="compform" id="compForm">
-              <div class="field" style="flex:1"><div class="label">Competitor handles (comma-separated, up to 5)</div><input type="text" name="handles" placeholder="@barrysbootcamp, @rumbleboxing" value="${comp ? comp.competitors.map(c => c.handle).join(', ') : ''}"></div>
-              <button class="btn md" type="submit">${comp ? 'Re-run comparison' : 'Compare'}</button>
-            </form>
-            <div id="compResult">${comp ? raw(competitorTable(comp)) : ''}</div>`)
-          : raw(h`<div class="compteaser">
-              <div class="row"><span class="l">@${biz.handle || 'you'}</span><span class="n">${overall}</span></div>
-              ${raw(['', '', ''].map((_, i) => `<div class="row ghost"><span class="l"><span class="sk" style="width:${[120, 96, 140][i]}px"></span></span><span class="n"><span class="sk" style="width:22px"></span></span></div>`).join(''))}
-              <div class="fine">Add competitor handles after you unlock the plan.</div>
-            </div>`)}
-        </section>
-
-        ${phases.length ? raw(h`<section>
-          <div class="path-head">
-            <div><h2 class="sec-h">Your 30-60-90 day path</h2><p class="sec-s">${paid ? 'Every move, in order, written from your own posts.' : 'The first move of each phase is yours now. The rest is written and waiting.'}</p></div>
-            <div class="unlockchip ${paid ? 'open' : ''}">${paid ? `ALL ${totalSteps} STEPS UNLOCKED` : `${unlocked} OF ${totalSteps} STEPS UNLOCKED`}</div>
-          </div>
-          <div class="phases">${raw(phases.map(p => h`<article class="phase">
-            <div class="ph"><div class="days">${p.days}</div><div class="lbl">${p.label}</div></div>
-            <div class="pb">
-              <div class="move"><div class="movetag">MOVE 01</div><div class="action">${p.action}</div></div>
-              ${p.detail ? raw(h`<div class="detail">${p.detail}</div>`) : ''}
-            </div>
-            ${p.moves.length ? raw(h`<div class="moves">
-              ${raw(p.moves.map(m => h`<div class="mv"><div class="movetag">MOVE ${String(m.n).padStart(2, '0')}</div><div class="mvb"><div class="mvt">${m.title}</div><div class="mva">${m.action}</div>${m.why ? raw(h`<div class="mvw">${m.why}</div>`) : ''}</div></div>`).join(''))}
+            ${thisWeek ? raw(h`<div class="weekcard">
+              <div class="eb"><span>This week</span><span>${thisWeek.days} · ${thisWeek.label}</span></div>
+              <div class="mv">MOVE 01</div>
+              <p class="a">${thisWeek.action}</p>
+              ${thisWeek.detail ? raw(h`<p class="w">${thisWeek.detail}</p>`) : ''}
+              <button class="done ${isDone('p1m1') ? 'on' : ''}" data-move="p1m1"><span class="box">${isDone('p1m1') ? '✓' : ''}</span>Mark this move done</button>
+              ${nextPhase ? raw(h`<div class="next">Next: Day 31 — ${nextPhase.label}</div>`) : ''}
             </div>`) : ''}
-            <div class="locked ${p.moves.length ? 'open' : ''}">
-              ${p.moves.length ? '' : raw(h`<div class="lh"><div class="lock"></div><div class="t">${p.lockedHeader}</div></div>`)}
-              <div class="lb">
-                ${p.moves.length ? '' : raw(p.items.map(it => h`<div class="li"><div class="m">${it.meta}</div><div class="sk"><div style="width:${it.w1 || '90%'}"></div><div style="width:${it.w2 || '55%'}"></div></div></div>`).join(''))}
-                <div class="cal">
-                  <div class="m">${p.calendarLabel}</div>
-                  <div class="grid">${raw(p.calendar.map(on => `<div class="${on ? 'slot' : ''}"></div>`).join(''))}</div>
-                  <div class="legend"><span><i class="slot"></i>POST SLOT</span><span><i></i>REST</span></div>
-                </div>
-              </div>
+          </div>
+
+          <details class="card acc" open>
+            <summary>The four dimensions</summary>
+            <div class="body">
+              ${raw((s.dimensions || []).map(d => { const sc = clamp(d.score, 0, 100); const [g, gcc] = grade(sc); const hue = hueOf(d.label); const dd = hist?.delta_dimensions?.find(x => x.label === d.label);
+                return h`<div class="dimcard bd${hue}"><div class="top"><span class="n">${d.label}</span><span class="s hue${hue}">${sc} · ${g}${dd && dd.delta ? raw(h`<span class="dd g-${dd.delta > 0 ? 'strong' : 'weak'}">${dd.delta > 0 ? '+' : ''}${dd.delta}</span>`) : ''}</span></div>
+                  <div class="bar in"><div class="fill bg${hue}" style="width:${sc}%"></div>${d.category_avg != null ? raw(h`<div class="mark" style="left:${clamp(d.category_avg, 0, 100)}%"></div>`) : ''}</div>
+                  <p>${d.explanation || ''}</p></div>`; }).join(''))}
+              <div class="fine">${s.category_avg != null ? `The marker is your ${niche} average (${fmtN(s.category_sample_size)} accounts).` : pending ? `The marker is your niche average. Your ${niche} average appears once ${pending.min_n} accounts are scored — ${pending.n} so far.` : nicheKnown ? 'The marker is your niche average.' : `Scored against all creators — we don't have enough ${niche} accounts yet.`}</div>
             </div>
-          </article>`).join(''))}</div>
-        </section>`) : ''}
+          </details>
 
-        ${calWeeks.length ? raw(h`<section class="calendar">
-          <div class="path-head">
-            <div><h2 class="sec-h">Your 12-week calendar</h2><p class="sec-s">${cal.posting_days && cal.posting_days.length ? raw(h`${cal.posting_days.join(' · ')}${cal.posting_time ? ` at ${cal.posting_time}` : ''}. `) : ''}Each slot has an angle and a shooting brief — open a week to read them.</p></div>
-          </div>
-          <div class="weeks">${raw(calWeeks.map((w, i) => h`<details class="week" ${i === 0 ? 'open' : ''}>
-            <summary><span class="wk">WEEK ${w.week}</span><span class="ph">DAYS ${(w.phase - 1) * 30 + 1}–${w.phase * 30}</span><span class="slots">${raw((w.slots || []).map(sl => h`<span class="slot"><b>${String(sl.day).slice(0, 3)}</b> ${sl.format}</span>`).join(''))}</span></summary>
-            <div class="wbody">${raw((w.slots || []).map(sl => h`<div class="wslot"><div class="wday"><b>${String(sl.day).slice(0, 3)}</b><span>${sl.format}</span></div><div><div class="wangle">${sl.angle}</div>${sl.prompt ? raw(h`<div class="wprompt">${sl.prompt}</div>`) : ''}</div></div>`).join(''))}</div>
-          </details>`).join(''))}</div>
-        </section>`) : ''}
+          ${pi && pi.top && pi.top.length ? raw(h`<details class="card acc">
+            <summary>Your best and worst posts</summary>
+            <div class="body">
+              <div class="postmeta"><span class="pill tone">AVG ${fmtN(pi.avg_engagement)} per post</span>${pi.patterns?.best_format ? raw(h`<span class="pill tone">${String(pi.patterns.best_format.format).toUpperCase()}S ${pi.patterns.best_format.vs_avg}×</span>`) : ''}${pi.patterns?.best_day ? raw(h`<span class="pill green">${String(pi.patterns.best_day.day).toUpperCase()} IS YOUR STRONGEST DAY</span>`) : ''}</div>
+              <div class="posts">${raw([...pi.top.map(p => [p, 'top']), ...pi.bottom.map(p => [p, 'low'])].map(([p, k]) => h`<div class="post ${k}">
+                <div class="k"><div class="x ${k === 'top' ? 'g-strong' : 'g-weak'}">${p.vs_avg}×</div><div class="t">${k === 'top' ? 'TOP' : 'LOW'} · ${String(p.format).toUpperCase()}</div><div class="d">${p.weekday ? p.weekday + ' ' : ''}${p.date ? fmtShort(p.date) : ''}</div></div>
+                <div class="c"><p>“${p.caption || 'no caption'}”</p><div class="n">${fmtN(p.likes)} likes · ${fmtN(p.comments)} comments${p.views ? ` · ${fmtN(p.views)} views` : ''}${p.url ? raw(h` · <a href="${p.url}" target="_blank" rel="noopener">open</a>`) : ''}</div></div></div>`).join(''))}</div>
+              ${pi.note ? raw(h`<p class="postnote">${pi.note}</p>`) : ''}
+            </div>
+          </details>`) : ''}
 
-        ${narrativeHtml ? raw(h`<section class="narrative">
-          <h2 class="sec-h">${hasScores ? 'The full read' : 'Your report'}</h2>
-          <div class="prose">${raw(narrativeHtml)}</div>
-        </section>`) : ''}
+          ${phases.length ? raw(h`<details class="card acc" ${paid ? 'open' : ''}>
+            <summary>Your 30-60-90 path</summary>
+            <div class="body">${raw(phases.map((p, i) => {
+              const tone = ['var(--gold)', 'var(--green)', 'var(--purple)'][i % 3]; const toneT = ['var(--gold-t)', 'var(--green-t)', 'var(--c4t)'][i % 3];
+              const total = 1 + p.moves.length; const doneN = (isDone(p.key + 'm1') ? 1 : 0) + p.moves.filter(m => isDone(p.key + 'm' + m.n)).length;
+              return h`<div class="phase">
+                <div class="ph" style="background:${raw(tone)}"><span>${p.days} · ${p.label}</span>${paid && p.moves.length ? raw(h`<span class="prog" style="color:${raw(toneT)}">${doneN} of ${total} done</span>`) : ''}</div>
+                <div class="pb">
+                  <div class="move"><span class="n">01</span><p>${p.action}</p></div>
+                  ${paid ? raw(p.moves.map(m => h`<button class="mvrow ${isDone(p.key + 'm' + m.n) ? 'on' : ''}" data-move="${p.key}m${m.n}"><span class="box">${isDone(p.key + 'm' + m.n) ? '✓' : ''}</span><div class="b"><div class="t">${String(m.n).padStart(2, '0')} · ${m.title || ''}</div><p>${m.action}</p>${m.why ? raw(h`<p class="w">Why: ${m.why}</p>`) : ''}</div></button>`).join(''))
+                  : raw(h`<div class="locked"><div class="rows">${raw((p.teasers.length ? p.teasers : Array.from({ length: p.count }, (_, k) => `MOVE ${String(p.firstLocked + k).padStart(2, '0')}`)).slice(0, 4).map((t, k) => h`<div>${String(p.firstLocked + k).padStart(2, '0')} · ${t.replace(/^MOVE \d+\s*·?\s*/i, '')}${/…$/.test(t) ? '' : '…'}</div>`).join(''))}
+                      <div class="grid">${raw(Array.from({ length: 28 }, (_, k) => `<span style="${[0, 2, 4, 6].includes(k % 7) ? `background:var(--c${(Math.floor(k / 7) % 4) + 1})` : ''}"></span>`).join(''))}</div></div>
+                    <div class="lk"><i>🔒</i>${p.lockedHeader}</div></div>`)}
+                </div></div>`; }).join(''))}</div>
+          </details>`) : ''}
 
+          ${paid && calWeeks.length ? raw(h`<details class="card acc" open>
+            <summary>Your 12-week calendar</summary>
+            <div class="body" style="gap:8px">${raw(calWeeks.map((w, i) => h`<details class="week" ${i === 0 ? 'open' : ''}>
+              <summary><span class="wk">WEEK ${w.week} · DAYS ${(w.week - 1) * 7 + 1}–${w.week * 7}</span><span class="sl">${(w.slots || []).map(sl => `${String(sl.day).slice(0, 3)} ${sl.format}`).join(' · ')}</span></summary>
+              <div class="slots">${raw((w.slots || []).map((sl, k) => h`<div class="slot bd${(k % 4) + 1}"><div class="d">${String(sl.day).slice(0, 3).toUpperCase()} · ${String(sl.format).toUpperCase()}</div><div class="a">${sl.angle}</div>${sl.prompt ? raw(h`<div class="p">${sl.prompt}</div>`) : ''}</div>`).join(''))}</div>
+            </details>`).join(''))}</div>
+          </details>`) : ''}
 
-        ${paid ? raw(h`<section class="upsell quiet">
-          <div>
-            <h3>This plan refreshes weekly</h3>
-            <div class="p">Score @${biz.handle || 'this profile'} again any time — the moves and calendar are rewritten against your latest posts.${report.refresh_due_at ? ` Next scheduled refresh ${fmtDate(report.refresh_due_at)}.` : ''}</div>
-          </div>
-          <div class="right"><a class="btn ghost strong md" href="#/" data-scroll="form">Run a fresh evaluation</a></div>
-        </section>`) : raw(h`<section class="upsell">
-          <div>
-            <h3>${up.cta_label || 'Unlock your full Growth Plan'}</h3>
-            <div class="p">${up.description || `${up.unlock_count || 12} locked items: the remaining specific moves and the week-by-week posting calendar for all three phases, written against your own posts — not a template.`}</div>
-            <div class="chips"><span>${up.unlock_count || 12} LOCKED ITEMS</span><span>12-WEEK CALENDAR</span><span>WEEKLY REFRESH</span></div>
-          </div>
-          <div class="right">
-            <div class="price" id="upPrice">$${price}<span>/mo</span></div>
-            <div class="alt" id="upAlt">or $${Math.round(price * 12 * 0.75)}/yr — 25% off</div>
-            <button class="btn" data-action="unlock" data-tier="${up.target_tier || 'growth_plan'}">Unlock the plan <span class="arrow">→</span></button>
-            <div class="fine">Cancel anytime. Keep the report either way.</div>
-          </div>
-        </section>`)}
-      </div></div>`;
+          <details class="card acc" ${paid && comp ? 'open' : ''}>
+            <summary>Against your competitors</summary>
+            <div class="body">
+              ${paid ? raw(h`<form class="compform" id="compForm"><input type="text" name="handles" placeholder="@handle — add up to 5" value="${comp ? comp.competitors.map(c => c.handle).join(', ') : (report.competitor_handles || []).join(', ')}" aria-label="Competitor handles"><button class="btn dark" type="submit">${comp ? 'Re-run' : 'Compare'}</button></form><div id="compResult">${comp ? raw(competitorRows(comp)) : ''}</div>`)
+              : raw(h`<div class="comprows"><div class="crow you"><span>@${biz.handle} (you)</span><span>${overall}</span></div>
+                  ${raw(((report.competitor_handles && report.competitor_handles.length) ? report.competitor_handles : ['', '', '']).slice(0, 3).map((hn, i) => h`<div class="crow"><span>${hn ? '@' + hn : raw(`<span style="display:inline-block;width:${[120, 96, 140][i]}px;height:12px;border-radius:6px;background:var(--track2)"></span>`)}</span><span class="ghost">${[63, 48, 57][i]}</span></div>`).join(''))}
+                  <p class="fine" style="margin-top:6px">Their scores and what they do differently unlock with the plan.</p></div>`)}
+            </div>
+          </details>
 
-    $view.querySelector('[data-action=unlock]')?.addEventListener('click', e => { sset('sc_intent_tier', e.currentTarget.dataset.tier); go('#/pricing'); });
+          <div class="datawindow">${report.data_window || `Based on your last ${pi?.sample || 12} posts. We can't see saves, reach or story views.`}</div>
+
+          ${!paid && sget('sc_limit_msg', null) ? raw(h`<div class="notice">${sget('sc_limit_msg', '')} <a href="#/pricing">See the plan →</a></div>`) : ''}
+          ${paid && report.one_time_unlock ? raw(h`<div class="refresh once"><div class="t"><h3>Yours to keep</h3><p>You unlocked this report once. It won't refresh — start the Growth Plan to be re-scored every week and see what each move changed.</p></div><button class="btn green" data-action="unlock">Start the plan · $${price}/mo</button></div>`)
+          : paid ? raw(h`<div class="refresh"><div class="t"><h3>This plan refreshes weekly</h3><p>${Object.keys(done).length ? `You did ${Object.keys(done).length} move${Object.keys(done).length === 1 ? '' : 's'} — we'll re-score you and tell you what changed.` : 'Run it again any time — the moves and calendar are rewritten against your latest posts.'}</p></div><a class="btn green" href="#/" data-scroll="evalForm">Run a fresh evaluation</a></div>`)
+          : raw(h`<div class="upsell"><h3>Unlock your full Growth Plan</h3><p>${report.upsell?.unlock_count || 12} locked items: the remaining moves and your week-by-week calendar, written from your own posts.</p>
+              <div class="paths">
+                <div class="path main"><div class="pn">Growth Plan · <b>$${price}/mo</b></div><div class="pd">Re-scored every week. See what each move changed.</div><button class="btn" data-action="unlock">Start the plan →</button></div>
+                <div class="path"><div class="pn">Just this report · <b>$${oneTime}</b></div><div class="pd">Every move and the calendar, once. No subscription.</div><button class="btn light" data-action="unlock-once">Unlock once</button></div>
+              </div>
+              <div class="fine">Cancel anytime. Keep the report either way.</div></div>`)}
+
+          <div class="bridge">Run a business too? The same engine scores a business account against its category and writes the plan for bookings, not just followers. <a href="#/business">For businesses →</a></div>
+        </div>
+      </div>${raw(footer())}`;
+
+    // move done toggles
+    $view.querySelectorAll('[data-move]').forEach(b => b.addEventListener('click', async () => {
+      const k = b.dataset.move; const now = !isDone(k);
+      if (now) done[k] = Date.now(); else delete done[k];
+      lset(doneKey, done);
+      b.classList.toggle('on', now); b.querySelector('.box').textContent = now ? '✓' : '';
+      if (token() && paid) { try { await api('/reports/' + encodeURIComponent(report.report_id) + '/moves', { method: 'POST', body: JSON.stringify({ key: k, done: now }) }); } catch { } }
+      report.moves_done = done; sset('sc_report_' + report.report_id, report);
+      $view.querySelectorAll('.phase').forEach((ph, i) => { const p = phases[i]; if (!p || !paid) return; const total = 1 + p.moves.length; const dn = (isDone(p.key + 'm1') ? 1 : 0) + p.moves.filter(m => isDone(p.key + 'm' + m.n)).length; const el = ph.querySelector('.prog'); if (el) el.textContent = `${dn} of ${total} done`; });
+    }));
+    $view.querySelector('[data-action=share]').addEventListener('click', () => openShareSheet(report));
+    $view.querySelector('[data-action=unlock]')?.addEventListener('click', () => { sset('sc_intent_tier', 'growth_plan'); go('#/pricing'); });
+    $view.querySelector('[data-action=unlock-once]')?.addEventListener('click', async e => {
+      if (!token()) { sset('sc_next', location.hash); sset('sc_unlock_once', report.report_id); go('#/signup'); return; }
+      const b = e.currentTarget; b.disabled = true; b.textContent = 'Unlocking…';
+      try {
+        const res = await api('/reports/' + encodeURIComponent(report.report_id) + '/unlock', { method: 'POST', body: JSON.stringify({}) });
+        if (res.already_unlocked) { go('#/report/' + encodeURIComponent(res.report_id)); return; }
+        sset('sc_job_' + res.job_id, { handle: biz.handle, platform: biz.platform, category: biz.category, submitted_at: Date.now(), one_time: true });
+        toast(`Charged ${res.payment?.amount || '$9'} once. Writing your full plan…`);
+        go('#/evaluating/' + encodeURIComponent(res.job_id));
+      } catch (e2) { if (e2.status === 401) return; toast(e2.message || 'Unlock failed.'); b.disabled = false; b.textContent = 'Unlock once'; }
+    });
     $view.querySelector('#compForm')?.addEventListener('submit', async e => {
-      e.preventDefault();
-      const f = e.currentTarget; const btn = f.querySelector('button'); const out = $view.querySelector('#compResult');
+      e.preventDefault(); const f = e.currentTarget; const btn = f.querySelector('button'); const out = $view.querySelector('#compResult');
       const handles = f.handles.value.split(/[,\s]+/).map(x => x.replace(/^@/, '').trim()).filter(Boolean).slice(0, 5);
       if (!handles.length) { toast('Add at least one handle.'); return; }
-      btn.disabled = true; btn.textContent = `Scoring ${handles.length} account${handles.length === 1 ? '' : 's'}…`;
-      out.innerHTML = '<div class="fine">Reading each profile — about ten seconds per account.</div>';
-      try {
-        const res = await api('/reports/' + encodeURIComponent(report.report_id) + '/competitors', { method: 'POST', body: JSON.stringify({ handles }) });
-        report.competitors = res; sset('sc_report_' + report.report_id, report);
-        out.innerHTML = competitorTable(res);
-      } catch (e2) {
-        if (e2.status === 401) return;
-        if (e2.status === 402) { sset('sc_intent_tier', 'growth_plan'); go('#/pricing'); return; }
-        out.innerHTML = h`<div class="form-error">${e2.message}</div>`;
-      }
-      btn.disabled = false; btn.textContent = 'Re-run comparison';
+      btn.disabled = true; btn.textContent = `Scoring ${handles.length}…`; out.innerHTML = '<div class="fine">Reading each account — about ten seconds per handle.</div>';
+      try { const res = await api('/reports/' + encodeURIComponent(report.report_id) + '/competitors', { method: 'POST', body: JSON.stringify({ handles }) }); report.competitors = res; sset('sc_report_' + report.report_id, report); out.innerHTML = competitorRows(res); }
+      catch (e2) { if (e2.status === 401) return; if (e2.status === 402) { sset('sc_intent_tier', 'growth_plan'); go('#/pricing'); return; } out.innerHTML = h`<div class="form-error">${e2.message}</div>`; }
+      btn.disabled = false; btn.textContent = 'Re-run';
     });
-
-    // Never trust a cached price — refresh it from billing.
-    if (!paid) api('/billing/pricing', {}, { allow401: true }).then(p => {
-      const t = (p.tiers || []).find(x => x.tier === (up.target_tier || 'growth_plan'));
-      if (t && t.monthlyPrice != null) {
-        price = t.monthlyPrice;
-        const dm = /(\d+)\s*%/.exec(p.discount?.annual || ''); const disc = p.annual_discount ?? (dm ? Number(dm[1]) / 100 : 0.25);
-        $view.querySelector('#upPrice').innerHTML = h`$${price}<span>/mo</span>`;
-        $view.querySelector('#upAlt').textContent = `or $${t.annualPrice != null ? t.annualPrice : Math.round(price * 12 * (1 - disc))}/yr — ${Math.round(disc * 100)}% off`;
-      }
-    }).catch(() => { });
+    if (!paid) api('/billing/pricing', {}, { allow401: true }).then(p => { const t = (p.tiers || []).find(x => x.tier === 'growth_plan'); if (t && t.monthlyPrice != null) { const el = $view.querySelector('.upsell p'); if (el) el.textContent = el.textContent.replace(/\$\d+\/mo or \$\d+\/yr/, `$${t.monthlyPrice}/mo or $${t.annualPrice ?? Math.round(t.monthlyPrice * 9)}/yr`); } }).catch(() => { });
+  }
+  function competitorRows(c) {
+    const rows = [...c.competitors.filter(x => x.ok !== false).map(x => ({ ...x, you: false })), { handle: c.you.handle, overall: c.you.overall, you: true }].sort((a, b) => b.overall - a.overall);
+    return h`<div class="fine" style="margin-bottom:10px">You rank #${c.rank.position} of ${c.rank.of}</div><div class="comprows">${raw(rows.map((r, i) => h`<div class="crow ${r.you ? 'you' : ''}"><div class="h"><span>${i + 1} · @${r.handle}${r.you ? ' (you)' : ''}</span><span>${r.overall}</span></div>${!r.you ? raw(h`<ul>${raw((r.does_differently && r.does_differently.length ? r.does_differently : ['Nothing they do better on these measures.']).map(t => h`<li>${t}</li>`).join(''))}</ul>`) : ''}</div>`).join(''))}${raw(c.competitors.filter(x => x.ok === false).map(x => h`<div class="crow"><span>@${x.handle}</span><span class="fine">${x.error}</span></div>`).join(''))}</div>`;
   }
 
-  // ------------------------------------------------------------ pricing
+  // ------------------------------------------------------------ pricing (batch 2)
   async function viewPricing() {
     renderHeader('pricing');
     $view.innerHTML = h`<div class="center-msg">Loading pricing…</div>`;
     let pricing, ent = null;
     try { pricing = await api('/billing/pricing', {}, { allow401: true }); }
     catch (e) { $view.innerHTML = h`<div class="center-msg"><h2>Pricing is unavailable right now.</h2>${e.message}</div>`; return; }
-    if (token()) { try { ent = await api('/account/subscription-status', {}, { allow401: true }); } catch { try { ent = await api('/entitlements', {}, { allow401: true }); } catch { } } }
-    const discMatch = /(\d+)\s*%/.exec(pricing.discount?.annual || '');
-    const disc = pricing.annual_discount ?? (discMatch ? Number(discMatch[1]) / 100 : 0.25);
+    if (token()) { try { ent = await api('/account/subscription-status', {}, { allow401: true }); } catch { } }
+    const discM = /(\d+)\s*%/.exec(pricing.discount?.annual || ''); const disc = discM ? Number(discM[1]) / 100 : 0.25;
     let billing = sget('sc_billing', 'monthly');
     const intent = sget('sc_intent_tier', null);
-
+    const limitMsg = sget('sc_limit_msg', null);
+    const tiers = pricing.tiers || [];
+    const free = tiers.find(t => !t.monthlyPrice) || {};
+    const growth = tiers.find(t => t.tier === 'growth_plan') || {};
+    const pro = tiers.find(t => t.tier === 'growth_plan_pro');
+    const yr = t => t.annualPrice ?? Math.round((t.monthlyPrice || 0) * 12 * (1 - disc));
+    const cur = t => ent && ent.current_tier === t;
     const render = () => {
       const annual = billing === 'annual';
-      const yr = t => t.annualPrice != null ? t.annualPrice : Math.round(t.monthlyPrice * 12 * (1 - disc));
-      $view.innerHTML = h`
-        <div class="wrap"><div class="pricing">
-          <div class="intro">
-            ${sget('sc_limit_msg', null) ? raw(h`<div class="notice">${sget('sc_limit_msg', '')}</div>`) : ''}
-            <h1>Pay when the plan is worth doing.</h1>
-            <p>The score is always free. Paid tiers are for owners who want the whole ninety days written out and kept current.</p>
-            <div class="toggle" role="tablist">
-              <button type="button" class="${annual ? '' : 'on'}" data-billing="monthly">Monthly</button>
-              <button type="button" class="${annual ? 'on' : ''}" data-billing="annual">Annual <b>−${Math.round(disc * 100)}%</b></button>
+      const proOpen = sget('sc_pro_open', false);
+      $view.innerHTML = h`<div class="wrap"><div class="pricing">
+        ${limitMsg ? raw(h`<div class="notice" style="margin-bottom:18px">${limitMsg}</div>`) : ''}
+        <h1>Pay when the plan is worth doing.</h1>
+        <p class="lede">Score first, free. Unlock the rest when you've read it and decided it's right.</p>
+        <div class="toggle" role="tablist"><button type="button" class="${annual ? '' : 'on'}" data-billing="monthly">Monthly</button><button type="button" class="${annual ? 'on' : ''}" data-billing="annual">Annual · ${Math.round(disc * 100)}% off</button></div>
+        <div class="tiers">
+          <div class="card tier">
+            <div class="n">Free Snapshot</div>
+            <div class="p">$0</div>
+            <div class="note">${free.note || 'One report per email'}</div>
+            <div class="feats">${raw((free.features || []).map(f => h`<div>${f}</div>`).join(''))}</div>
+            <a class="btn ghost" href="#/" data-scroll="evalForm">Score my account</a>
+          </div>
+          <div class="tier dark ${cur('growth_plan') ? 'cur' : ''}">
+            <div class="th"><span class="n">${growth.name || 'Growth Plan'}</span><span class="tag act">${cur('growth_plan') ? 'YOUR PLAN' : 'MOST POPULAR'}</span></div>
+            <div class="price"><span class="p">$${annual ? yr(growth) : growth.monthlyPrice}</span><span class="per">${annual ? '/ year' : '/ month'}</span></div>
+            <div class="note">${annual ? 'Two and a bit months free' : `Or $${yr(growth)} a year — ${Math.round(disc * 100)}% off`}</div>
+            <div class="feats">${raw((growth.features || []).map(f => h`<div>${f}</div>`).join(''))}</div>
+            <button type="button" class="btn" data-subscribe="growth_plan" ${cur('growth_plan') ? 'disabled' : ''}>${cur('growth_plan') ? 'Current plan' : 'Unlock the plan'}</button>
+            <div class="fine center">Cancel anytime. Keep the report either way.</div>
+          </div>
+          <div class="side">
+            ${pro ? raw(h`<div class="card procard ${proOpen ? 'open' : ''}">
+              <button type="button" class="prohead" data-expand><div><div class="n">${pro.name}</div><div class="note">$${annual ? yr(pro) + '/yr' : pro.monthlyPrice + '/mo'} · all platforms together</div></div><span class="caret">${proOpen ? '–' : '+'}</span></button>
+              ${proOpen ? raw(h`<div class="probody"><div class="feats">${raw((pro.features || []).map(f => h`<div>${f}</div>`).join(''))}</div><button type="button" class="btn ghost block" data-subscribe="growth_plan_pro" ${cur('growth_plan_pro') ? 'disabled' : ''}>${cur('growth_plan_pro') ? 'Current plan' : 'Choose Pro'}</button></div>`) : ''}
+            </div>`) : ''}
+            ${raw((pricing.one_time || []).map(o => h`<div class="card tier once"><div class="th"><span class="n">${o.name}</span><span class="tag fair">ONE-TIME</span></div><div class="price"><span class="p">$${o.price}</span><span class="per">once</span></div><div class="note">${o.description}</div><div class="feats">${raw((o.features || []).map(f => h`<div>${f}</div>`).join(''))}</div><a class="btn ghost" href="${token() ? '#/reports' : '#/'}" ${token() ? '' : raw('data-scroll="evalForm"')}>${token() ? 'Pick a report to unlock' : 'Score first, then unlock'}</a></div>`).join(''))}
+            <div class="quote">
+              <div class="m">[REVIEW — replace before launch]</div>
+              <p class="q">“One-line quote placeholder about what changed after six weeks.”</p>
+              <div class="who"><span class="av"></span><div><div class="nm">Name placeholder</div><div class="hd">@handle · Fitness · 41 → 58</div></div></div>
             </div>
           </div>
-          <div class="tiers">${raw((pricing.tiers || []).map(t => {
-            const free = !t.monthlyPrice;
-            const popular = t.popular ?? t.tier === 'growth_plan';
-            const current = ent && ent.current_tier === t.tier;
-            const price = free ? 'Free' : '$' + (annual ? yr(t) : t.monthlyPrice);
-            const per = free ? '' : annual ? '/yr' : '/mo';
-            const note = free ? (t.note || 'No card, ever') : t.note && t.tier === 'agency' ? t.note : annual ? `Billed yearly — ${Math.round(disc * 100)}% off` : `$${yr(t)}/yr saves ${Math.round(disc * 100)}%`;
-            const cta = current ? 'Current plan' : t.cta || (free ? 'Score a profile' : 'Start ' + t.name.split(' /')[0]);
-            return h`<article class="tier" data-tier="${t.tier}">
-              <div class="th"><div class="n">${t.name}</div>${popular ? raw('<div class="popular">Most popular</div>') : current ? raw('<div class="current">Current plan</div>') : ''}</div>
-              <div><div class="price"><div class="p">${price}</div><div class="per">${per}</div></div><div class="note">${note}</div></div>
-              ${(t.who || t.description) ? raw(h`<div class="who">${t.who || t.description}</div>`) : ''}
-              <div class="feats">${raw((t.features || []).map(f => h`<div>${f}</div>`).join(''))}</div>
-              <button type="button" class="btn md ${popular ? '' : 'ghost strong'}" data-subscribe="${t.tier}" data-free="${free}" ${current ? 'disabled' : ''}>${cta}</button>
-            </article>`;
-          }).join(''))}</div>
-          <div class="foot">All tiers keep your report history. Cancel in two clicks — no call, no retention offer.</div>
-        </div></div>`;
-
+        </div>
+        <div class="pfoot"><div>All tiers keep your report history. Cancel in two clicks.</div><div>${pricing.refund || 'Not useful in the first 7 days? Reply to any email and we refund it.'}</div><div class="fine">Business accounts are priced separately — $39 and $99. <a href="#/business">For businesses →</a></div></div>
+      </div></div>${raw(footer())}`;
       $view.querySelectorAll('[data-billing]').forEach(b => b.addEventListener('click', () => { billing = b.dataset.billing; sset('sc_billing', billing); render(); }));
+      $view.querySelector('[data-expand]')?.addEventListener('click', () => { sset('sc_pro_open', !proOpen); render(); });
       $view.querySelectorAll('[data-subscribe]').forEach(b => b.addEventListener('click', async () => {
-        if (b.dataset.free === 'true') { sset('sc_scroll', 'form'); go('#/'); return; }
-        if (!token()) { sset('sc_next', '#/pricing'); sset('sc_intent_tier', b.dataset.subscribe); go('#/signin'); return; }
+        if (!token()) { sset('sc_next', location.hash); sset('sc_intent_tier', b.dataset.subscribe); go('#/signup'); return; }
         b.disabled = true; const label = b.textContent; b.textContent = 'Starting…';
         try {
           await api('/billing/subscribe', { method: 'POST', body: JSON.stringify({ tier: b.dataset.subscribe, billingCycle: billing }) });
-          sessionStorage.removeItem('sc_intent_tier');
-          sessionStorage.removeItem('sc_limit_msg');
-          // Re-read entitlements from the backend — the tier is never set client-side.
-          try { ent = await api('/account/subscription-status'); } catch { try { ent = await api('/entitlements'); } catch { } }
-          const planName = (pricing.tiers.find(t => t.tier === b.dataset.subscribe) || {}).name || 'the new plan';
+          sessionStorage.removeItem('sc_intent_tier'); sessionStorage.removeItem('sc_limit_msg');
           const last = sget('sc_form', {});
-          if (last.handle && last.platform && last.category && last.email) {
-            toast(`You’re on ${planName}. Writing the full plan for @${last.handle}…`);
-            await submitEvaluation(last, null);
-            return;
-          }
-          toast(`You’re on ${planName}. Score a profile to get the full plan.`);
-          render();
-        } catch (e) {
-          if (e.status === 401) return;
-          toast(e.message || 'Subscription failed.'); b.disabled = false; b.textContent = label;
-        }
+          if (last.handle && last.platform && last.category && last.email) { toast(`You're on. Writing the full plan for @${last.handle}…`); await submitEvaluation(last, null); return; }
+          toast("You're on. Score an account to get the full plan."); go('#/');
+        } catch (e) { if (e.status === 401) return; toast(e.message || 'Subscription failed.'); b.disabled = false; b.textContent = label; }
       }));
-      if (intent) { $view.querySelector(`[data-tier="${intent}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+      if (intent === 'growth_plan_pro' && !proOpen) { sset('sc_pro_open', true); render(); }
     };
     render();
   }
 
-  // ------------------------------------------------------------ sign in
-  function viewSignin() {
-    renderHeader('signin');
-    const next = sget('sc_next', '#/');
-    const limitMsg = sget('sc_limit_msg', null);
-    $view.innerHTML = h`
-      <div class="signin"><div class="box">
-        <div class="brandname">Scalecraft</div>
-        ${limitMsg ? raw(h`<div class="notice">${limitMsg}</div>`) : ''}
-        <form class="card" id="signinForm" novalidate>
-          <h2>Sign in</h2>
-          <div class="field"><div class="label">Email</div><input type="email" name="email" autocomplete="email" placeholder="maya@sunrisefitness.co" value="${sget('sc_form', {}).email || ''}"></div>
-          <div class="field">
-            <div class="lblrow"><div class="label">Password</div><a href="#" data-action="forgot">Forgot?</a></div>
-            <input type="password" name="password" autocomplete="current-password" placeholder="••••••••••">
-          </div>
-          <div class="form-error" id="signinError" hidden></div>
-          <button class="btn" type="submit">Sign in</button>
-          <div class="alt">No account yet? <a href="#/signup">Create one</a></div>
-        </form>
-      </div></div>`;
-    const form = $view.querySelector('#signinForm');
-    form.querySelector('[data-action=forgot]').addEventListener('click', e => { e.preventDefault(); toast('Password reset isn’t wired up yet.'); });
-    form.addEventListener('submit', async e => {
-      e.preventDefault();
-      const err = form.querySelector('#signinError');
-      const email = form.email.value.trim(), password = form.password.value;
-      if (!email || !password) { err.textContent = 'Email and password, please.'; err.hidden = false; return; }
-      err.hidden = true;
-      const btn = form.querySelector('button[type=submit]'); btn.disabled = true; btn.textContent = 'Signing in…';
-      try {
-        const res = await api('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }, { allow401: true });
-        const t = res.token || res.access_token || res.jwt;
-        if (!t) throw new Error('No token in response');
-        setToken(t);
-        sessionStorage.removeItem('sc_next');
-        go(next && next !== '#/signin' ? next : (sget('sc_limit_msg', null) ? '#/pricing' : '#/'));
-      } catch (e2) {
-        err.textContent = e2.status === 401 ? "That email and password don't match." : (e2.message || 'Sign-in failed.');
-        err.hidden = false; btn.disabled = false; btn.textContent = 'Sign in';
-      }
+  // ------------------------------------------------------------ for businesses (batch 3)
+  async function viewBusiness() {
+    renderHeader('business');
+    let biz = [], checkout = false;
+    try { const p = await api('/billing/pricing', {}, { allow401: true }); biz = p.business || []; checkout = !!p.business_checkout_enabled; } catch { }
+    const b39 = biz.find(t => t.tier === 'business_growth') || { monthlyPrice: 39 }; const b99 = biz.find(t => t.tier === 'business_evaluator') || { monthlyPrice: 99 };
+    $view.innerHTML = h`<div class="wrap"><div class="bizpage">
+      <div class="eyebrow">For businesses</div>
+      <h1>The same engine, scored for bookings.</h1>
+      <p class="lede">Your business account gets a score out of 100 against its category — not against creators. The plan is written for the thing you actually need: people walking in, booking, buying.</p>
+      <div class="three">
+        <div class="it bd4"><b>Profile Clarity counts differently</b><p>Location, price range and a working booking link are scored — not just a tidy bio.</p></div>
+        <div class="it bd1"><b>The plan is written for bookings</b><p>Moves aim at enquiries and repeat customers, not follower count.</p></div>
+        <div class="it bd2"><b>Margin-aware moves</b><p>The Business Evaluator weighs what a move costs you against what it's likely to return.</p></div>
+      </div>
+      <div class="tiers">
+        <div class="card tier"><div class="n">Business</div><div class="p">$${b39.monthlyPrice}<span class="per"> /mo</span></div><div class="feats">${raw(['One business account, scored against its category', 'The booking-led plan and calendar', 'Weekly refresh'].map(f => h`<div>${f}</div>`).join(''))}</div></div>
+        <div class="tier dark"><div class="n">Business Pro</div><div class="p">$${b99.monthlyPrice}<span class="per"> /mo</span></div><div class="feats">${raw(['Up to five locations or accounts', 'Category benchmarks and competitor set', 'Priority refresh'].map(f => h`<div>${f}</div>`).join(''))}</div></div>
+        <div class="tier gold">${checkout
+          ? raw(h`<a class="btn" href="#/" data-scroll="evalForm">Score a business account</a><div class="fine">Public data only. No login to your account. Cancel in two clicks.</div>`)
+          : raw(h`<form id="bizForm" class="bizlead"><div class="n">Business plans open soon</div><input type="email" name="email" placeholder="you@business.com" aria-label="Email"><input type="text" name="handle" placeholder="@yourbusiness" aria-label="Business handle"><button class="btn" type="submit">Put me on the list</button><div class="fine">We'll email you the day business scoring opens. Score your account free in the meantime.</div></form>`)}</div>
+      </div>
+    </div></div>${raw(footer())}`;
+    $view.querySelector('#bizForm')?.addEventListener('submit', async e => {
+      e.preventDefault(); const f = e.currentTarget; const email = f.email.value.trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast('Add an email first.'); return; }
+      try { await api('/waitlist', { method: 'POST', body: JSON.stringify({ email, platform: 'business' }) }); } catch { }
+      f.innerHTML = h`<div class="waitdone">You're on the list. We'll email you when business scoring opens.</div>`;
     });
   }
 
-  // ------------------------------------------------------------ sign up
+  // ------------------------------------------------------------ auth
+  function viewSignin() {
+    renderHeader('signin');
+    const next = sget('sc_next', '#/');
+    $view.innerHTML = h`<div class="wrap"><div class="authwrap"><div class="brandname">Scalecraft</div>
+      ${sget('sc_limit_msg', null) ? raw(h`<div class="notice" style="margin-top:16px">${sget('sc_limit_msg', '')}</div>`) : ''}
+      <form class="card lightform" id="signinForm" novalidate><h2>Sign in</h2>
+        <div class="field"><label for="siEmail">Email</label><input id="siEmail" type="email" name="email" autocomplete="email" placeholder="you@email.com" value="${sget('sc_form', {}).email || ''}"></div>
+        <div class="field"><div class="lblrow"><label for="siPass">Password</label><a href="#" data-action="forgot">Forgot?</a></div><input id="siPass" type="password" name="password" autocomplete="current-password" placeholder="••••••••••"></div>
+        <div class="form-error" id="signinError" hidden></div>
+        <button class="btn" type="submit">Sign in</button>
+        <div class="alt">No account yet? <a href="#/signup">Create one</a> · <a href="#/" data-scroll="evalForm">Score an account free</a></div>
+      </form></div></div>${raw(footer())}`;
+    const form = $view.querySelector('#signinForm');
+    form.querySelector('[data-action=forgot]').addEventListener('click', e => { e.preventDefault(); toast('Password reset isn’t wired up yet.'); });
+    form.addEventListener('submit', async e => {
+      e.preventDefault(); const err = form.querySelector('#signinError');
+      const email = form.email.value.trim(), password = form.password.value;
+      if (!email || !password) { err.textContent = 'Email and password, please.'; err.hidden = false; return; }
+      err.hidden = true; const btn = form.querySelector('button[type=submit]'); btn.disabled = true; btn.textContent = 'Signing in…';
+      try {
+        const res = await api('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }, { allow401: true });
+        const t = res.token || res.access_token; if (!t) throw new Error('No token in response');
+        setToken(t); sessionStorage.removeItem('sc_next'); go(next && next !== '#/signin' ? next : (sget('sc_limit_msg', null) ? '#/pricing' : '#/'));
+      } catch (e2) { err.textContent = e2.status === 401 ? "That email and password don't match." : (e2.message || 'Sign-in failed.'); err.hidden = false; btn.disabled = false; btn.textContent = 'Sign in'; }
+    });
+  }
   function viewSignup() {
     renderHeader('signup');
     const next = sget('sc_next', '#/');
-    $view.innerHTML = h`
-      <div class="signin"><div class="box">
-        <div class="brandname">Scalecraft</div>
-        <form class="card" id="signupForm" novalidate>
-          <h2>Create account</h2>
-          <div class="field"><div class="label">Company / Name</div><input type="text" name="company_name" placeholder="Sunrise Fitness" required></div>
-          <div class="field"><div class="label">Email</div><input type="email" name="email" autocomplete="email" placeholder="maya@sunrisefitness.co" required></div>
-          <div class="field"><div class="label">Password</div><input type="password" name="password" autocomplete="new-password" placeholder="••••••••••" required></div>
-          <div class="field"><div class="label">Confirm password</div><input type="password" name="password_confirm" autocomplete="new-password" placeholder="••••••••••" required></div>
-          <div class="form-error" id="signupError" hidden></div>
-          <button class="btn" type="submit">Create account</button>
-          <div class="alt">Already signed up? <a href="#/signin">Sign in here</a></div>
-        </form>
-      </div></div>`;
+    $view.innerHTML = h`<div class="wrap"><div class="authwrap"><div class="brandname">Scalecraft</div>
+      <form class="card lightform" id="signupForm" novalidate><h2>Create account</h2>
+        <div class="field"><label for="suName">Name or handle</label><input id="suName" type="text" name="company_name" placeholder="@yourhandle" autocapitalize="none"></div>
+        <div class="field"><label for="suEmail">Email</label><input id="suEmail" type="email" name="email" autocomplete="email" placeholder="you@email.com" value="${sget('sc_form', {}).email || ''}"></div>
+        <div class="field"><label for="suPass">Password</label><input id="suPass" type="password" name="password" autocomplete="new-password" placeholder="At least 8 characters"></div>
+        <div class="field"><label for="suPass2">Confirm password</label><input id="suPass2" type="password" name="password_confirm" autocomplete="new-password" placeholder="••••••••••"></div>
+        <label class="check"><input type="checkbox" name="consent"> I agree to the <a href="#/legal/terms">Terms</a> and <a href="#/legal/privacy">Privacy Policy</a>.</label>
+        <div class="form-error" id="signupError" hidden></div>
+        <button class="btn" type="submit">Create account</button>
+        <div class="alt">Already signed up? <a href="#/signin">Sign in</a></div>
+      </form></div></div>${raw(footer())}`;
     const form = $view.querySelector('#signupForm');
     form.addEventListener('submit', async e => {
-      e.preventDefault();
-      const err = form.querySelector('#signupError');
-      const email = form.email.value.trim(), company = form.company_name.value.trim(), pass = form.password.value, passconf = form.password_confirm.value;
-      if (!email || !company || !pass) { err.textContent = 'All fields required.'; err.hidden = false; return; }
-      if (pass !== passconf) { err.textContent = 'Passwords do not match.'; err.hidden = false; return; }
-      if (pass.length < 8) { err.textContent = 'Password must be at least 8 characters.'; err.hidden = false; return; }
-      err.hidden = true;
-      const btn = form.querySelector('button[type=submit]'); btn.disabled = true; btn.textContent = 'Creating…';
+      e.preventDefault(); const err = form.querySelector('#signupError');
+      const email = form.email.value.trim(), pass = form.password.value, pass2 = form.password_confirm.value, name = form.company_name.value.trim();
+      if (!email || !pass) { err.textContent = 'Email and password, please.'; err.hidden = false; return; }
+      if (pass.length < 8) { err.textContent = 'Password needs at least 8 characters.'; err.hidden = false; return; }
+      if (pass !== pass2) { err.textContent = 'Passwords don’t match.'; err.hidden = false; return; }
+      if (!form.consent.checked) { err.textContent = 'Please agree to the Terms and Privacy Policy.'; err.hidden = false; return; }
+      err.hidden = true; const btn = form.querySelector('button[type=submit]'); btn.disabled = true; btn.textContent = 'Creating…';
       try {
-        const res = await api('/auth/signup', { method: 'POST', body: JSON.stringify({ email, password: pass, company_name: company }) }, { allow401: true });
-        const t = res.token || res.access_token || res.jwt;
-        if (!t) throw new Error('No token in response');
-        setToken(t);
-        sset('sc_form', { email });
-        sessionStorage.removeItem('sc_next');
-        go(next && next !== '#/signup' ? next : '#/');
-      } catch (e2) {
-        err.textContent = e2.status === 409 ? 'Email already registered.' : (e2.message || 'Signup failed.');
-        err.hidden = false; btn.disabled = false; btn.textContent = 'Create account';
-      }
+        const res = await api('/auth/signup', { method: 'POST', body: JSON.stringify({ email, password: pass, company_name: name || null }) }, { allow401: true });
+        const t = res.token || res.access_token; if (!t) throw new Error('No token in response');
+        setToken(t); sessionStorage.removeItem('sc_next');
+        const pendingUnlock = sget('sc_unlock_once', null);
+        if (pendingUnlock) { sessionStorage.removeItem('sc_unlock_once'); go('#/report/' + encodeURIComponent(pendingUnlock)); toast('Signed up — tap "Unlock once" again to finish.'); return; }
+        go(next && !/signin|signup/.test(next) ? next : '#/');
+      } catch (e2) { err.textContent = e2.body?.code === 'EMAIL_EXISTS' ? 'That email already has an account — sign in instead.' : (e2.message || 'Sign-up failed.'); err.hidden = false; btn.disabled = false; btn.textContent = 'Create account'; }
     });
   }
 
   // ------------------------------------------------------------ reports (history)
+  function sparkline(vals) {
+    const w = 64, hh = 18, n = vals.length; const lo = Math.min(...vals), hi = Math.max(...vals);
+    const pts = vals.map((v, i) => `${(i / Math.max(1, n - 1)) * w},${hh - ((v - lo) / Math.max(1, hi - lo)) * (hh - 2) - 1}`).join(' ');
+    return `<svg class="spark" viewBox="0 0 ${w} ${hh}" width="${w}" height="${hh}"><polyline fill="none" stroke="currentColor" stroke-width="1.5" points="${pts}"/></svg>`;
+  }
   async function viewReports() {
     renderHeader('reports');
     if (!token()) { sset('sc_next', '#/reports'); go('#/signin'); return; }
     $view.innerHTML = h`<div class="center-msg">Loading your reports…</div>`;
     let list;
     try { list = await api('/account/reports'); } catch (e) { if (e.status === 401) return; $view.innerHTML = h`<div class="center-msg"><h2>Couldn’t load reports.</h2>${e.message}</div>`; return; }
-    const reports = (list.reports || []).map(r => ({
-      id: r.reportId || r.report_id, tier: r.tier, at: r.generatedAt || r.generated_at,
-      handle: r.business?.handle, platform: r.business?.platform, category: r.business?.category,
-      overall: r.reportBody?.scores?.overall ?? null,
-    })).sort((a, b) => b.at - a.at);
-    const byHandle = {};
-    for (const r of reports) (byHandle[`${r.platform}:${r.handle}`] ||= []).push(r);
-    $view.innerHTML = h`<div class="wrap"><div class="reports">
-      <div class="path-head"><div><h2 class="sec-h">Your reports</h2><p class="sec-s">Every evaluation you’ve run while signed in. Scores are comparable run to run.</p></div>
-        <a class="btn md" href="#/" data-scroll="form">Score a profile <span class="arrow">→</span></a></div>
-      ${reports.length ? raw(Object.entries(byHandle).map(([k, rs]) => {
-        const series = [...rs].reverse().map(r => r.overall).filter(v => v != null);
-        const latest = rs[0], first = rs[rs.length - 1];
-        const delta = series.length > 1 ? latest.overall - first.overall : null;
-        return h`<div class="hgroup">
-          <div class="hhead"><div><span class="handle">@${latest.handle}</span> <span class="ctx">${platName(latest.platform)} · ${catName(latest.category)} · ${rs.length} run${rs.length === 1 ? '' : 's'}</span></div>
-            <div class="hscore">${latest.overall != null ? raw(h`<b>${latest.overall}</b>`) : ''}${delta != null ? raw(h`<span class="delta ${delta > 0 ? 'up' : delta < 0 ? 'down' : ''}">${delta === 0 ? 'unchanged' : (delta > 0 ? '+' : '') + delta} since first run</span>`) : ''}${series.length > 1 ? raw(sparkline(series)) : ''}</div></div>
-          <div class="hlist">${raw(rs.map(r => h`<a class="hrow" href="#/report/${r.id}"><span class="d">${fmtDate(r.at)}</span><span class="t">${r.tier === 'social_snapshot' ? 'Snapshot' : 'Growth Plan'}</span><span class="n">${r.overall ?? '—'}</span></a>`).join(''))}</div>
-        </div>`;
-      }).join('')) : raw(h`<div class="center-msg"><h2>No reports yet.</h2>Run an evaluation while signed in and it will show up here.</div>`)}
-    </div></div>`;
+    const reports = (list.reports || []).map(r => ({ id: r.reportId || r.report_id, tier: r.tier, at: r.generatedAt || r.generated_at, handle: r.business?.handle, platform: r.business?.platform, category: r.business?.category, overall: r.reportBody?.scores?.overall ?? null, known: r.reportBody?.scores?.niche_known !== false })).sort((a, b) => b.at - a.at);
+    const byHandle = {}; for (const r of reports) (byHandle[`${r.platform}:${r.handle}`] ||= []).push(r);
+    const unknownNiches = [...new Set(reports.filter(r => !r.known).map(r => nicheName(r.category)))];
+    $view.innerHTML = h`<div class="wrap"><div class="history">
+      <div class="ph"><h1>Your reports</h1><a class="btn pillbtn" href="#/" data-scroll="evalForm">Run a new evaluation</a></div>
+      ${reports.length ? raw(Object.values(byHandle).map((rs, gi) => { const asc = [...rs].reverse(); const series = asc.map(r => r.overall).filter(v => v != null); const latest = rs[0], first = asc[0]; const delta = series.length > 1 ? latest.overall - first.overall : null;
+        return h`<details class="card hgroup" ${gi === 0 ? 'open' : ''}><summary>
+            <div class="who"><div class="handle">@${latest.handle}</div><div class="ctx">${platName(latest.platform)} · ${nicheName(latest.category)} · ${rs.length} run${rs.length === 1 ? '' : 's'}</div></div>
+            <div class="sc"><span class="big">${latest.overall ?? '—'}</span>${delta != null ? raw(h`<span class="delta ${delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat'}">${delta === 0 ? 'unchanged since first run' : (delta > 0 ? '+' : '') + delta + ' since first run'}</span>`) : raw('<span class="delta none">No history yet</span>')}</div>
+            ${series.length > 1 ? raw(`<div class="bars">${series.map((v, i) => `<span style="height:${Math.max(8, v)}%;${i >= series.length - 2 ? 'background:var(--act)' : ''}"></span>`).join('')}</div>`) : ''}
+            <span class="caret"></span></summary>
+          <div class="runs">${raw(rs.map((r, i) => { const prev = rs[i + 1]; const d = prev && r.overall != null && prev.overall != null ? r.overall - prev.overall : null;
+            return h`<a class="run" href="#/report/${r.id}"><span>${fmtDate(r.at)}</span><span class="t">${r.tier === 'social_snapshot' ? 'Free Snapshot' : 'Growth Plan'}</span><span class="n">${r.overall ?? '—'} · ${!prev ? 'first run' : d === 0 ? 'unchanged' : (d > 0 ? '+' : '') + d}</span><span class="o">Open</span></a>`; }).join(''))}</div>
+        </details>`; }).join(''))
+      : raw('<div class="center-msg"><h2>No reports yet.</h2>Run an evaluation while signed in and it will show up here.</div>')}
+      ${unknownNiches.length ? raw(h`<div class="fine">Scored against all creators — we don't have enough ${unknownNiches.join(' / ')} accounts yet.</div>`) : ''}
+      <div class="card settings"><div class="n">Settings · your data</div><p>Delete my account and reports — removes your account, every report we've written for you and your score history. Payment records we're required to keep are retained by Stripe.</p><button type="button" class="btn danger" data-action="delete-account">Delete my account</button></div>
+    </div></div>${raw(footer())}`;
+    $view.querySelector('[data-action=delete-account]').addEventListener('click', () => openDeleteDialog(reports.length));
+  }
+  function openDeleteDialog(n) {
+    const el = document.createElement('div'); el.className = 'sheet center';
+    el.innerHTML = h`<div class="panel dialog" role="dialog" aria-label="Delete account">
+      <h3>Delete your account and all ${n} report${n === 1 ? '' : 's'}?</h3>
+      <p>This can't be undone. Your scores, plans and calendars go with it. If you only want to stop paying, cancel the plan instead and keep the reports.</p>
+      <input type="text" id="delConfirm" placeholder="Type DELETE to confirm" autocomplete="off">
+      <div class="row2"><button type="button" class="btn ghost" data-close>Keep my account</button><button type="button" class="btn danger" data-del disabled>Delete everything</button></div>
+      <div class="fine center">Or <a href="#/pricing">cancel the plan</a> and keep your reports.</div></div>`;
+    document.body.appendChild(el);
+    const close = () => el.remove();
+    el.addEventListener('click', e => { if (e.target === el) close(); });
+    el.querySelector('[data-close]').addEventListener('click', close);
+    el.querySelector('#delConfirm').addEventListener('input', e => { el.querySelector('[data-del]').disabled = e.target.value.trim() !== 'DELETE'; });
+    el.querySelector('[data-del]').addEventListener('click', async () => {
+      try { await api('/account', { method: 'DELETE' }); setToken(null); close(); toast('Your account and reports are gone.'); go('#/'); }
+      catch (e) { if (e.status === 404) toast('Account deletion isn’t wired up on the server yet.'); else toast(e.message); }
+    });
+  }
+
+  // ------------------------------------------------------------ how the score works (batch 3)
+  function viewHow() {
+    renderHeader('how');
+    const dims = [
+      ['Posting Consistency', 1, 'How often you post and how long you go quiet. We count your posts across the window, work out your weekly rate against a target of four to five, and look at your longest gap and how recently you last posted.', ['cadence 60', 'gaps 25', 'recency 15'], 'posting on fixed days, and never leaving a gap longer than a week.'],
+      ['Content Mix', 2, 'Whether you use enough video and enough different formats. We read the format of each post in the window, the share that is video against your niche target, and how much variety there is between reels, carousels and stills.', ['video share 50', 'format variety 25', 'caption depth 25'], 'adding a second format to a feed that only does one thing.'],
+      ['Engagement Quality', 3, 'Not just likes. We take likes and comments against your follower count for an engagement rate, measured against your niche goal, and then look at how much of that is comments rather than taps.', ['engagement rate 60', 'comment share 25', 'video reach 15'], 'captions that ask something answerable, and replying in the first hour.'],
+      ['Profile Clarity', 4, 'Whether a stranger knows what you do in five seconds. We read your bio for what you’re about, a working link and whether that link leads somewhere useful, a clear next step, and story highlights.', ['bio 25', 'link 20', 'link goes somewhere 25', 'next step 15', 'highlights 15'], 'one line saying who it’s for, and a link that goes straight to the thing.']
+    ];
+    $view.innerHTML = h`<div class="wrap"><div class="howpage">
+      <h1>How the score works</h1>
+      <p class="lede">Your score out of 100 is the plain average of four dimensions. Nothing is weighted secretly at the top level — if one number is low, you can see exactly which one and why. Under 50 is Weak, 50 to 69 is Fair, 70 and up is Strong.</p>
+      <div class="dimlist">${raw(dims.map(([l, hue, t, chips, moves]) => h`<div class="card dimx bd${hue}"><div class="n">${l}</div><p>${t}</p><div class="chips2">${raw(chips.map(c => h`<span class="pill tone">${c}</span>`).join(''))}</div><p class="mv">What moves it: ${moves}</p></div>`).join(''))}</div>
+      <div class="cannot"><div class="n">What we cannot see</div><p>We read public data only. That means no saves, no reach, no story views, no audience demographics, and nothing from a private account. A report is based on your last 12 posts within the window shown on it. If a number here disagrees with your own analytics, yours is the more complete one — ours is the one a stranger can see.</p></div>
+      <p class="lede sm">Your niche average appears once 20 accounts in that niche are scored. Until then the marker is the all-creator average and the report says so.</p>
+    </div></div>${raw(footer())}`;
+  }
+
+  // ------------------------------------------------------------ legal (batch 3 template; copy is draft)
+  const LEGAL = {
+    terms: { title: 'Terms of Service', sections: [
+      ['What Scalecraft does', 'Scalecraft reads a public social media account, scores it out of 100 across four dimensions, and writes a plan of suggested moves. We are a measurement and recommendation service. We do not guarantee growth, reach, followers, sales or any other outcome.'],
+      ['Eligibility', 'You must be 18 or over to use Scalecraft. You may score an account you hold, or one you have the account holder’s consent to score.'],
+      ['Your account', 'Keep your password to yourself. You are responsible for what happens under your account. Tell us at once if you think someone else has access to it.'],
+      ['Free tier limits', 'One free Snapshot per email address. A second evaluation requires an account and a paid plan.'],
+      ['Subscriptions, billing and refunds', 'Paid plans renew monthly or annually until cancelled. Billing is handled by Stripe; we never see your full card details. You can cancel in two clicks from your settings and keep access until the end of the period you paid for. If the plan is not useful in the first seven days, reply to any email from us and we refund it.'],
+      ['Acceptable use', 'Do not score an account you intend to harass. Do not scrape, resell or redistribute our scores, plans or calendars. Do not attempt to reverse the engine or use the service to build a competing dataset.'],
+      ['Intellectual property', 'Your content and your data stay yours. The scores, plans and calendars we produce are licensed to you for your own use for as long as your account exists.'],
+      ['Disclaimers', 'Recommendations are suggestions, not instructions, and results vary. We are not affiliated with, endorsed by or operated by Instagram, TikTok or any other platform.'],
+      ['Liability', 'To the extent the law allows, our liability to you is limited to the amount you paid us in the twelve months before the claim. [Counsel to confirm wording.]'],
+      ['Termination', 'You can delete your account at any time from settings. We may suspend an account that breaks these terms; we will say why.'],
+      ['Governing law', '[Jurisdiction placeholder — to be set by counsel.]'],
+      ['Changes and contact', 'If these terms change materially we will email you before the change takes effect. Questions: reply to any email from us.']
+    ] },
+    privacy: { title: 'Privacy Policy', sections: [
+      ['What we collect', 'Your handle, niche, email and — if you create an account — a password hash. The public profile data we read to score you. Your scores and reports. Payment metadata from Stripe (never your full card number). Basic usage analytics.'],
+      ['How we read profiles', 'Public data only, through a third-party data provider. We never log in as you, never post, and never read private accounts.'],
+      ['Why', 'To produce your report; to improve niche averages in aggregate; to email you what you asked for.'],
+      ['Who we share with', 'Our data provider; the language-model providers that write the report text (your data is not used to train their models); Stripe for payments; our email provider; our hosting provider. No one else.'],
+      ['Retention', 'Reports are kept while your account exists. Delete your account from settings and they go with it. Anonymous free snapshots are kept for 90 days.'],
+      ['Your rights', 'Access, correction and deletion of your data, on request or from settings. If you are in the EU/UK or California, the rights in GDPR and CCPA apply and we honour them. [Counsel to confirm disclosures.]'],
+      ['Cookies', 'See the Cookie Notice.'],
+      ['Children', 'Scalecraft is not for anyone under 18.'],
+      ['Changes and contact', 'We will email you before a material change. Questions: reply to any email from us.']
+    ] },
+    cookies: { title: 'Cookie Notice', sections: [
+      ['Strictly necessary', 'A session token so you stay signed in.'],
+      ['Preferences', 'Your billing toggle and a few display settings, stored in your browser.'],
+      ['Analytics', '[None yet — if we add a tool, we will name it here.]'],
+      ['Advertising', 'None. We do not run advertising cookies.'],
+      ['How to control them', 'Clear your browser storage for scalecraft.com, or sign out.']
+    ] },
+    use: { title: 'Acceptable Use', sections: [
+      ['Do not', 'Score an account you intend to harass. Scrape, resell or redistribute our scores, plans or calendars. Attempt to reverse the engine or build a competing dataset from it. Use the service for anyone under 18 without consent.'],
+      ['We may', 'Suspend an account that breaks these rules. We will say why.']
+    ] }
+  };
+  function viewLegal(page) {
+    renderHeader('legal');
+    const doc = LEGAL[page] || LEGAL.terms;
+    $view.innerHTML = h`<div class="wrap"><div class="legal">
+      <aside class="lnav">
+        <div class="eyebrow">Legal</div>
+        <div class="pages">${raw(Object.entries(LEGAL).map(([k, v]) => h`<a class="${k === page ? 'on' : ''}" href="#/legal/${k}">${v.title}</a>`).join(''))}</div>
+        <div class="toc">${raw(doc.sections.map((sec, i) => h`<a href="#/legal/${page}#s${i + 1}" data-jump="s${i + 1}">${i + 1} · ${sec[0]}</a>`).join(''))}</div>
+      </aside>
+      <article class="lbody">
+        <span class="tag fair">DRAFT, PENDING LEGAL REVIEW</span>
+        <h1>${doc.title}</h1>
+        <div class="fine">Last updated ${fmtDate('2026-09-19')}</div>
+        <div class="sections">${raw(doc.sections.map((sec, i) => h`<section id="s${i + 1}"><h2>${i + 1} · ${sec[0]}</h2><p>${sec[1]}</p></section>`).join(''))}</div>
+      </article>
+    </div></div>${raw(footer())}`;
+    $view.querySelectorAll('[data-jump]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); document.getElementById(a.dataset.jump)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }));
   }
 
   // ------------------------------------------------------------ router
   function route() {
-    stopPolling();
-    window.scrollTo(0, 0);
+    stopPolling(); window.scrollTo(0, 0);
     const hash = location.hash || '#/';
-    const [path] = hash.slice(1).split('?');
-    const parts = path.split('/').filter(Boolean);
+    const parts = hash.slice(1).split('?')[0].split('/').filter(Boolean);
     if (parts.length === 0) return viewLanding();
     if (parts[0] === 'evaluating' && parts[1]) return viewEvaluating(decodeURIComponent(parts[1]));
     if (parts[0] === 'report' && parts[1]) return viewReport(decodeURIComponent(parts[1]));
     if (parts[0] === 'pricing') return viewPricing();
-    if (parts[0] === 'reports') return viewReports();
+    if (parts[0] === 'business') return viewBusiness();
     if (parts[0] === 'signin') return viewSignin();
     if (parts[0] === 'signup') return viewSignup();
+    if (parts[0] === 'reports') return viewReports();
+    if (parts[0] === 'how') return viewHow();
+    if (parts[0] === 'legal') return viewLegal(parts[1] || 'terms');
     renderHeader('landing');
     $view.innerHTML = h`<div class="center-msg"><h2>Nothing here.</h2><a href="#/">Back to start</a></div>`;
   }
-
-  // Global click handling: header actions, in-page scroll targets
   document.addEventListener('click', e => {
     const a = e.target.closest('[data-scroll]');
-    if (a) {
-      const target = a.dataset.scroll;
-      if ((location.hash || '#/') === '#/' || location.hash === '#') { e.preventDefault(); document.getElementById(target)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
-      else sset('sc_scroll', target);
-      return;
-    }
-    const act = e.target.closest('[data-action]');
-    if (!act) return;
+    if (a) { const target = a.dataset.scroll; if ((location.hash || '#/') === '#/' || location.hash === '#') { e.preventDefault(); document.getElementById(target)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); } else sset('sc_scroll', target); return; }
+    const act = e.target.closest('[data-action]'); if (!act) return;
     if (act.dataset.action === 'signout') { e.preventDefault(); setToken(null); toast('Signed out.'); route(); }
     if (act.dataset.action === 'email-report') { e.preventDefault(); toast('This report is already on its way to your inbox.'); }
   });
-
   window.addEventListener('hashchange', route);
-  console.log('[Scalecraft] Config:', { useMock: CFG.useMock, apiBase: CFG.apiBase });
-  if (CFG.useMock) { const b = document.createElement('div'); b.className = 'mockbadge'; b.textContent = 'Mock API'; document.body.appendChild(b); }
+  if (CFG.useMock) { const b = document.createElement('div'); b.className = 'mockbadge'; b.textContent = 'Sample data'; document.body.appendChild(b); }
   route();
 })();

@@ -19,7 +19,7 @@ const keysRoutes = require("./routes/keys");
 const sessionsRoutes = require("./routes/sessions");
 const proxyRoutes = require("./routes/proxy");
 const growthEngineRoutes = require("./routes/growth-engine");
-const geDb = require(process.env.DATABASE_URL ? "./growth_engine_db_postgres" : "./growth_engine_db");
+const geDb = require("./growth_engine_db_select");
 
 // NOTE: Growth Engine uses its own sql.js database (geDb)
 // Convergence services below are commented out—Growth Engine doesn't need them
