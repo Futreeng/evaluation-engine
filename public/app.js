@@ -883,7 +883,7 @@
       const err = form.querySelector('#signupError');
       const email = form.email.value.trim(), company = form.company_name.value.trim(), pass = form.password.value, passconf = form.password_confirm.value;
       if (!email || !company || !pass) { err.textContent = 'All fields required.'; err.hidden = false; return; }
-      if (pass !== passconf) { err.textContent = 'Passwords don't match.'; err.hidden = false; return; }
+      if (pass !== passconf) { err.textContent = 'Passwords do not match.'; err.hidden = false; return; }
       if (pass.length < 8) { err.textContent = 'Password must be at least 8 characters.'; err.hidden = false; return; }
       err.hidden = true;
       const btn = form.querySelector('button[type=submit]'); btn.disabled = true; btn.textContent = 'Creating…';
