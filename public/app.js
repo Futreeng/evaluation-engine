@@ -495,7 +495,7 @@
     const done = { ...(lget(doneKey, {})), ...(report.moves_done || {}) };
     const isDone = k => !!done[k];
     const price = report.upsell?.monthly_price || 12;
-    const oneTime = report.upsell?.one_time_price || 9;
+    const oneTime = report.upsell?.one_time_price || 15;
     const thisWeek = phases[0];
     const nextPhase = phases[1];
     const followers = biz.followers || report.followers || (report.post_insights && report.post_insights.followers) || null;

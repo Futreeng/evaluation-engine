@@ -3,6 +3,7 @@ const db = require("./db");
 const { analyzeTwitterAccount } = require("./twitter_fetcher");
 const { analyzeInstagramAccount } = require("./instagram_fetcher");
 const { analyzeInstagramAccountViaApify } = require("./instagram_apify_fetcher");
+const { TIER_PRICING, ONE_TIME_PRICING } = require("./growth_engine_billing");
 const { analyzeTikTokAccountViaApify } = require("./tiktok_apify_fetcher");
 const { scoreProfile, rankPosts } = require("./growth_engine_scoring");
 
@@ -679,6 +680,8 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
       cta_label: "Unlock your full Growth Plan",
       target_tier: "growth_plan",
       unlock_count: phases.reduce((n, p) => n + (Number(p?.locked?.count) || 4), 0) || 12,
+      monthly_price: TIER_PRICING.growth_plan / 100,
+      one_time_price: ONE_TIME_PRICING.plan_unlock / 100,
     };
   }
 

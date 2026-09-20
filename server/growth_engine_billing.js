@@ -25,7 +25,7 @@ const TIER_PRICING = {
 };
 // One-time products (not subscriptions)
 const ONE_TIME_PRICING = {
-  plan_unlock: 900, // $9 — the full plan for one report, no refresh, no history
+  plan_unlock: 1500, // $15 — the full plan for one report, no refresh, no competitors. Priced so a second unlock costs more than a month of the plan.
 };
 
 // Annual discounts (25% off)
@@ -378,3 +378,5 @@ class BillingManager {
 }
 
 module.exports = BillingManager;
+module.exports.TIER_PRICING = TIER_PRICING;
+module.exports.ONE_TIME_PRICING = ONE_TIME_PRICING;
