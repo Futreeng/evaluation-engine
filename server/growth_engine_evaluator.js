@@ -1,6 +1,5 @@
 const { decrypt } = require("./crypto");
 const db = require("./db");
-const { analyzeTwitterAccount } = require("./twitter_fetcher");
 const { analyzeInstagramAccount } = require("./instagram_fetcher");
 const { analyzeInstagramAccountViaApify } = require("./instagram_apify_fetcher");
 const { TIER_PRICING, ONE_TIME_PRICING } = require("./growth_engine_billing");
@@ -156,16 +155,6 @@ const CATEGORY_BENCHMARKS = {
 
 // Fetch real social media data based on platform
 async function getRealPostData(handle, platform, category) {
-  if (platform === "x" || platform === "twitter") {
-    try {
-      const twitterData = await analyzeTwitterAccount(handle);
-      return formatTwitterDataForAnalysis(twitterData);
-    } catch (err) {
-      console.error("[Growth Engine] Twitter fetch failed:", err.message);
-      throw new Error(`Could not fetch Twitter data for @${handle}: ${err.message}`);
-    }
-  }
-
   if (platform === "instagram" || platform === "ig") {
     try {
       // Apify reads any public profile; the Graph API only reads accounts we own.
@@ -189,27 +178,7 @@ async function getRealPostData(handle, platform, category) {
     }
   }
 
-  throw new Error(`Platform '${platform}' not yet supported. Available: 'instagram', 'tiktok', 'x'.`);
-}
-
-function formatTwitterDataForAnalysis(twitterData) {
-  // Convert Twitter API response into analysis-friendly format
-  return {
-    handle: twitterData.handle,
-    platform: "twitter",
-    follower_count: twitterData.follower_count,
-    tweet_count: twitterData.tweet_count,
-    metrics: twitterData.analysis,
-    recent_activity: twitterData.recent_tweets.slice(0, 10).map((t) => ({
-      date: t.created_at.split("T")[0],
-      engagement: t.public_metrics.like_count + t.public_metrics.reply_count + t.public_metrics.retweet_count,
-      reach: t.public_metrics.impression_count || 0,
-      likes: t.public_metrics.like_count,
-      retweets: t.public_metrics.retweet_count,
-      replies: t.public_metrics.reply_count,
-      text_preview: t.text.substring(0, 100),
-    })),
-  };
+  throw new Error(`Platform '${platform}' not yet supported. Available: 'instagram', 'tiktok'.`);
 }
 
 function formatInstagramDataForAnalysis(instagramData) {
