@@ -14,10 +14,11 @@ After both: Railway redeploys from `main`, and `scalecraft-demo.vercel.app` (moc
 | Frontend | Full "Field Guide" redesign in `public/` — landing, evaluating, free/paid report (phone-first, checkable moves, 12-week calendar, canvas share card), pricing, business lead form, history, how-it-scores, legal, auth. Vanilla hash router, no build step. |
 | Platforms | **Instagram** (`instagram_apify_fetcher.js`, ~$0.003/pull) and **TikTok** (`tiktok_apify_fetcher.js`, 15 videos ≈ $0.06/pull) live. 8 others show "coming soon" + waitlist (`POST /waitlist`). |
 | Scoring | Deterministic (`growth_engine_scoring.js`): four dimensions, per-niche targets, creator vs business checklists, TikTok branches. LLM only explains and writes moves — never sets numbers. |
-| Pricing | Free Snapshot → **$12/mo Growth Plan** → **$15 one-time unlock** (`POST /reports/:id/unlock`). $29 Pro and business tiers exist but are hidden behind `ENABLE_GROWTH_PLAN_PRO` / `ENABLE_BUSINESS_CHECKOUT`. |
+| Pricing | Free Snapshot → **$12/mo Growth Plan** (90 days, weekly refresh) → **$15 one-time 60-day plan** (`POST /reports/:id/unlock`; phases 1–2, phase 3 locked). $29 Pro and business tiers exist but are hidden behind `ENABLE_GROWTH_PLAN_PRO` / `ENABLE_BUSINESS_CHECKOUT`. |
 | Cost controls | Free limit is per handle+platform (402 returns the existing `report_id`); `PAID_RUNS_PER_DAY`, `COMPETITOR_PULLS_PER_DAY`, `FREE_RUNS_PER_DAY_GLOBAL`; 24h DB profile cache; in-process weekly refresh sweeper (`growth_engine_refresh.js`). |
 | Evidence | `growth_engine_outcomes` — moves done → score/follower delta; `GET /outcomes`. |
-| Emails | Templates in `server/emails/` (report ready, move due, score changed). **No sender wired.** |
+| Emails | `server/mailer.js` — report ready, day-30/60 check-in, score changed (+nudge), plan ended (day 60, one-time), password reset. Sends via Resend when `RESEND_API_KEY` is set. |
+| Plan fit | 4-question intake at unlock (`#/plan-setup`), saved per handle; check-ins at day 30/60; weekly refresh nudges when answers stop matching behaviour. |
 | Tests | `node server/growth_engine_db_postgres.test.js` (pg-mem, no DB needed). |
 
 `server/.env.example` lists every variable. Verified live locally against real Apify + Gemini/Groq: `@humansofny` IG 53 / TikTok 49, `@nike` TikTok 35, one-time unlock end-to-end.
@@ -26,9 +27,9 @@ After both: Railway redeploys from `main`, and `scalecraft-demo.vercel.app` (moc
 
 1. **Merge #2, then #3.** Railway env needs `DATABASE_URL`, `JWT_SECRET`, `ENCRYPTION_KEY`, `APIFY_TOKEN`, ≥1 LLM key. Optional knobs are commented in `.env.example`.
 2. **Stripe for real.** `growth_engine_billing.js` is mock unless `STRIPE_API_KEY` is set; `purchaseOneTime` uses a PaymentIntent, subscriptions use Subscriptions. The webhook handler (`POST /billing/webhook`) is a stub — payment-failed → downgrade isn't implemented. Stripe Tax is worth turning on (SaaS is taxable in several states). Annual pricing is shown but `subscribe` only takes monthly — wire it or drop the toggle.
-3. **Cancel.** `cancelSubscription()` exists in billing; there's no route and no button. FTC click-to-cancel applies — needed before charging anyone.
-4. **Email sender.** Resend (or whatever you prefer) behind `server/emails/README.md`. Unblocks report-ready, weekly score-changed, password reset, receipts.
-5. **Password reset.** The "Forgot?" link toasts "not wired." Needs 4.
+3. ~~Cancel~~ — done: `POST /billing/cancel` (at period end) / `resume`, "Your plan" card on `#/reports`. Stripe path calls `subscriptions.update({cancel_at_period_end})` once real subscriptions exist.
+4. ~~Email sender~~ — done: `server/mailer.js` (Resend REST). Needs `RESEND_API_KEY`, `MAIL_FROM` on a verified domain, `APP_URL`. Without the key it logs instead of sending.
+5. ~~Password reset~~ — done: `POST /auth/forgot` + `/auth/reset`, `#/forgot`, `#/reset?token=`. Needs 4 to actually deliver.
 6. **`GET /admin/queue-stats`** has no auth — one-line fix.
 7. **Meta OAuth "connect your account."** Your Graph API fetcher only reads owner-connected accounts; the scorer doesn't consume that data yet (deliberately parked until the connect flow exists). Needs a Meta app + review.
 

@@ -81,7 +81,7 @@ async function sweep(jobQueue) {
       if (!r.accountId || r.accountId === "demo-account" || !b.handle || !b.platform) { skipped++; continue; }
       // Still entitled? Lapsed accounts stop refreshing rather than burning credit.
       let tier = "social_snapshot";
-      try { const ent = await geDb.getOrCreateEntitlement(r.accountId); tier = ent?.currentTier || ent?.current_tier || tier; } catch { /* treat as lapsed */ }
+      try { const ent = await (geDb.getEffectiveEntitlement || geDb.getOrCreateEntitlement)(r.accountId); tier = ent?.currentTier || ent?.current_tier || tier; } catch { /* treat as lapsed */ }
       if (tier === "social_snapshot") { await geDb.updateReportRefreshDue(r.reportId, null); skipped++; continue; }
       const input = { handle: b.handle, platform: b.platform, category: b.category, email: r.reportBody?.email || null, scheduled: true, refresh_of: r.reportId };
       const { jobId } = await geDb.createJob(r.accountId, "growth_plan", input);

@@ -604,3 +604,13 @@ p { margin: 0; }
 .notin .btn { margin-top: 16px; }
 .notfeats { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line2); font-size: 13px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
 .notfeats .l { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; font-weight: 600; }
+
+/* ---- your plan card (reports page) ---- */
+.plancard { display: flex; flex-wrap: wrap; gap: 14px 24px; align-items: center; padding: 22px; margin-bottom: 14px; }
+.plancard .t { flex: 1 1 320px; }
+.plancard .n { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.plancard h2 { margin-top: 4px; font-family: var(--display); font-size: 22px; font-weight: 700; }
+.plancard .pr { font-size: 16px; font-weight: 500; color: var(--muted2); }
+.plancard p { margin-top: 6px; font-size: 14px; line-height: 1.55; color: var(--body); }
+.plancard.pending { border: 1.5px solid var(--gold-t2); }
+.lightform .sub { margin: 8px 0 14px; font-size: 15px; line-height: 1.55; color: var(--body); }

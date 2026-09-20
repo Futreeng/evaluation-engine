@@ -35,10 +35,10 @@ const moveCard = (eyebrow, action, why) => `<div style="margin-top:20px;padding:
   <p style="margin:8px 0 0;font-size:17px;line-height:1.45;font-weight:600">${esc(action)}</p>${why ? `<p style="margin:10px 0 0;font-size:14px;line-height:1.55;color:#5B4C3B">Why: ${esc(why)}</p>` : ""}</div>`;
 const scoreRow = (oldS, newS) => `<div style="margin-top:20px;font-family:'Bricolage Grotesque',Helvetica,Arial,sans-serif;font-size:44px;font-weight:700;letter-spacing:-0.03em">${esc(oldS)} <span style="color:#7A6A57">→</span> ${esc(newS)}</div>`;
 
-async function send({ to, subject, html, tag }) {
+async function send({ to, subject, html, tag, devLink }) {
   if (!to) return { skipped: "no recipient" };
   const key = process.env.RESEND_API_KEY;
-  if (!key) { console.log(`[Mail] (no RESEND_API_KEY) would send "${subject}" to ${to}`); return { skipped: "no key", subject }; }
+  if (!key) { console.log(`[Mail] (no RESEND_API_KEY) would send "${subject}" to ${to}${devLink ? ` — ${devLink}` : ""}`); return { skipped: "no key", subject }; }
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
@@ -98,7 +98,7 @@ function planEnded({ to, handle, reportId, overall, price }) {
 // Password reset (route wiring is separate).
 function passwordReset({ to, resetUrl }) {
   const inner = h2("Reset your password") + p("This link works once and expires in one hour. If you didn't ask for it, ignore this email.") + button(resetUrl, "Choose a new password");
-  return send({ to, subject: "Reset your Scalecraft password", html: layout("Reset your password", inner), tag: "password_reset" });
+  return send({ to, subject: "Reset your Scalecraft password", html: layout("Reset your password", inner), tag: "password_reset", devLink: resetUrl });
 }
 
 module.exports = { send, reportReady, checkin, scoreChanged, planEnded, passwordReset, reportUrl, configured: () => !!process.env.RESEND_API_KEY };

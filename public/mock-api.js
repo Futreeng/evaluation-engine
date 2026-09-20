@@ -238,6 +238,11 @@
       return ok ? json(200, { access: true }) : json(402, { error: 'Upgrade required', required_tier: body.requiredTier });
     }
     // Auth — same shape as routes/growth-engine.js
+    if (method === 'GET' && path === '/account/subscription-status') { const free = entitlement.current_tier === 'social_snapshot'; return json(200, { current_tier: entitlement.current_tier, tier_name: free ? 'Free Snapshot' : 'Growth Plan', monthly_price: free ? 0 : 12, billing_period_end: free ? null : (entitlement.period_end || (entitlement.period_end = Date.now() + 30 * 86400000)), cancel_at: entitlement.cancel_at || null, status: free ? 'free' : entitlement.cancel_at ? 'cancel_pending' : 'active' }); }
+    if (method === 'POST' && path === '/billing/cancel') { entitlement.cancel_at = entitlement.period_end || Date.now() + 30 * 86400000; return json(200, { status: 'cancel_pending', endsAt: entitlement.cancel_at }); }
+    if (method === 'POST' && path === '/billing/resume') { delete entitlement.cancel_at; return json(200, { status: 'active' }); }
+    if (method === 'POST' && path === '/auth/forgot') return json(200, { ok: true, message: 'If that email has an account, a reset link is on its way.' });
+    if (method === 'POST' && path === '/auth/reset') { if (body.token === 'expired') return json(400, { error: 'This reset link has expired or was already used. Request a new one.' }); return json(200, { token: 'mock-token', user: { email: 'you@example.com' } }); }
     if (method === 'POST' && (path === '/auth/login' || path === '/auth/signup')) {
       if (!body.email || !body.password) return json(400, { error: 'Email and password required', code: 'INVALID_EMAIL' });
       if (path === '/auth/login' && body.password === 'wrong') return json(401, { error: 'Invalid email or password', code: 'AUTH_FAILED' });

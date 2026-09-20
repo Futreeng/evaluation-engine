@@ -77,6 +77,19 @@ const assert = require("assert");
   assert.equal(ctx.horizon, "usual"); assert.equal(ctx.goal, "deals"); assert.ok(ctx.updated_at > 0);
   assert.equal((await db.listPaidReportsBetween(0, Date.now() + 1)).every((r) => r.tier !== "social_snapshot"), true);
 
+  // cancel at period end → lazy downgrade; password reset tokens are single-use
+  await db.upgradeTier("acct_c", "growth_plan");
+  await db.setCancelAt("acct_c", Date.now() + 60000);
+  assert.equal((await db.getEffectiveEntitlement("acct_c")).currentTier, "growth_plan");
+  await db.setCancelAt("acct_c", Date.now() - 1);
+  assert.equal((await db.getEffectiveEntitlement("acct_c")).currentTier, "social_snapshot");
+  assert.equal((await db.getEntitlement("acct_c")).cancelAt, null);
+  await db.createPasswordReset("u1", "hash1", Date.now() + 60000);
+  assert.equal(await db.consumePasswordReset("hash1"), "u1");
+  assert.equal(await db.consumePasswordReset("hash1"), null);
+  await db.createPasswordReset("u1", "hash2", Date.now() - 1);
+  assert.equal(await db.consumePasswordReset("hash2"), null);
+
   console.log("postgres module: all assertions passed");
   process.exit(0);
 })().catch((e) => { console.error("FAILED:", e.message); process.exit(1); });

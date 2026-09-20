@@ -884,7 +884,7 @@
         <div class="alt">No account yet? <a href="#/signup">Create one</a> · <a href="#/" data-scroll="evalForm">Score an account free</a></div>
       </form></div></div>${raw(footer())}`;
     const form = $view.querySelector('#signinForm');
-    form.querySelector('[data-action=forgot]').addEventListener('click', e => { e.preventDefault(); toast('Password reset isn’t wired up yet.'); });
+    form.querySelector('[data-action=forgot]').addEventListener('click', e => { e.preventDefault(); sset('sc_forgot_email', form.querySelector('#siEmail')?.value || ''); go('#/forgot'); });
     form.addEventListener('submit', async e => {
       e.preventDefault(); const err = form.querySelector('#signinError');
       const email = form.email.value.trim(), password = form.password.value;
@@ -941,13 +941,22 @@
     renderHeader('reports');
     if (!token()) { sset('sc_next', '#/reports'); go('#/signin'); return; }
     $view.innerHTML = h`<div class="center-msg">Loading your reports…</div>`;
-    let list;
-    try { list = await api('/account/reports'); } catch (e) { if (e.status === 401) return; $view.innerHTML = h`<div class="center-msg"><h2>Couldn’t load reports.</h2>${e.message}</div>`; return; }
+    let list, subn = null;
+    try { [list, subn] = await Promise.all([api('/account/reports'), api('/account/subscription-status').catch(() => null)]); } catch (e) { if (e.status === 401) return; $view.innerHTML = h`<div class="center-msg"><h2>Couldn’t load reports.</h2>${e.message}</div>`; return; }
+    const planCard = () => {
+      if (!subn) return '';
+      const free = subn.status === 'free';
+      const pending = subn.status === 'cancel_pending';
+      return h`<div class="card plancard ${pending ? 'pending' : ''}"><div class="t"><div class="n">Your plan</div><h2>${subn.tier_name || 'Free Snapshot'}${free ? '' : raw(h` <span class="pr">· $${subn.monthly_price}/mo</span>`)}</h2>
+        <p>${free ? 'One free score per account. The Growth Plan writes the whole 90 days and re-scores you weekly.' : pending ? `Cancelled. You keep everything until ${fmtDate(subn.cancel_at)}, then the weekly refresh stops. Your reports stay.` : subn.billing_period_end ? `Renews ${fmtDate(subn.billing_period_end)}. Cancel any time — you keep the plan to the end of the period and every report after.` : 'Cancel any time — you keep the plan to the end of the period and every report after.'}</p></div>
+        <div class="acts">${free ? raw(h`<a class="btn" href="#/pricing">See the plan</a>`) : pending ? raw(h`<button type="button" class="btn green" data-action="resume-plan">Resume the plan</button>`) : raw(h`<button type="button" class="btn ghost" data-action="cancel-plan">Cancel plan</button>`)}</div></div>`;
+    };
     const reports = (list.reports || []).map(r => ({ id: r.reportId || r.report_id, tier: r.tier, at: r.generatedAt || r.generated_at, handle: r.business?.handle, platform: r.business?.platform, category: r.business?.category, overall: r.reportBody?.scores?.overall ?? null, known: r.reportBody?.scores?.niche_known !== false })).sort((a, b) => b.at - a.at);
     const byHandle = {}; for (const r of reports) (byHandle[`${r.platform}:${r.handle}`] ||= []).push(r);
     const unknownNiches = [...new Set(reports.filter(r => !r.known).map(r => nicheName(r.category)))];
     $view.innerHTML = h`<div class="wrap"><div class="history">
       <div class="ph"><h1>Your reports</h1><a class="btn pillbtn" href="#/" data-scroll="evalForm">Run a new evaluation</a></div>
+      ${raw(planCard())}
       ${reports.length ? raw(Object.values(byHandle).map((rs, gi) => { const asc = [...rs].reverse(); const series = asc.map(r => r.overall).filter(v => v != null); const latest = rs[0], first = asc[0]; const delta = series.length > 1 ? latest.overall - first.overall : null;
         return h`<details class="card hgroup" ${gi === 0 ? 'open' : ''}><summary>
             <div class="who"><div class="handle">@${latest.handle}</div><div class="ctx">${platName(latest.platform)} · ${nicheName(latest.category)} · ${rs.length} run${rs.length === 1 ? '' : 's'}</div></div>
@@ -962,6 +971,32 @@
       <div class="card settings"><div class="n">Settings · your data</div><p>Delete my account and reports — removes your account, every report we've written for you and your score history. Payment records we're required to keep are retained by Stripe.</p><button type="button" class="btn danger" data-action="delete-account">Delete my account</button></div>
     </div></div>${raw(footer())}`;
     $view.querySelector('[data-action=delete-account]').addEventListener('click', () => openDeleteDialog(reports.length));
+    $view.querySelector('[data-action=cancel-plan]')?.addEventListener('click', () => openCancelDialog(subn));
+    $view.querySelector('[data-action=resume-plan]')?.addEventListener('click', async e => {
+      e.currentTarget.disabled = true;
+      try { await api('/billing/resume', { method: 'POST', body: '{}' }); toast('Welcome back. The plan carries on.'); viewReports(); }
+      catch (e2) { if (e2.status === 401) return; toast(e2.message); e.currentTarget.disabled = false; }
+    });
+  }
+  // Cancel is one confirm, no retention screens. Reason is optional and only logged.
+  function openCancelDialog(subn) {
+    const el = document.createElement('div'); el.className = 'sheet center';
+    const until = subn?.billing_period_end ? fmtDate(subn.billing_period_end) : 'the end of this billing period';
+    el.innerHTML = h`<div class="panel dialog" role="dialog" aria-label="Cancel plan">
+      <h3>Cancel the ${subn?.tier_name || 'Growth Plan'}?</h3>
+      <p>You keep everything until ${until} — moves, calendar, competitors, the weekly re-score. After that the plan stops refreshing and you're on the free tier. Every report stays yours.</p>
+      <input type="text" id="cancelWhy" placeholder="Why? (optional — one line)" autocomplete="off" maxlength="200">
+      <div class="row2"><button type="button" class="btn ghost" data-close>Keep my plan</button><button type="button" class="btn danger" data-cancel>Cancel the plan</button></div>
+      <div class="fine center">Changed your mind later? You can resume until ${until}.</div></div>`;
+    document.body.appendChild(el);
+    const close = () => el.remove();
+    el.addEventListener('click', e => { if (e.target === el) close(); });
+    el.querySelector('[data-close]').addEventListener('click', close);
+    el.querySelector('[data-cancel]').addEventListener('click', async e => {
+      e.currentTarget.disabled = true;
+      try { const r = await api('/billing/cancel', { method: 'POST', body: JSON.stringify({ reason: el.querySelector('#cancelWhy').value }) }); close(); toast(r.endsAt ? `Cancelled. Yours until ${fmtDate(r.endsAt)}.` : 'Cancelled.'); viewReports(); }
+      catch (e2) { if (e2.status === 401) return; toast(e2.message); e.currentTarget.disabled = false; }
+    });
   }
   function openDeleteDialog(n) {
     const el = document.createElement('div'); el.className = 'sheet center';
@@ -979,6 +1014,48 @@
     el.querySelector('[data-del]').addEventListener('click', async () => {
       try { await api('/account', { method: 'DELETE' }); setToken(null); close(); toast('Your account and reports are gone.'); go('#/'); }
       catch (e) { if (e.status === 404) toast('Account deletion isn’t wired up on the server yet.'); else toast(e.message); }
+    });
+  }
+
+  // ------------------------------------------------------------ password reset
+  function viewForgot() {
+    renderHeader('signin');
+    const last = sget('sc_forgot_email', '');
+    $view.innerHTML = h`<div class="wrap"><div class="authwrap"><div class="brandname">Scalecraft</div><form class="card lightform" id="forgotForm" novalidate>
+        <h2>Reset your password</h2>
+        <p class="sub">Type the email you signed up with. If it has an account, we'll send a link that works once, for an hour.</p>
+        <div class="field"><label for="fgEmail">Email</label><input id="fgEmail" type="email" name="email" autocomplete="email" value="${last}" placeholder="you@example.com"></div>
+        <button class="btn block" type="submit">Send the link</button>
+        <div class="fine center"><a href="#/signin">Back to sign in</a></div>
+      </form></div></div>${raw(footer())}`;
+    const form = $view.querySelector('#forgotForm');
+    form.addEventListener('submit', async e => {
+      e.preventDefault(); const email = form.email.value.trim(); if (!email) { toast('Type your email first.'); return; }
+      const b = form.querySelector('button'); b.disabled = true; b.textContent = 'Sending…';
+      try { await api('/auth/forgot', { method: 'POST', body: JSON.stringify({ email }) }, { allow401: true }); } catch { }
+      form.innerHTML = h`<h2>Check your inbox</h2><p class="sub">If <b>${email}</b> has an account, a reset link is on its way. It works once and expires in an hour. Nothing arrived in a few minutes? Check spam, or <a href="#/forgot">try again</a>.</p><div class="fine center"><a href="#/signin">Back to sign in</a></div>`;
+    });
+  }
+  function viewReset() {
+    renderHeader('signin');
+    const tokenParam = new URLSearchParams(location.hash.split('?')[1] || '').get('token') || '';
+    if (!tokenParam) { $view.innerHTML = h`<div class="center-msg"><h2>This reset link is missing its code.</h2><a href="#/forgot">Request a new one</a></div>`; return; }
+    $view.innerHTML = h`<div class="wrap"><div class="authwrap"><div class="brandname">Scalecraft</div><form class="card lightform" id="resetForm" novalidate>
+        <h2>Choose a new password</h2>
+        <div class="field"><label for="rsPass">New password</label><input id="rsPass" type="password" name="password" autocomplete="new-password" placeholder="At least 6 characters"></div>
+        <div class="field"><label for="rsPass2">Again</label><input id="rsPass2" type="password" name="password2" autocomplete="new-password"></div>
+        <button class="btn block" type="submit">Save and sign in</button>
+        <div class="form-error" id="rsErr" hidden></div>
+      </form></div></div>${raw(footer())}`;
+    const form = $view.querySelector('#resetForm'); const err = form.querySelector('#rsErr');
+    form.addEventListener('submit', async e => {
+      e.preventDefault(); err.hidden = true;
+      const p1 = form.password.value, p2 = form.password2.value;
+      if (p1.length < 6) { err.textContent = 'At least 6 characters.'; err.hidden = false; return; }
+      if (p1 !== p2) { err.textContent = "Those don't match."; err.hidden = false; return; }
+      const b = form.querySelector('button'); b.disabled = true; b.textContent = 'Saving…';
+      try { const r = await api('/auth/reset', { method: 'POST', body: JSON.stringify({ token: tokenParam, password: p1 }) }, { allow401: true }); if (r.token) setToken(r.token); toast('Password saved. You’re signed in.'); go('#/reports'); }
+      catch (e2) { err.textContent = e2.message || 'That link has expired.'; err.hidden = false; b.disabled = false; b.textContent = 'Save and sign in'; }
     });
   }
 
@@ -1071,6 +1148,8 @@
     if (parts[0] === 'business') return viewBusiness();
     if (parts[0] === 'signin') return viewSignin();
     if (parts[0] === 'signup') return viewSignup();
+    if (parts[0] === 'forgot') return viewForgot();
+    if (parts[0] === 'reset') return viewReset();
     if (parts[0] === 'reports') return viewReports();
     if (parts[0] === 'how') return viewHow();
     if (parts[0] === 'legal') return viewLegal(parts[1] || 'terms');

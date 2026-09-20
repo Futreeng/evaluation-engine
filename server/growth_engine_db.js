@@ -163,6 +163,19 @@ function initSchema() {
     )
   `);
 
+  // Cancel-at-period-end: tier stays until this timestamp, then reads as free.
+  try { db.run(`ALTER TABLE entitlements ADD COLUMN cancel_at INTEGER`); } catch { /* exists */ }
+
+  // Password reset tokens: sha256 of the emailed token, single use, 1h.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS growth_engine_password_resets (
+      token_hash TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      used_at INTEGER
+    )
+  `);
+
   // Tier history table: audit log of tier changes
   db.run(`
     CREATE TABLE IF NOT EXISTS tier_history (
@@ -702,9 +715,55 @@ async function getEntitlement(accountId) {
     tierStartDate: row[columns.indexOf("tier_start_date")],
     billingPeriodStart: row[columns.indexOf("billing_period_start")],
     billingPeriodEnd: row[columns.indexOf("billing_period_end")],
+    cancelAt: columns.includes("cancel_at") ? row[columns.indexOf("cancel_at")] || null : null,
     createdAt: row[columns.indexOf("created_at")],
     updatedAt: row[columns.indexOf("updated_at")],
   };
+}
+
+// A cancelled plan keeps its tier until cancel_at, then reads as free. The
+// downgrade is applied lazily here so every caller sees the same answer.
+async function getEffectiveEntitlement(accountId) {
+  const ent = await getOrCreateEntitlement(accountId);
+  if (ent.cancelAt && ent.cancelAt <= Date.now() && ent.currentTier !== "social_snapshot") {
+    await upgradeTier(accountId, "social_snapshot");
+    db.run(`UPDATE entitlements SET cancel_at = NULL, updated_at = ? WHERE account_id = ?`, [Date.now(), accountId]);
+    saveDb();
+    return getEntitlement(accountId);
+  }
+  return ent;
+}
+async function setCancelAt(accountId, cancelAt) {
+  if (!db) throw new Error("Database not initialized");
+  await getOrCreateEntitlement(accountId);
+  db.run(`UPDATE entitlements SET cancel_at = ?, updated_at = ? WHERE account_id = ?`, [cancelAt || null, Date.now(), accountId]);
+  saveDb();
+  return getEntitlement(accountId);
+}
+async function setBillingPeriod(accountId, start, end) {
+  if (!db) throw new Error("Database not initialized");
+  await getOrCreateEntitlement(accountId);
+  db.run(`UPDATE entitlements SET billing_period_start = ?, billing_period_end = ?, updated_at = ? WHERE account_id = ?`, [start || null, end || null, Date.now(), accountId]);
+  saveDb();
+  return getEntitlement(accountId);
+}
+
+async function createPasswordReset(userId, tokenHash, expiresAt) {
+  if (!db) throw new Error("Database not initialized");
+  db.run(`DELETE FROM growth_engine_password_resets WHERE user_id = ? OR expires_at < ?`, [userId, Date.now()]);
+  db.run(`INSERT INTO growth_engine_password_resets (token_hash, user_id, expires_at, used_at) VALUES (?, ?, ?, NULL)`, [tokenHash, userId, expiresAt]);
+  saveDb();
+}
+// Returns the user id for a live token and burns it, or null.
+async function consumePasswordReset(tokenHash) {
+  if (!db) throw new Error("Database not initialized");
+  const r = db.exec(`SELECT user_id, expires_at, used_at FROM growth_engine_password_resets WHERE token_hash = ?`, [tokenHash]);
+  if (!r.length || !r[0].values.length) return null;
+  const [userId, expiresAt, usedAt] = r[0].values[0];
+  if (usedAt || expiresAt < Date.now()) return null;
+  db.run(`UPDATE growth_engine_password_resets SET used_at = ? WHERE token_hash = ?`, [Date.now(), tokenHash]);
+  saveDb();
+  return userId;
 }
 
 async function upgradeTier(accountId, newTier) {
@@ -874,6 +933,11 @@ module.exports = {
   // Entitlements
   getOrCreateEntitlement,
   getEntitlement,
+  getEffectiveEntitlement,
+  setCancelAt,
+  setBillingPeriod,
+  createPasswordReset,
+  consumePasswordReset,
   upgradeTier,
   getTierHistory,
   // Users

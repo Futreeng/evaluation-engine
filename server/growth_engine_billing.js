@@ -130,8 +130,10 @@ class BillingManager {
 
     mockSubscriptions.set(subscriptionId, mockSub);
 
-    // Upgrade tier in database
+    // Upgrade tier in database; period end is what "cancel at period end" keys off
     const ent = await geDb.upgradeTier(accountId, tier);
+    if (geDb.setBillingPeriod) await geDb.setBillingPeriod(accountId, billingPeriodStart, billingPeriodEnd);
+    if (geDb.setCancelAt) await geDb.setCancelAt(accountId, null);
 
     console.log(`[Billing] Mock subscription created: ${subscriptionId} for ${tier} (${billingCycle})`);
 
@@ -171,36 +173,45 @@ class BillingManager {
   }
 
   /**
-   * Cancel subscription (downgrade to free tier)
+   * Cancel at period end. The tier stays until the paid-through date, then
+   * reads as free (geDb.getEffectiveEntitlement applies it lazily). Nothing
+   * is refunded and nothing is deleted; reports stay.
    */
-  async cancelSubscription(subscriptionId) {
-    const sub = mockSubscriptions.get(subscriptionId);
-    if (!sub) {
-      throw new Error(`Subscription not found: ${subscriptionId}`);
+  async cancelSubscription(accountId) {
+    const ent = await geDb.getOrCreateEntitlement(accountId);
+    if (!ent || ent.currentTier === "social_snapshot") return { status: "none", currentTier: "social_snapshot" };
+    if (ent.cancelAt) return { status: "cancel_pending", currentTier: ent.currentTier, endsAt: ent.cancelAt };
+    if (this.isProduction && this.stripe && ent.stripeSubscriptionId) {
+      await this.stripe.subscriptions.update(ent.stripeSubscriptionId, { cancel_at_period_end: true });
     }
+    const sub = await this.getSubscription(accountId);
+    if (sub) { sub.cancelAtPeriodEnd = true; mockSubscriptions.set(sub.subscriptionId, sub); }
+    // Paid-through date: the subscription's period end, else the entitlement's, else 30 days.
+    const endsAt = sub?.currentPeriodEnd || ent.billingPeriodEnd || Date.now() + 30 * 24 * 60 * 60 * 1000;
+    await geDb.setCancelAt(accountId, endsAt);
+    console.log(`[Billing] Cancel at period end for ${accountId}: ${new Date(endsAt).toISOString()}`);
+    return { status: "cancel_pending", currentTier: ent.currentTier, endsAt };
+  }
 
-    // Downgrade user to free tier
-    const ent = await geDb.upgradeTier(sub.accountId, "social_snapshot");
-
-    // Mark subscription as canceled
-    sub.status = "canceled";
-    sub.canceledAt = Date.now();
-    mockSubscriptions.set(subscriptionId, sub);
-
-    console.log(`[Billing] Subscription canceled: ${subscriptionId}`);
-
-    return {
-      subscriptionId,
-      status: "canceled",
-      downgradedTo: ent.currentTier,
-    };
+  /** Undo a pending cancellation before the period ends. */
+  async resumeSubscription(accountId) {
+    const ent = await geDb.getOrCreateEntitlement(accountId);
+    if (!ent.cancelAt) return { status: ent.currentTier === "social_snapshot" ? "none" : "active", currentTier: ent.currentTier };
+    if (ent.cancelAt <= Date.now()) return { status: "ended", currentTier: "social_snapshot" };
+    if (this.isProduction && this.stripe && ent.stripeSubscriptionId) {
+      await this.stripe.subscriptions.update(ent.stripeSubscriptionId, { cancel_at_period_end: false });
+    }
+    const sub = await this.getSubscription(accountId);
+    if (sub) { sub.cancelAtPeriodEnd = false; mockSubscriptions.set(sub.subscriptionId, sub); }
+    await geDb.setCancelAt(accountId, null);
+    return { status: "active", currentTier: ent.currentTier, renewsAt: ent.billingPeriodEnd };
   }
 
   /**
    * Check if user has access to tier
    */
   async checkEntitlement(accountId, requiredTier) {
-    const ent = await geDb.getOrCreateEntitlement(accountId);
+    const ent = await (geDb.getEffectiveEntitlement || geDb.getOrCreateEntitlement)(accountId);
 
     // Tier hierarchy: social_snapshot < growth_plan < business_evaluator < agency
     const tierHierarchy = ["social_snapshot", "growth_plan", "growth_plan_pro", "business_growth", "business_evaluator", "agency"];

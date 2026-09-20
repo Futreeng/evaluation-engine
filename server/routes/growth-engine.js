@@ -5,7 +5,8 @@ const { evaluateProfile } = require("../growth_engine_evaluator");
 const BillingManager = require("../growth_engine_billing");
 const JobQueue = require("../growth_engine_job_queue");
 const { compareCompetitors, MAX_COMPETITORS } = require("../growth_engine_competitors");
-const { signup, login, verifyJWT } = require("../auth");
+const { signup, login, verifyJWT, requestPasswordReset, resetPassword } = require("../auth");
+const mailer = require("../mailer");
 const {
   sendError,
   validateAuthRequest,
@@ -90,6 +91,33 @@ router.post("/auth/signup", validateAuthRequest, async (req, res) => {
   }
 });
 
+// Password reset. Same reply whether or not the email exists; 5 requests
+// per email per hour, in-process (enough to blunt abuse of the mailer).
+const resetHits = new Map();
+router.post("/auth/forgot", async (req, res) => {
+  try {
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    const ok = { ok: true, message: "If that email has an account, a reset link is on its way." };
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.json(ok);
+    const now = Date.now();
+    const hits = (resetHits.get(email) || []).filter((t) => now - t < 60 * 60 * 1000);
+    if (hits.length >= 5) return res.json(ok);
+    hits.push(now); resetHits.set(email, hits);
+    const r = await requestPasswordReset(email);
+    if (r) await mailer.passwordReset({ to: r.email, resetUrl: `${(process.env.APP_URL || "http://localhost:3005").replace(/\/$/, "")}/#/reset?token=${r.token}` });
+    res.json(ok);
+  } catch (err) { console.error("[Auth] forgot failed:", err.message); res.json({ ok: true, message: "If that email has an account, a reset link is on its way." }); }
+});
+router.post("/auth/reset", async (req, res) => {
+  try {
+    const password = String(req.body?.password || "");
+    if (password.length < 6) return sendError(res, 400, "INVALID_PASSWORD", "Password must be at least 6 characters");
+    if (password.length > 255) return sendError(res, 400, "INVALID_PASSWORD", "Password is too long");
+    const r = await resetPassword(String(req.body?.token || ""), password);
+    res.json(r);
+  } catch (err) { sendError(res, 400, "RESET_INVALID", err.message); }
+});
+
 // POST /auth/login
 router.post("/auth/login", validateAuthRequest, async (req, res) => {
   try {
@@ -140,17 +168,36 @@ router.get("/account/profile", authMiddleware, async (req, res) => {
 // GET /account/subscription-status
 router.get("/account/subscription-status", authMiddleware, async (req, res) => {
   try {
-    const ent = await geDb.getOrCreateEntitlement(req.user.id);
+    const ent = await geDb.getEffectiveEntitlement(req.user.id);
+    const pricing = billingManager.getPricing();
+    const tierInfo = [...(pricing.tiers || []), ...(pricing.business || [])].find((t) => t.tier === ent.currentTier) || null;
     res.json({
       user_id: req.user.id,
       current_tier: ent.currentTier,
+      tier_name: tierInfo?.name || (ent.currentTier === "social_snapshot" ? "Free Snapshot" : ent.currentTier),
+      monthly_price: tierInfo?.monthlyPrice ?? 0,
       tier_start_date: ent.tierStartDate,
       billing_period_start: ent.billingPeriodStart,
       billing_period_end: ent.billingPeriodEnd,
+      cancel_at: ent.cancelAt || null,
+      status: ent.currentTier === "social_snapshot" ? "free" : ent.cancelAt ? "cancel_pending" : "active",
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// Cancel at period end — one call, no questions. Reports and history stay.
+router.post("/billing/cancel", authMiddleware, async (req, res) => {
+  try {
+    const r = await billingManager.cancelSubscription(req.user.id);
+    if (req.body && typeof req.body.reason === "string" && req.body.reason.trim()) console.log(`[Billing] cancel reason from ${req.user.id}: ${req.body.reason.trim().slice(0, 200)}`);
+    res.json(r);
+  } catch (err) { sendError(res, 500, "CANCEL_ERROR", err.message); }
+});
+router.post("/billing/resume", authMiddleware, async (req, res) => {
+  try { res.json(await billingManager.resumeSubscription(req.user.id)); }
+  catch (err) { sendError(res, 500, "RESUME_ERROR", err.message); }
 });
 
 // GET /account/reports
@@ -180,7 +227,7 @@ const optionalAuth = async (req, _res, next) => {
 async function evaluationTierFor(accountId) {
   if (!accountId || accountId === "demo-account") return "social_snapshot";
   try {
-    const ent = await geDb.getOrCreateEntitlement(accountId);
+    const ent = await geDb.getEffectiveEntitlement(accountId);
     const t = ent?.current_tier || ent?.currentTier || "social_snapshot";
     if (t && t !== "social_snapshot") return "growth_plan"; // every paid tier runs the plan pipeline today
   } catch (err) {

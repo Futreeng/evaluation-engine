@@ -135,6 +135,14 @@ async function initSchema() {
         platform TEXT NOT NULL,
         created_at BIGINT NOT NULL
       )`);
+    await client.query(`ALTER TABLE entitlements ADD COLUMN IF NOT EXISTS cancel_at BIGINT`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_password_resets (
+        token_hash TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        expires_at BIGINT NOT NULL,
+        used_at BIGINT
+      )`);
     await client.query(`
       CREATE TABLE IF NOT EXISTS growth_engine_plan_context (
         id TEXT PRIMARY KEY,
@@ -378,8 +386,39 @@ function entRow(row) {
         billingPeriodStart: row.billing_period_start ? Number(row.billing_period_start) : null, billing_period_start: row.billing_period_start ? Number(row.billing_period_start) : null,
         billingPeriodEnd: row.billing_period_end ? Number(row.billing_period_end) : null, billing_period_end: row.billing_period_end ? Number(row.billing_period_end) : null,
         stripeSubscriptionId: row.stripe_subscription_id || null,
+        cancelAt: row.cancel_at ? Number(row.cancel_at) : null, cancel_at: row.cancel_at ? Number(row.cancel_at) : null,
       }
     : null;
+}
+async function getEffectiveEntitlement(accountId) {
+  const ent = await getOrCreateEntitlement(accountId);
+  if (ent.cancelAt && ent.cancelAt <= Date.now() && ent.currentTier !== "social_snapshot") {
+    await upgradeTier(accountId, "social_snapshot");
+    await q(`UPDATE entitlements SET cancel_at = NULL, updated_at = $1 WHERE user_id = $2`, [Date.now(), accountId]);
+    return getEntitlement(accountId);
+  }
+  return ent;
+}
+async function setCancelAt(accountId, cancelAt) {
+  await getOrCreateEntitlement(accountId);
+  await q(`UPDATE entitlements SET cancel_at = $1, updated_at = $2 WHERE user_id = $3`, [cancelAt || null, Date.now(), accountId]);
+  return getEntitlement(accountId);
+}
+async function setBillingPeriod(accountId, start, end) {
+  await getOrCreateEntitlement(accountId);
+  await q(`UPDATE entitlements SET billing_period_start = $1, billing_period_end = $2, updated_at = $3 WHERE user_id = $4`, [start || null, end || null, Date.now(), accountId]);
+  return getEntitlement(accountId);
+}
+async function createPasswordReset(userId, tokenHash, expiresAt) {
+  await q(`DELETE FROM growth_engine_password_resets WHERE user_id = $1 OR expires_at < $2`, [userId, Date.now()]);
+  await q(`INSERT INTO growth_engine_password_resets (token_hash, user_id, expires_at) VALUES ($1, $2, $3)`, [tokenHash, userId, expiresAt]);
+}
+async function consumePasswordReset(tokenHash) {
+  const r = await q(`SELECT user_id, expires_at, used_at FROM growth_engine_password_resets WHERE token_hash = $1`, [tokenHash]);
+  const row = r.rows[0];
+  if (!row || row.used_at || Number(row.expires_at) < Date.now()) return null;
+  await q(`UPDATE growth_engine_password_resets SET used_at = $1 WHERE token_hash = $2`, [Date.now(), tokenHash]);
+  return row.user_id;
 }
 async function getEntitlement(accountId) {
   return entRow((await q(`SELECT * FROM entitlements WHERE user_id = $1`, [accountId])).rows[0]);
@@ -535,6 +574,11 @@ module.exports = {
   // Entitlements
   getOrCreateEntitlement,
   getEntitlement,
+  getEffectiveEntitlement,
+  setCancelAt,
+  setBillingPeriod,
+  createPasswordReset,
+  consumePasswordReset,
   upgradeTier,
   updateEntitlement,
   getTierHistory,
