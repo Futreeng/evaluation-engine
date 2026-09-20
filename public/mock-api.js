@@ -116,6 +116,7 @@
         target_tier: 'growth_plan',
         unlock_count: 12,
         monthly_price: 12,
+        one_time_price: 9,
         description: '12 locked items: 11 more specific moves and the week-by-week posting calendar for all three phases, written against your own posts — not a template.'
       }
     };
@@ -126,9 +127,10 @@
     discount: { annual: '25% off', note: 'Annual billing includes 25% discount' },
     refund: 'Not useful in the first 7 days? Reply to any email and we refund it.',
     business_checkout_enabled: false,
+    one_time: [{ product: 'plan_unlock', name: 'Unlock this report', description: 'The full plan for one report. No subscription, no refresh.', price: 9, features: ['Every move, 01 through 13', 'Your 12-week calendar', 'Keep it forever'], cta: 'Unlock once' }],
     tiers: [
       { tier: 'social_snapshot', name: 'Snapshot', monthlyPrice: 0, annualPrice: 0, note: 'One report per email', features: ['Your score and the four dimensions', 'Why each one landed where it did', 'Your best and worst posts', 'The first move of each phase'], cta: 'Score my account' },
-      { tier: 'growth_plan', name: 'Growth Plan', monthlyPrice: 12, annualPrice: 108, popular: true, features: ['Every move, 01 through 13', 'Your 12-week posting calendar', 'Competitor comparison, up to 5 handles', 'Weekly refresh and score history'], cta: 'Unlock the plan' },
+      { tier: 'growth_plan', name: 'Growth Plan', monthlyPrice: 12, annualPrice: 108, popular: true, features: ['Every move, 01 through 13, with the reason for each', 'Your 12-week posting calendar with a brief per post', 'Re-scored every week — see what each move changed', 'Up to 5 competitors, scored the same way', 'Score and follower history'], cta: 'Start Growth Plan' },
       { tier: 'growth_plan_pro', name: 'Growth Plan Pro', monthlyPrice: 29, annualPrice: 261, optional: true, features: ["Every platform you're on, scored together", 'Priority refresh — rescored within the hour', 'One plan that balances all of them'], cta: 'Choose Pro' }
     ],
     business: [
@@ -156,6 +158,7 @@
     if (t < QUEUED_MS + STAGE_MS * STAGES.length) return running(job, t);
     if (!job.report) {
       job.report = sampleReport(job.handle, job.platform, job.category);
+      if (job.paid || entitlement.current_tier !== 'social_snapshot') { job.report.tier = 'growth_plan'; job.report.growth_path.phases.forEach((p, i) => { p.moves = (p.locked.items || []).map((it, k) => ({ n: i * 5 + k + 2, title: it.meta.replace(/^MOVE \d+ · /, '').split(' · ')[0], action: it.meta.split(' · ').slice(1).join(' · '), why: '' })); p.locked = { count: 0, teaser: '' }; }); job.report.calendar = { posting_days: ['Mon', 'Wed', 'Sat'], posting_time: '7:15am', weeks: Array.from({ length: 12 }, (_, w) => ({ week: w + 1, phase: Math.floor(w / 4) + 1, slots: ['Mon', 'Wed', 'Sat'].map(d => ({ day: d, format: 'reel', angle: 'Coach on camera, one cue', prompt: 'Film in one take; open with the cue in the first two seconds.' })) })) }; if (job.oneTime) job.report.one_time_unlock = { of: null, payment_id: 'pay_mock' }; }
       reports.set(job.report.report_id, job.report);
     }
     return { status: 'complete', stage: 'complete', resultPayload: job.report };
@@ -216,6 +219,7 @@
     if (method === 'GET' && path === '/health') return json(200, { status: 'ok', mock: true });
     if (method === 'POST' && path === '/waitlist') return json(200, { ok: true, platform: body.platform });
     if (method === 'DELETE' && path === '/account') { entitlement = { account_id: 'acct_mock', current_tier: 'social_snapshot' }; return json(200, { deleted: true, reports: reports.size }); }
+    if (method === 'POST' && (m = path.match(/^\/reports\/([^/]+)\/unlock$/))) { const r = reports.get(m[1]); if (!r) return json(404, { error: 'Report not found' }); const id = 'job_' + Math.random().toString(36).slice(2, 10); jobs.set(id, { id, handle: r.business.handle, platform: r.business.platform, category: r.business.category, email: 'x', started: Date.now() - QUEUED_MS, fail: false, paid: true, oneTime: true, ref: 'MOCK' }); return json(200, { job_id: id, status: 'queued', tier: 'growth_plan', one_time: true, payment: { id: 'pay_mock', amount: '$9.00' } }); }
     if (method === 'POST' && (m = path.match(/^\/reports\/([^/]+)\/moves$/))) { const r = reports.get(m[1]); if (!r) return json(404, { error: 'Report not found' }); r.moves_done = r.moves_done || {}; if (body.done) r.moves_done[body.key] = Date.now(); else delete r.moves_done[body.key]; return json(200, { moves_done: r.moves_done }); }
     if (method === 'GET' && path === '/billing/pricing') return json(200, PRICING);
     if (method === 'POST' && path === '/billing/subscribe') {

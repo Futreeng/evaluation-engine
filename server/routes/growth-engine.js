@@ -358,6 +358,31 @@ router.get("/account/history", authMiddleware, async (req, res) => {
   }
 });
 
+// One-time unlock: the full plan for one report, no subscription.
+// Runs the plan pipeline once for the report's handle; the result is a new
+// growth_plan-tier report with refresh_due_at cleared and unlock metadata.
+router.post("/reports/:reportId/unlock", authMiddleware, async (req, res) => {
+  try {
+    const report = await geDb.getReport(req.params.reportId);
+    if (!report) return sendError(res, 404, "REPORT_NOT_FOUND", "Report not found");
+    // A free report is anonymous until adopted; adopt-on-signup covers most
+    // cases, and an explicit unlock from the owner's email covers the rest.
+    if (report.accountId !== req.user.id && report.accountId !== "demo-account") return sendError(res, 403, "NOT_YOUR_REPORT", "This report belongs to another account");
+    if (report.tier && report.tier !== "social_snapshot") return res.json({ already_unlocked: true, report_id: report.reportId });
+
+    const payment = await billingManager.purchaseOneTime(req.user.id, "plan_unlock");
+    if (payment.status !== "succeeded" && !payment.mock) return res.status(402).json({ error: "Payment did not complete", code: "PAYMENT_INCOMPLETE", status: 402, payment });
+
+    const b = report.business || {};
+    const input = { handle: b.handle, platform: b.platform, category: b.category, email: req.user.email || null, one_time_unlock: true, unlock_of: report.reportId, payment_id: payment.paymentId };
+    const { jobId } = await geDb.createJob(req.user.id, "growth_plan", input);
+    jobQueue.processJob(jobId, req.user.id, "growth_plan", input).catch((err) => console.error(`[Unlock] job ${jobId} failed:`, err.message));
+    res.json({ job_id: jobId, status: "queued", tier: "growth_plan", one_time: true, payment: { id: payment.paymentId, amount: payment.amountFormatted } });
+  } catch (err) {
+    sendError(res, 500, "UNLOCK_ERROR", err.message);
+  }
+});
+
 // Delete account + everything written for it (settings → "Delete my account")
 router.delete("/account", authMiddleware, async (req, res) => {
   try {

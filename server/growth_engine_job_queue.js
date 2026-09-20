@@ -113,6 +113,12 @@ class JobQueue {
         console.warn("[Growth Engine] Baseline update failed:", err.message);
       }
 
+      // One-time unlock: full plan, but it never refreshes and says so.
+      if (inputParams.one_time_unlock) {
+        reportBody.refresh_due_at = null;
+        reportBody.one_time_unlock = { of: inputParams.unlock_of || null, payment_id: inputParams.payment_id || null };
+      }
+
       // (6) Followers on every report — the number a creator checks first.
       if (reportBody.business && reportBody.business.followers == null) {
         const f = reportBody.followers ?? reportBody.raw_followers;

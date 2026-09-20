@@ -339,7 +339,15 @@ p { margin: 0; }
 .upsell h3 { font-size: 26px; line-height: 1.15; letter-spacing: -.025em; color: var(--on-dark); text-wrap: pretty; }
 .upsell p { margin-top: 10px; font-size: 15px; line-height: 1.55; color: var(--on-dark-muted); }
 .upsell .row { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin-top: 20px; }
-.upsell .fine { color: var(--on-dark-muted); }
+.upsell .fine { color: var(--on-dark-muted); margin-top: 14px; }
+.upsell .paths { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px; }
+.upsell .path { flex: 1 1 240px; padding: 16px 18px; background: var(--dark-inset); border-radius: 16px; display: flex; flex-direction: column; gap: 6px; }
+.upsell .path.main { background: #4A2E1F; }
+.upsell .path .pn { font-size: 14px; color: var(--on-dark-muted); } .upsell .path .pn b { color: var(--on-dark); font-size: 16px; }
+.upsell .path .pd { font-size: 14px; line-height: 1.45; color: var(--on-dark-muted); }
+.upsell .path .btn { margin-top: 8px; align-self: flex-start; }
+.refresh.once { background: var(--gold); } .refresh.once p { color: var(--gold-t); }
+.tier.once { flex: 1 1 280px; }
 .refresh { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; padding: 22px 24px; background: var(--green); border-radius: var(--r-card); }
 .refresh .t { flex: 1 1 260px; }
 .refresh h3 { font-size: 20px; }

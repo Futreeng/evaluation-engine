@@ -23,6 +23,10 @@ const TIER_PRICING = {
   business_evaluator: 9900, // $99/month — businesses
   agency: 24900, // $249/month base
 };
+// One-time products (not subscriptions)
+const ONE_TIME_PRICING = {
+  plan_unlock: 900, // $9 — the full plan for one report, no refresh, no history
+};
 
 // Annual discounts (25% off)
 const ANNUAL_DISCOUNT = 0.25;
@@ -44,6 +48,22 @@ class BillingManager {
         this.isProduction = false;
       }
     }
+  }
+
+  /**
+   * One-time purchase against a report (no entitlement change).
+   * Mock mode records a charge; production goes through Stripe PaymentIntents.
+   */
+  async purchaseOneTime(accountId, product, stripeCustomerId = null) {
+    const cents = ONE_TIME_PRICING[product];
+    if (!cents) throw new Error(`Unknown product: ${product}`);
+    if (this.isProduction && this.stripe) {
+      const intent = await this.stripe.paymentIntents.create({ amount: cents, currency: "usd", customer: stripeCustomerId || undefined, metadata: { accountId, product } });
+      return { paymentId: intent.id, product, amountInCents: cents, amountFormatted: `$${(cents / 100).toFixed(2)}`, status: intent.status };
+    }
+    const paymentId = "pay_mock_" + require("crypto").randomBytes(8).toString("hex");
+    console.log(`[Billing] Mock one-time charge ${paymentId}: ${product} $${(cents / 100).toFixed(2)} for ${accountId}`);
+    return { paymentId, product, amountInCents: cents, amountFormatted: `$${(cents / 100).toFixed(2)}`, status: "succeeded", mock: true };
   }
 
   /**
@@ -264,16 +284,16 @@ class BillingManager {
         {
           tier: "growth_plan",
           name: "Growth Plan",
-          description: "The whole 90 days, written from your own posts.",
+          description: "Your account, re-scored every week, with the whole 90 days written from your own posts.",
           monthlyPrice: TIER_PRICING.growth_plan / 100,
           annualPrice: yr(TIER_PRICING.growth_plan),
           popular: true,
           features: [
-            "Every move, 13 in all, with the reason for each",
+            "Every move, 01 through 13, with the reason for each",
             "Your 12-week posting calendar with a brief per post",
+            "Re-scored every week — see what each move changed",
             "Up to 5 competitors, scored the same way",
-            "Score history and weekly refresh",
-            "Unlimited accounts",
+            "Score and follower history",
           ],
           cta: "Start Growth Plan",
         },
@@ -313,6 +333,16 @@ class BillingManager {
           annualPrice: yr(TIER_PRICING.business_evaluator),
           features: ["Everything in Business Growth Plan", "Margin-aware recommendations", "Action plan checklist with owners and dates", "Bi-weekly refresh"],
           cta: "Start Business Evaluator",
+        },
+      ],
+      one_time: [
+        {
+          product: "plan_unlock",
+          name: "Unlock this report",
+          description: "The full plan for one report. No subscription, no refresh.",
+          price: ONE_TIME_PRICING.plan_unlock / 100,
+          features: ["Every move, 01 through 13", "Your 12-week calendar", "Keep it forever"],
+          cta: "Unlock once",
         },
       ],
       discount: {

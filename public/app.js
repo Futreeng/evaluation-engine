@@ -495,6 +495,7 @@
     const done = { ...(lget(doneKey, {})), ...(report.moves_done || {}) };
     const isDone = k => !!done[k];
     const price = report.upsell?.monthly_price || 12;
+    const oneTime = report.upsell?.one_time_price || 9;
     const thisWeek = phases[0];
     const nextPhase = phases[1];
     const followers = biz.followers || report.followers || (report.post_insights && report.post_insights.followers) || null;
@@ -503,7 +504,7 @@
     $view.innerHTML = h`
       <div class="wrap">
         <div class="rhead">
-          <div class="l"><span class="h">@${biz.handle || ''}</span><span class="ctx">${platName(biz.platform)} · ${niche} · ${fmtDate(report.created_at)}</span>${paid ? raw('<span class="tag dark">GROWTH PLAN</span>') : ''}</div>
+          <div class="l"><span class="h">@${biz.handle || ''}</span><span class="ctx">${platName(biz.platform)} · ${niche} · ${fmtDate(report.created_at)}</span>${paid ? raw(h`<span class="tag dark">${report.one_time_unlock ? 'UNLOCKED ONCE' : 'GROWTH PLAN'}</span>`) : ''}</div>
           <div class="r"><button class="btn ghost sm" data-action="email-report">Email me this report</button><button class="btn dark sm" data-action="share">Share my score</button></div>
         </div>
         <div class="report">
@@ -585,9 +586,14 @@
           <div class="datawindow">${report.data_window || `Based on your last ${pi?.sample || 12} posts. We can't see saves, reach or story views.`}</div>
 
           ${!paid && sget('sc_limit_msg', null) ? raw(h`<div class="notice">${sget('sc_limit_msg', '')} <a href="#/pricing">See the plan →</a></div>`) : ''}
-          ${paid ? raw(h`<div class="refresh"><div class="t"><h3>This plan refreshes weekly</h3><p>${Object.keys(done).length ? `You did ${Object.keys(done).length} move${Object.keys(done).length === 1 ? '' : 's'} — we'll re-score you and tell you what changed.` : 'Run it again any time — the moves and calendar are rewritten against your latest posts.'}</p></div><a class="btn green" href="#/" data-scroll="evalForm">Run a fresh evaluation</a></div>`)
-          : raw(h`<div class="upsell"><h3>Unlock your full Growth Plan</h3><p>${report.upsell?.unlock_count || 12} locked items: the remaining moves and your week-by-week calendar, written from your own posts. $${price}/mo or $${Math.round(price * 9)}/yr.</p>
-              <div class="row"><button class="btn" data-action="unlock">Unlock the plan →</button><span class="fine">Cancel anytime. Keep the report either way.</span></div></div>`)}
+          ${paid && report.one_time_unlock ? raw(h`<div class="refresh once"><div class="t"><h3>Yours to keep</h3><p>You unlocked this report once. It won't refresh — start the Growth Plan to be re-scored every week and see what each move changed.</p></div><button class="btn green" data-action="unlock">Start the plan · $${price}/mo</button></div>`)
+          : paid ? raw(h`<div class="refresh"><div class="t"><h3>This plan refreshes weekly</h3><p>${Object.keys(done).length ? `You did ${Object.keys(done).length} move${Object.keys(done).length === 1 ? '' : 's'} — we'll re-score you and tell you what changed.` : 'Run it again any time — the moves and calendar are rewritten against your latest posts.'}</p></div><a class="btn green" href="#/" data-scroll="evalForm">Run a fresh evaluation</a></div>`)
+          : raw(h`<div class="upsell"><h3>Unlock your full Growth Plan</h3><p>${report.upsell?.unlock_count || 12} locked items: the remaining moves and your week-by-week calendar, written from your own posts.</p>
+              <div class="paths">
+                <div class="path main"><div class="pn">Growth Plan · <b>$${price}/mo</b></div><div class="pd">Re-scored every week. See what each move changed.</div><button class="btn" data-action="unlock">Start the plan →</button></div>
+                <div class="path"><div class="pn">Just this report · <b>$${oneTime}</b></div><div class="pd">Every move and the calendar, once. No subscription.</div><button class="btn light" data-action="unlock-once">Unlock once</button></div>
+              </div>
+              <div class="fine">Cancel anytime. Keep the report either way.</div></div>`)}
 
           <div class="bridge">Run a business too? The same engine scores a business account against its category and writes the plan for bookings, not just followers. <a href="#/business">For businesses →</a></div>
         </div>
@@ -605,6 +611,17 @@
     }));
     $view.querySelector('[data-action=share]').addEventListener('click', () => openShareSheet(report));
     $view.querySelector('[data-action=unlock]')?.addEventListener('click', () => { sset('sc_intent_tier', 'growth_plan'); go('#/pricing'); });
+    $view.querySelector('[data-action=unlock-once]')?.addEventListener('click', async e => {
+      if (!token()) { sset('sc_next', location.hash); sset('sc_unlock_once', report.report_id); go('#/signup'); return; }
+      const b = e.currentTarget; b.disabled = true; b.textContent = 'Unlocking…';
+      try {
+        const res = await api('/reports/' + encodeURIComponent(report.report_id) + '/unlock', { method: 'POST', body: JSON.stringify({}) });
+        if (res.already_unlocked) { go('#/report/' + encodeURIComponent(res.report_id)); return; }
+        sset('sc_job_' + res.job_id, { handle: biz.handle, platform: biz.platform, category: biz.category, submitted_at: Date.now(), one_time: true });
+        toast(`Charged ${res.payment?.amount || '$9'} once. Writing your full plan…`);
+        go('#/evaluating/' + encodeURIComponent(res.job_id));
+      } catch (e2) { if (e2.status === 401) return; toast(e2.message || 'Unlock failed.'); b.disabled = false; b.textContent = 'Unlock once'; }
+    });
     $view.querySelector('#compForm')?.addEventListener('submit', async e => {
       e.preventDefault(); const f = e.currentTarget; const btn = f.querySelector('button'); const out = $view.querySelector('#compResult');
       const handles = f.handles.value.split(/[,\s]+/).map(x => x.replace(/^@/, '').trim()).filter(Boolean).slice(0, 5);
@@ -668,6 +685,7 @@
               <button type="button" class="prohead" data-expand><div><div class="n">${pro.name}</div><div class="note">$${annual ? yr(pro) + '/yr' : pro.monthlyPrice + '/mo'} · all platforms together</div></div><span class="caret">${proOpen ? '–' : '+'}</span></button>
               ${proOpen ? raw(h`<div class="probody"><div class="feats">${raw((pro.features || []).map(f => h`<div>${f}</div>`).join(''))}</div><button type="button" class="btn ghost block" data-subscribe="growth_plan_pro" ${cur('growth_plan_pro') ? 'disabled' : ''}>${cur('growth_plan_pro') ? 'Current plan' : 'Choose Pro'}</button></div>`) : ''}
             </div>`) : ''}
+            ${raw((pricing.one_time || []).map(o => h`<div class="card tier once"><div class="th"><span class="n">${o.name}</span><span class="tag fair">ONE-TIME</span></div><div class="price"><span class="p">$${o.price}</span><span class="per">once</span></div><div class="note">${o.description}</div><div class="feats">${raw((o.features || []).map(f => h`<div>${f}</div>`).join(''))}</div><a class="btn ghost" href="${token() ? '#/reports' : '#/'}" ${token() ? '' : raw('data-scroll="evalForm"')}>${token() ? 'Pick a report to unlock' : 'Score first, then unlock'}</a></div>`).join(''))}
             <div class="quote">
               <div class="m">[REVIEW — replace before launch]</div>
               <p class="q">“One-line quote placeholder about what changed after six weeks.”</p>
@@ -779,7 +797,10 @@
       try {
         const res = await api('/auth/signup', { method: 'POST', body: JSON.stringify({ email, password: pass, company_name: name || null }) }, { allow401: true });
         const t = res.token || res.access_token; if (!t) throw new Error('No token in response');
-        setToken(t); sessionStorage.removeItem('sc_next'); go(next && !/signin|signup/.test(next) ? next : '#/');
+        setToken(t); sessionStorage.removeItem('sc_next');
+        const pendingUnlock = sget('sc_unlock_once', null);
+        if (pendingUnlock) { sessionStorage.removeItem('sc_unlock_once'); go('#/report/' + encodeURIComponent(pendingUnlock)); toast('Signed up — tap "Unlock once" again to finish.'); return; }
+        go(next && !/signin|signup/.test(next) ? next : '#/');
       } catch (e2) { err.textContent = e2.body?.code === 'EMAIL_EXISTS' ? 'That email already has an account — sign in instead.' : (e2.message || 'Sign-up failed.'); err.hidden = false; btn.disabled = false; btn.textContent = 'Create account'; }
     });
   }

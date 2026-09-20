@@ -779,7 +779,7 @@ async function evaluateTier1(accountId, inputParams, onStage = () => {}) {
   planPhases = planPhases.map((ph) => ({ ...ph, range: normRange(ph.range), moves: Array.isArray(ph.moves) ? ph.moves : [] }));
 
   reportBody.tier = "growth_plan";
-  reportBody.refresh_due_at = Date.now() + (reportBody.plan_incomplete ? 1 : 7) * 24 * 60 * 60 * 1000;
+  reportBody.refresh_due_at = inputParams.one_time_unlock ? null : Date.now() + (reportBody.plan_incomplete ? 1 : 7) * 24 * 60 * 60 * 1000;
   if (!reportBody.growth_path) reportBody.growth_path = { phases: [] };
   reportBody.growth_path.phases = reportBody.growth_path.phases.map((p, i) => {
     const extra = planPhases.find((x) => x.range === normRange(p.range)) || planPhases[i] || { moves: [] };
