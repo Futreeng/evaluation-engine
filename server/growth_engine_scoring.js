@@ -85,9 +85,26 @@ function scorePostingConsistency(pf, t) {
   };
 }
 
-function scoreContentMix(content, posts, t) {
+function scoreContentMix(content, posts, t, platform) {
   const total = num(content.video_posts) + num(content.carousel_posts) + num(content.static_posts);
   if (!total) return { label: "Content Mix", score: 0, evidence: "no posts to classify", parts: {} };
+  if (platform === "tiktok") {
+    // Everything is video here. Variety = a spread of lengths, some slideshows,
+    // original sound; substance = captions that say something.
+    const short = num(content.short_videos_under_15s), long = num(content.long_videos_over_60s), slides = num(content.slideshow_posts);
+    const kinds = (short > 0 ? 1 : 0) + (total - short - long - slides > 0 ? 1 : 0) + (long > 0 ? 1 : 0) + (slides > 0 ? 1 : 0);
+    const variety = kinds >= 3 ? 1 : kinds === 2 ? 0.7 : 0.35;                                                  // 45
+    const original = clamp01(num(content.original_sound_share));                                                 // 20
+    const captions = Array.isArray(posts) ? posts.map((p) => p.caption || "") : [];
+    const promoShare = captions.length ? captions.filter((c) => PROMO_RE.test(c)).length / captions.length : 0;
+    const substance = ramp(num(content.avg_caption_length), 60, 5) * 0.5 + (1 - promoShare) * 0.5;               // 35
+    const score = pct(variety * 0.45 + original * 0.2 + substance * 0.35);
+    return {
+      label: "Content Mix", score,
+      evidence: `${kinds} of 4 video kinds in use (short / standard / long / slideshow); ${Math.round(original * 100)}% original sound; avg caption ${num(content.avg_caption_length)} chars; avg length ${num(content.avg_duration_s)}s`,
+      parts: { variety: pct(variety), original: pct(original), substance: pct(substance) },
+    };
+  }
   const videoShare = num(content.video_posts) / total;
   const closeness = 1 - clamp01(Math.abs(videoShare - t.video_share) / Math.max(t.video_share, 1 - t.video_share)); // 50
   const formats = ["video_posts", "carousel_posts", "static_posts"].filter((k) => num(content[k]) > 0).length;
@@ -103,7 +120,28 @@ function scoreContentMix(content, posts, t) {
   };
 }
 
-function scoreEngagementQuality(eng, aud, content, t) {
+function scoreEngagementQuality(eng, aud, content, t, platform) {
+  if (platform === "tiktok") {
+    // Reach on TikTok is mostly non-followers, so rate-vs-followers is not the
+    // signal it is on Instagram. Use views per follower, share+save rate on
+    // views, and comment share.
+    const followers = num(aud.followers);
+    const plays = num(eng.avg_plays_per_video);
+    const likes = num(eng.total_likes), comments = num(eng.total_comments), shares = num(eng.total_shares), saves = num(eng.total_saves);
+    const totalPlays = num(eng.total_video_views);
+    const viewsPerFollower = followers > 0 ? plays / followers : 0;
+    const reach = ramp(Math.log10(Math.max(0.01, viewsPerFollower)), 1, -1);          // 40: 10× followers → full, 0.1× → zero
+    const keep = totalPlays > 0 ? (shares + saves) / totalPlays : 0;
+    const keeping = ramp(keep, 0.02, 0);                                               // 35: 2% of viewers share or save → full
+    const commentShare = likes + comments > 0 ? comments / (likes + comments) : 0;
+    const conversation = ramp(commentShare, t.comment_share, 0);                       // 25
+    const score = pct(reach * 0.4 + keeping * 0.35 + conversation * 0.25);
+    return {
+      label: "Engagement Quality", score,
+      evidence: `avg ${Math.round(plays).toLocaleString()} plays per video (${viewsPerFollower.toFixed(1)}× followers); ${(keep * 100).toFixed(2)}% of viewers share or save; comments are ${(commentShare * 100).toFixed(1)}% of interactions`,
+      parts: { reach: pct(reach), keeping: pct(keeping), conversation: pct(conversation) },
+    };
+  }
   const er = num(eng.engagement_rate_percent);
   const likes = num(eng.total_likes), comments = num(eng.total_comments);
   const commentShare = likes + comments > 0 ? comments / (likes + comments) : 0;
@@ -127,11 +165,12 @@ function scoreProfileClarity(pc, t) {
   const hits = [], misses = [];
   const check = (ok, key, name) => { if (ok) { s += w[key]; hits.push(name); } else misses.push(name); };
   if (t.creator) {
+    if (pc.highlight_count === 0 && t.platform_no_highlights) w.highlights = 0;
     check(num(pc.bio_length) >= 40, "substance", "a bio that says what you're about");
     check(!!pc.external_url, "link", "a link");
     check(!!pc.external_url_is_booking || /youtu|tiktok|spotify|substack|beacons|linktr|stan\.store|patreon|gumroad|shop|newsletter|podcast|discord|twitch/i.test(pc.external_url || ""), "destination_link", "a link that goes somewhere worth going");
     check(!!pc.bio_has_cta || /\b(follow|subscribe|watch|listen|join|dm|new (video|drop|episode))\b/i.test(pc.bio_text || ""), "cta", "a next step in your bio");
-    check(num(pc.highlight_count) >= 1, "highlights", "story highlights");
+    if (w.highlights > 0) check(num(pc.highlight_count) >= 1, "highlights", "story highlights");
     const total = Object.values(w).reduce((a, b) => a + b, 0);
     return {
       label: "Profile Clarity", score: pct(s / total),
@@ -166,14 +205,16 @@ function scoreProfile(realData, category) {
   const { target: t, known } = targetFor(category);
   const pc = m.profile_clarity || {};
   const posts = (realData.recent_posts || realData.recent_activity || []).map((p) => ({ caption: p.caption ?? p.caption_preview ?? "" }));
+  const platform = String(realData.platform || realData.source || "").includes("tiktok") ? "tiktok" : "instagram";
+  const tt = platform === "tiktok" ? { ...t, posts_per_week: Math.max(t.posts_per_week, 5), max_gap_days: 5, platform_no_highlights: true, profile: { ...t.profile, highlights: 0 } } : t;
   const dims = [
-    scorePostingConsistency(m.posting_frequency, t),
-    scoreContentMix(m.content, posts, t),
-    scoreEngagementQuality(m.engagement, m.audience || { followers: realData.follower_count }, m.content, t),
+    scorePostingConsistency(m.posting_frequency, tt),
+    scoreContentMix(m.content, posts, tt, platform),
+    scoreEngagementQuality(m.engagement, m.audience || { followers: realData.follower_count }, m.content, tt, platform),
     scoreProfileClarity(pc, t),
   ];
   const overall = Math.round(dims.reduce((a, d) => a + d.score, 0) / dims.length);
-  return { overall, dimensions: dims, targets: t, method: "deterministic-v1", niche_known: known, creator: !!t.creator };
+  return { overall, dimensions: dims, targets: tt, method: "deterministic-v1", niche_known: known, creator: !!t.creator, platform };
 }
 
 /**
