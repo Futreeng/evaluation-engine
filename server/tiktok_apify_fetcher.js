@@ -19,7 +19,8 @@ const VIDEOS = 15;
 const RUN_TIMEOUT_SECS = 150;
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
-const cache = new Map();
+const cache = new Map(); // in-process fallback; the DB cache is authoritative
+const geDb = require("./growth_engine_db_select");
 
 async function fetchVideosFromApify(handle) {
   const token = process.env.APIFY_TOKEN;
@@ -84,6 +85,10 @@ async function analyzeTikTokAccountViaApify(rawHandle) {
 
   const hit = cache.get(handle);
   if (hit && Date.now() - hit.at < CACHE_TTL_MS) { console.log(`[TikTok/Apify] Cache hit for @${handle}`); return hit.data; }
+  try {
+    const c = await geDb.getCachedProfile("tiktok", handle, CACHE_TTL_MS);
+    if (c) { console.log(`[TikTok/Apify] DB cache hit for @${handle}`); cache.set(handle, { at: c.fetchedAt, data: c.data }); return c.data; }
+  } catch { /* cache is best-effort */ }
 
   console.log(`[TikTok/Apify] Fetching @${handle}...`);
   const items = await fetchVideosFromApify(handle);
@@ -165,6 +170,7 @@ async function analyzeTikTokAccountViaApify(rawHandle) {
     source: "clockworks/tiktok-scraper",
   };
   cache.set(handle, { at: Date.now(), data });
+  try { await geDb.putCachedProfile("tiktok", handle, data); } catch { /* best-effort */ }
   return data;
 }
 

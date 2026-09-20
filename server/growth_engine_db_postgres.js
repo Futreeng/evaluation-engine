@@ -116,6 +116,19 @@ async function initSchema() {
     await client.query(`ALTER TABLE entitlements ALTER COLUMN current_tier SET DEFAULT 'social_snapshot'`);
 
     await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_outcomes (
+        id TEXT PRIMARY KEY, account_id TEXT NOT NULL, handle TEXT NOT NULL, platform TEXT NOT NULL, category TEXT,
+        moves_done INTEGER NOT NULL, score_delta INTEGER NOT NULL, follower_delta INTEGER, days INTEGER, created_at BIGINT NOT NULL
+      )`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_profile_cache (
+        id TEXT PRIMARY KEY, platform TEXT NOT NULL, handle TEXT NOT NULL, data JSONB NOT NULL, fetched_at BIGINT NOT NULL
+      )`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_usage (
+        id TEXT PRIMARY KEY, account_id TEXT NOT NULL, kind TEXT NOT NULL, day TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0
+      )`);
+    await client.query(`
       CREATE TABLE IF NOT EXISTS growth_engine_waitlist (
         id TEXT PRIMARY KEY,
         email TEXT NOT NULL,
@@ -213,6 +226,41 @@ async function updateJobStatus(jobId, status, updates = {}) {
   return getJob(jobId);
 }
 
+async function recordOutcome({ accountId, handle, platform, category, movesDone, scoreDelta, followerDelta, days }) {
+  await q(`INSERT INTO growth_engine_outcomes (id, account_id, handle, platform, category, moves_done, score_delta, follower_delta, days, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+    ["oc_" + uid(), accountId, String(handle).toLowerCase(), platform, category || null, movesDone, scoreDelta, followerDelta ?? null, days ?? null, Date.now()]);
+}
+async function getOutcomeSummary() {
+  const r = await q(`SELECT CASE WHEN moves_done >= 3 THEN 'did_3_plus' WHEN moves_done >= 1 THEN 'did_some' ELSE 'did_none' END AS bucket,
+    COUNT(*) AS n, AVG(score_delta) AS sd, AVG(follower_delta) AS fd FROM growth_engine_outcomes GROUP BY bucket`);
+  const out = {};
+  for (const row of r.rows) out[row.bucket] = { n: Number(row.n), avg_score_delta: +Number(row.sd).toFixed(1), avg_follower_delta: row.fd == null ? null : Math.round(Number(row.fd)) };
+  return out;
+}
+
+async function getCachedProfile(platform, handle, maxAgeMs) {
+  const r = await q(`SELECT data, fetched_at FROM growth_engine_profile_cache WHERE id = $1`, [`${platform}|${String(handle).toLowerCase()}`]);
+  const row = r.rows[0];
+  if (!row || Date.now() - Number(row.fetched_at) > maxAgeMs) return null;
+  return { data: parseJson(row.data), fetchedAt: Number(row.fetched_at) };
+}
+async function putCachedProfile(platform, handle, data) {
+  await q(`INSERT INTO growth_engine_profile_cache (id, platform, handle, data, fetched_at) VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, fetched_at = EXCLUDED.fetched_at`,
+    [`${platform}|${String(handle).toLowerCase()}`, platform, String(handle).toLowerCase(), JSON.stringify(data), Date.now()]);
+}
+const dayKey = () => new Date().toISOString().slice(0, 10);
+async function getUsage(accountId, kind) {
+  const r = await q(`SELECT count FROM growth_engine_usage WHERE id = $1`, [`${accountId}|${kind}|${dayKey()}`]);
+  return Number(r.rows[0]?.count || 0);
+}
+async function bumpUsage(accountId, kind, n = 1) {
+  const id = `${accountId}|${kind}|${dayKey()}`;
+  const r = await q(`INSERT INTO growth_engine_usage (id, account_id, kind, day, count) VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (id) DO UPDATE SET count = growth_engine_usage.count + $5 RETURNING count`, [id, accountId, kind, dayKey(), n]);
+  return Number(r.rows[0]?.count || n);
+}
+
 async function findFreeSnapshotForHandle(handle, platform) {
   const r = await q(`SELECT report_id, generated_at, created_at FROM growth_engine_reports
      WHERE tier = 'social_snapshot' AND lower(handle) = $1 AND platform = $2 ORDER BY created_at DESC LIMIT 1`, [String(handle).toLowerCase(), platform]);
@@ -302,9 +350,9 @@ async function listScoreHistory(accountId, handle, platform) {
   );
   return r.rows
     .map((row) => {
-      const sc = parseJson(row.report_body)?.scores;
+      const body = parseJson(row.report_body) || {}; const sc = body.scores;
       return sc && Number.isFinite(sc.overall)
-        ? { report_id: row.report_id, tier: row.tier, generated_at: Number(row.generated_at || row.created_at), overall: sc.overall, dimensions: (sc.dimensions || []).map((d) => ({ label: d.label, score: d.score })) }
+        ? { report_id: row.report_id, tier: row.tier, generated_at: Number(row.generated_at || row.created_at), overall: sc.overall, followers: body.business?.followers ?? null, dimensions: (sc.dimensions || []).map((d) => ({ label: d.label, score: d.score })) }
         : null;
     })
     .filter(Boolean);
@@ -438,6 +486,12 @@ module.exports = {
   countFreeSnapshotsByEmail,
   findFreeSnapshotForHandle,
   adoptAnonymousReports,
+  getCachedProfile,
+  putCachedProfile,
+  recordOutcome,
+  getOutcomeSummary,
+  getUsage,
+  bumpUsage,
   addWaitlist,
   deleteAccount,
   // Reports

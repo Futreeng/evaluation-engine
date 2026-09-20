@@ -21,6 +21,7 @@ let jobQueue = new JobQueue();
   try {
     await jobQueue.start();
     console.log("[Growth Engine] Job queue started");
+    require("../growth_engine_refresh").start(jobQueue);
   } catch (err) {
     console.error("[Growth Engine] Failed to start job queue:", err);
   }
@@ -200,6 +201,27 @@ router.post("/evaluate/social-snapshot", optionalAuth, validateEvaluationRequest
     const accountId = req.user?.id || "demo-account";
     const tier = await evaluationTierFor(accountId);
 
+    // (2) Paid on-demand runs are metered per day; the weekly refresh is scheduled
+    // and doesn't count. Every run is a fresh Apify pull (cached 24h) plus five
+    // LLM calls, so an unmetered "run again" button is an open tab on the bill.
+    if (tier !== "social_snapshot" && !req.body.scheduled) {
+      const limit = Number(process.env.PAID_RUNS_PER_DAY || 5);
+      const used = await geDb.getUsage(accountId, "eval");
+      if (used >= limit) {
+        return res.status(429).json({ error: `You've run ${used} evaluations today. The plan refreshes itself weekly — or try again tomorrow.`, code: "RUN_LIMIT_REACHED", status: 429, used, limit });
+      }
+      await geDb.bumpUsage(accountId, "eval");
+    }
+    // Global free-tier ceiling so a share-card spike can't run up the bill overnight.
+    if (tier === "social_snapshot") {
+      const cap = Number(process.env.FREE_RUNS_PER_DAY_GLOBAL || 500);
+      const used = await geDb.getUsage("__global__", "free_eval");
+      if (used >= cap) {
+        return res.status(503).json({ error: "We've hit today's limit for free scores. Try again tomorrow, or sign in for a plan.", code: "GLOBAL_CAP", status: 503 });
+      }
+      await geDb.bumpUsage("__global__", "free_eval");
+    }
+
     // The free Snapshot is one per account (handle + platform), not per email —
     // an email is free to invent, a handle is the thing that costs us money.
     // If it's already been scored we point at that report instead of a wall.
@@ -301,6 +323,12 @@ router.post("/reports/:reportId/competitors", authMiddleware, async (req, res) =
     if (!access.hasAccess) return res.status(402).json({ error: "Competitor comparison is part of the Growth Plan.", code: "UPGRADE_REQUIRED", required_tier: "growth_plan", status: 402 });
     const handles = Array.isArray(req.body.handles) ? req.body.handles : [];
     if (!handles.length || handles.length > MAX_COMPETITORS) return sendError(res, 400, "INVALID_HANDLES", `Provide 1–${MAX_COMPETITORS} competitor handles`);
+    // (8) Competitor pulls are metered per day; the 24h profile cache means
+    // re-running the same set is free, so this only bites on churning handles.
+    const climit = Number(process.env.COMPETITOR_PULLS_PER_DAY || 15);
+    const cused = await geDb.getUsage(req.user.id, "competitor");
+    if (cused + handles.length > climit) return res.status(429).json({ error: `That's ${cused + handles.length} competitor pulls today; the limit is ${climit}. Try again tomorrow.`, code: "COMPETITOR_LIMIT_REACHED", status: 429 });
+    await geDb.bumpUsage(req.user.id, "competitor", handles.length);
     const comparison = await compareCompetitors({
       handle: report.business.handle, platform: report.business.platform, category: report.business.category, handles,
     });
@@ -368,6 +396,11 @@ router.post("/reports/:reportId/moves", authMiddleware, async (req, res) => {
   } catch (err) {
     sendError(res, 500, "MOVE_ERROR", err.message);
   }
+});
+
+// Does doing the moves move the score? Aggregate only — no handles.
+router.get("/outcomes", async (req, res) => {
+  try { res.json(await geDb.getOutcomeSummary()); } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // Category baseline status (public; powers the "N profiles scored" copy)

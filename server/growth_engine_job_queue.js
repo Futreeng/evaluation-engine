@@ -113,7 +113,14 @@ class JobQueue {
         console.warn("[Growth Engine] Baseline update failed:", err.message);
       }
 
-      // Score history: compare with this account's last report for the handle.
+      // (6) Followers on every report — the number a creator checks first.
+      if (reportBody.business && reportBody.business.followers == null) {
+        const f = reportBody.followers ?? reportBody.raw_followers;
+        if (Number.isFinite(f)) reportBody.business.followers = f;
+      }
+
+      // Score history: compare with this account's last report for the handle,
+      // and record what they did in between — the evidence the plan works.
       try {
         if (accountId && accountId !== "demo-account" && reportBody.scores) {
           const prior = await geDb.listScoreHistory(accountId, inputParams.handle, inputParams.platform);
@@ -121,13 +128,21 @@ class JobQueue {
           if (prev) {
             const dims = {};
             for (const d of prev.dimensions || []) dims[d.label] = d.score;
+            let movesDone = [];
+            try { const prevReport = await geDb.getReport(prev.report_id); movesDone = Object.keys(prevReport?.reportBody?.moves_done || {}); } catch { /* fine */ }
+            const followerDelta = Number.isFinite(prev.followers) && Number.isFinite(reportBody.business?.followers) ? reportBody.business.followers - prev.followers : null;
             reportBody.history = {
               runs: prior.length + 1,
-              previous: { report_id: prev.report_id, generated_at: prev.generated_at, overall: prev.overall },
+              previous: { report_id: prev.report_id, generated_at: prev.generated_at, overall: prev.overall, followers: prev.followers ?? null },
               delta_overall: reportBody.scores.overall - prev.overall,
+              delta_followers: followerDelta,
               delta_dimensions: (reportBody.scores.dimensions || []).map((d) => ({ label: d.label, delta: dims[d.label] != null ? d.score - dims[d.label] : null })),
-              series: [...prior.map((r) => ({ generated_at: r.generated_at, overall: r.overall })), { generated_at: Date.now(), overall: reportBody.scores.overall }],
+              moves_done_since: movesDone,
+              series: [...prior.map((r) => ({ generated_at: r.generated_at, overall: r.overall, followers: r.followers ?? null })), { generated_at: Date.now(), overall: reportBody.scores.overall, followers: reportBody.business?.followers ?? null }],
             };
+            // Evidence row: what they did → what changed. Aggregated later for
+            // "creators who did ≥3 moves gained N points" and the review cards.
+            try { await geDb.recordOutcome({ accountId, handle: inputParams.handle, platform: inputParams.platform, category: inputParams.category, movesDone: movesDone.length, scoreDelta: reportBody.history.delta_overall, followerDelta, days: Math.round((Date.now() - prev.generated_at) / 86400000) }); } catch { /* best-effort */ }
           }
         }
       } catch (err) {

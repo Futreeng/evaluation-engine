@@ -75,6 +75,42 @@ function initSchema() {
   `);
   db.run(`CREATE INDEX IF NOT EXISTS idx_baselines_cat ON growth_engine_baselines (category, platform)`);
 
+  // Fetched-profile cache: one Apify pull per handle per day, across restarts
+  // and across the report, competitor and refresh paths.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS growth_engine_profile_cache (
+      id TEXT PRIMARY KEY,
+      platform TEXT NOT NULL,
+      handle TEXT NOT NULL,
+      data TEXT NOT NULL,
+      fetched_at INTEGER NOT NULL
+    )
+  `);
+  // Metered actions per account per day (on-demand runs, competitor pulls).
+  db.run(`
+    CREATE TABLE IF NOT EXISTS growth_engine_usage (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      day TEXT NOT NULL,
+      count INTEGER NOT NULL DEFAULT 0
+    )
+  `);
+  // What they did between runs → what changed. The proof the plan works.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS growth_engine_outcomes (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      handle TEXT NOT NULL,
+      platform TEXT NOT NULL,
+      category TEXT,
+      moves_done INTEGER NOT NULL,
+      score_delta INTEGER NOT NULL,
+      follower_delta INTEGER,
+      days INTEGER,
+      created_at INTEGER NOT NULL
+    )
+  `);
   db.run(`
     CREATE TABLE IF NOT EXISTS growth_engine_waitlist (
       id TEXT PRIMARY KEY,
@@ -245,6 +281,54 @@ async function deleteAccount(accountId) {
   try { db.run(`DELETE FROM users WHERE user_id = ?`, [accountId]); } catch { /* users may live in the Convergence store */ }
   saveDb();
   return { deleted: true, reports };
+}
+
+async function recordOutcome({ accountId, handle, platform, category, movesDone, scoreDelta, followerDelta, days }) {
+  if (!db) throw new Error("Database not initialized");
+  db.run(`INSERT INTO growth_engine_outcomes (id, account_id, handle, platform, category, moves_done, score_delta, follower_delta, days, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ["oc_" + uid(), accountId, String(handle).toLowerCase(), platform, category || null, movesDone, scoreDelta, followerDelta ?? null, days ?? null, Date.now()]);
+  saveDb();
+}
+// Aggregate: does doing the moves move the score?
+async function getOutcomeSummary() {
+  if (!db) throw new Error("Database not initialized");
+  const r = db.exec(`SELECT CASE WHEN moves_done >= 3 THEN 'did_3_plus' WHEN moves_done >= 1 THEN 'did_some' ELSE 'did_none' END AS bucket,
+    COUNT(*), AVG(score_delta), AVG(follower_delta) FROM growth_engine_outcomes GROUP BY bucket`);
+  const out = {};
+  if (r.length) for (const [b, n, sd, fd] of r[0].values) out[b] = { n: Number(n), avg_score_delta: +Number(sd).toFixed(1), avg_follower_delta: fd == null ? null : Math.round(Number(fd)) };
+  return out;
+}
+
+// ---------- profile cache ----------
+async function getCachedProfile(platform, handle, maxAgeMs) {
+  if (!db) throw new Error("Database not initialized");
+  const r = db.exec(`SELECT data, fetched_at FROM growth_engine_profile_cache WHERE id = ?`, [`${platform}|${String(handle).toLowerCase()}`]);
+  if (!r.length || !r[0].values.length) return null;
+  const [data, at] = r[0].values[0];
+  if (Date.now() - Number(at) > maxAgeMs) return null;
+  try { return { data: JSON.parse(data), fetchedAt: Number(at) }; } catch { return null; }
+}
+async function putCachedProfile(platform, handle, data) {
+  if (!db) throw new Error("Database not initialized");
+  db.run(`INSERT OR REPLACE INTO growth_engine_profile_cache (id, platform, handle, data, fetched_at) VALUES (?, ?, ?, ?, ?)`,
+    [`${platform}|${String(handle).toLowerCase()}`, platform, String(handle).toLowerCase(), JSON.stringify(data), Date.now()]);
+  saveDb();
+}
+
+// ---------- usage meter ----------
+const dayKey = () => new Date().toISOString().slice(0, 10);
+async function getUsage(accountId, kind) {
+  if (!db) throw new Error("Database not initialized");
+  const r = db.exec(`SELECT count FROM growth_engine_usage WHERE id = ?`, [`${accountId}|${kind}|${dayKey()}`]);
+  return r.length && r[0].values.length ? Number(r[0].values[0][0]) : 0;
+}
+async function bumpUsage(accountId, kind, n = 1) {
+  if (!db) throw new Error("Database not initialized");
+  const id = `${accountId}|${kind}|${dayKey()}`;
+  const cur = await getUsage(accountId, kind);
+  db.run(`INSERT OR REPLACE INTO growth_engine_usage (id, account_id, kind, day, count) VALUES (?, ?, ?, ?, ?)`, [id, accountId, kind, dayKey(), cur + n]);
+  saveDb();
+  return cur + n;
 }
 
 // (7) A free report is written under demo-account with the email in the job
@@ -456,8 +540,9 @@ async function listScoreHistory(accountId, handle, platform) {
   if (!result.length) return [];
   return result[0].values.map(([report_id, tier, generated_at, body]) => {
     let sc = null; try { sc = JSON.parse(body).scores || null; } catch { /* skip */ }
+    let followers = null; try { followers = JSON.parse(body).business?.followers ?? null; } catch { /* skip */ }
     return sc && Number.isFinite(sc.overall)
-      ? { report_id, tier, generated_at, overall: sc.overall, dimensions: (sc.dimensions || []).map((d) => ({ label: d.label, score: d.score })) }
+      ? { report_id, tier, generated_at, overall: sc.overall, followers, dimensions: (sc.dimensions || []).map((d) => ({ label: d.label, score: d.score })) }
       : null;
   }).filter(Boolean);
 }
@@ -710,6 +795,12 @@ module.exports = {
   countFreeSnapshotsByEmail,
   findFreeSnapshotForHandle,
   adoptAnonymousReports,
+  getCachedProfile,
+  putCachedProfile,
+  recordOutcome,
+  getOutcomeSummary,
+  getUsage,
+  bumpUsage,
   addWaitlist,
   deleteAccount,
   recordBaseline,

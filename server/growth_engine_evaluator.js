@@ -515,10 +515,12 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
   let postSummary;
   let computed = null;
   let postInsights = null;
+  let followers = null;
   try {
     await onStage("finding", 1);
     const realData = await getRealPostData(handle, platform, category);
     await onStage("reading", 2);
+    followers = Number.isFinite(realData.follower_count) ? realData.follower_count : null;
     postSummary = JSON.stringify(realData); // compact: every token counts against free-tier TPM caps
     computed = scoreProfile(realData, category); // null for fetchers without the metric shape (Twitter)
     postInsights = rankPosts(realData.recent_activity || realData.recent_posts);
@@ -606,6 +608,7 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
       platform,
       category,
       business_name: null,
+      followers,
     },
     generated_at: Date.now(),
     refresh_due_at: null,
