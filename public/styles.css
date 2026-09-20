@@ -346,6 +346,8 @@ p { margin: 0; }
 .upsell .path .pn { font-size: 14px; color: var(--on-dark-muted); } .upsell .path .pn b { color: var(--on-dark); font-size: 16px; }
 .upsell .path .pd { font-size: 14px; line-height: 1.45; color: var(--on-dark-muted); }
 .upsell .path .btn { margin-top: 8px; align-self: flex-start; }
+.samplebar { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; padding: 12px 18px; margin: 0 0 14px; border: 1.5px dashed var(--line2); border-radius: 14px; background: var(--card); color: var(--body); font-size: 14px; }
+.samplebar b { color: var(--ink); } .samplebar a { margin-left: auto; color: var(--act); font-weight: 600; text-decoration: none; }
 .refresh.once { background: var(--gold); } .refresh.once p { color: var(--gold-t); }
 .tier.once { flex: 1 1 280px; }
 .refresh { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; padding: 22px 24px; background: var(--green); border-radius: var(--r-card); }

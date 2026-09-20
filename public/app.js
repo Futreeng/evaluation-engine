@@ -119,8 +119,15 @@
       <div class="bar"><div class="fill bg${hue}" style="width:${sc}%"></div>${avg != null ? raw(h`<div class="mark" style="left:${clamp(avg, 0, 100)}%"></div>`) : ''}</div>
     </div>`;
   }
-  const SAMPLE = {
-    handle: 'humansofny', platform: 'instagram', date: '2026-09-18T00:00:00Z', followers: 12640167, overall: 53,
+  // The shipped sample report (public/sample-report.js) — a real Growth Plan
+  // run on an account we have permission to show. Powers the landing card
+  // and #/report/sample so prospects can read a full paid report.
+  const SHIPPED = window.SCALECRAFT_SAMPLE || null;
+  const SAMPLE = SHIPPED ? {
+    handle: SHIPPED.business.handle, platform: SHIPPED.business.platform, date: SHIPPED.created_at, followers: SHIPPED.business.followers || 0, overall: SHIPPED.scores.overall,
+    dims: (SHIPPED.scores.dimensions || []).map(d => ({ label: d.label, score: d.score, category_avg: d.category_avg })), summary: SHIPPED.scores.summary || '', link: '#/report/sample'
+  } : {
+    handle: 'yourhandle', platform: 'instagram', date: '2026-09-18T00:00:00Z', followers: 4820, overall: 53,
     dims: [{ label: 'Posting Consistency', score: 30, category_avg: 48 }, { label: 'Content Mix', score: 72, category_avg: 60 }, { label: 'Engagement Quality', score: 39, category_avg: 55 }, { label: 'Profile Clarity', score: 70, category_avg: 64 }],
     summary: 'Posting Consistency and Engagement Quality are driving most of the gap.'
   };
@@ -466,8 +473,9 @@
 
   // ------------------------------------------------------------ report
   async function viewReport(reportId) {
-    if (reportId === 'sample') { renderHeader('report'); $view.innerHTML = h`<div class="center-msg"><h2>Score your own account to see a real one.</h2><a href="#/">Score my account</a></div>`; return; }
-    let report = sget('sc_report_' + reportId, null);
+    const isSample = reportId === 'sample';
+    if (isSample && !SHIPPED) { renderHeader('report'); $view.innerHTML = h`<div class="center-msg"><h2>Score your own account to see a real one.</h2><a href="#/">Score my account</a></div>`; return; }
+    let report = isSample ? SHIPPED : sget('sc_report_' + reportId, null);
     if (!report) {
       renderHeader('report');
       $view.innerHTML = h`<div class="center-msg">Loading your report…</div>`;
@@ -492,7 +500,7 @@
     const calWeeks = Array.isArray(report.calendar?.weeks) ? report.calendar.weeks : [];
     const pending = s.category_baseline_pending;
     const doneKey = 'sc_done_' + report.report_id;
-    const done = { ...(lget(doneKey, {})), ...(report.moves_done || {}) };
+    const done = isSample ? {} : { ...(lget(doneKey, {})), ...(report.moves_done || {}) };
     const isDone = k => !!done[k];
     const price = report.upsell?.monthly_price || 12;
     const oneTime = report.upsell?.one_time_price || 15;
@@ -503,9 +511,10 @@
     renderHeader('report');
     $view.innerHTML = h`
       <div class="wrap">
+        ${isSample ? raw(h`<div class="samplebar"><b>Sample report.</b> A real Growth Plan for a real account, scored ${fmtDate(report.created_at)}. Yours is written from your own posts. <a href="#/" data-scroll="evalForm">Score my account →</a></div>`) : ''}
         <div class="rhead">
           <div class="l"><span class="h">@${biz.handle || ''}</span><span class="ctx">${platName(biz.platform)} · ${niche} · ${fmtDate(report.created_at)}</span>${paid ? raw(h`<span class="tag dark">${report.one_time_unlock ? 'UNLOCKED ONCE' : 'GROWTH PLAN'}</span>`) : ''}</div>
-          <div class="r"><button class="btn ghost sm" data-action="email-report">Email me this report</button><button class="btn dark sm" data-action="share">Share my score</button></div>
+          <div class="r">${isSample ? '' : raw(h`<button class="btn ghost sm" data-action="email-report">Email me this report</button>`)}<button class="btn dark sm" data-action="share">${isSample ? 'Share this sample' : 'Share my score'}</button></div>
         </div>
         <div class="report">
           <div class="toprow">
@@ -576,7 +585,7 @@
           <details class="card acc" ${paid && comp ? 'open' : ''}>
             <summary>Against your competitors</summary>
             <div class="body">
-              ${paid ? raw(h`<form class="compform" id="compForm"><input type="text" name="handles" placeholder="@handle — add up to 5" value="${comp ? comp.competitors.map(c => c.handle).join(', ') : (report.competitor_handles || []).join(', ')}" aria-label="Competitor handles"><button class="btn dark" type="submit">${comp ? 'Re-run' : 'Compare'}</button></form><div id="compResult">${comp ? raw(competitorRows(comp)) : ''}</div>`)
+              ${isSample ? raw(comp ? competitorRows(comp) : h`<p class="fine">Growth Plan reports compare you to up to five accounts you pick.</p>`) : paid ? raw(h`<form class="compform" id="compForm"><input type="text" name="handles" placeholder="@handle — add up to 5" value="${comp ? comp.competitors.map(c => c.handle).join(', ') : (report.competitor_handles || []).join(', ')}" aria-label="Competitor handles"><button class="btn dark" type="submit">${comp ? 'Re-run' : 'Compare'}</button></form><div id="compResult">${comp ? raw(competitorRows(comp)) : ''}</div>`)
               : raw(h`<div class="comprows"><div class="crow you"><span>@${biz.handle} (you)</span><span>${overall}</span></div>
                   ${raw(((report.competitor_handles && report.competitor_handles.length) ? report.competitor_handles : ['', '', '']).slice(0, 3).map((hn, i) => h`<div class="crow"><span>${hn ? '@' + hn : raw(`<span style="display:inline-block;width:${[120, 96, 140][i]}px;height:12px;border-radius:6px;background:var(--track2)"></span>`)}</span><span class="ghost">${[63, 48, 57][i]}</span></div>`).join(''))}
                   <p class="fine" style="margin-top:6px">Their scores and what they do differently unlock with the plan.</p></div>`)}
@@ -586,7 +595,8 @@
           <div class="datawindow">${report.data_window || `Based on your last ${pi?.sample || 12} posts. We can't see saves, reach or story views.`}</div>
 
           ${!paid && sget('sc_limit_msg', null) ? raw(h`<div class="notice">${sget('sc_limit_msg', '')} <a href="#/pricing">See the plan →</a></div>`) : ''}
-          ${paid && report.one_time_unlock ? raw(h`<div class="refresh once"><div class="t"><h3>Yours to keep</h3><p>You unlocked this report once. It won't refresh — start the Growth Plan to be re-scored every week and see what each move changed.</p></div><button class="btn green" data-action="unlock">Start the plan · $${price}/mo</button></div>`)
+          ${isSample ? raw(h`<div class="refresh"><div class="t"><h3>This is what $${price} a month gets you</h3><p>Every move with the reason behind it, a 12-week calendar written from the account's own posts, competitors scored the same way, and a fresh score every week. Yours starts with a free Snapshot.</p></div><a class="btn green" href="#/" data-scroll="evalForm">Score my account free</a></div>`)
+          : paid && report.one_time_unlock ? raw(h`<div class="refresh once"><div class="t"><h3>Yours to keep</h3><p>You unlocked this report once. It won't refresh — start the Growth Plan to be re-scored every week and see what each move changed.</p></div><button class="btn green" data-action="unlock">Start the plan · $${price}/mo</button></div>`)
           : paid ? raw(h`<div class="refresh"><div class="t"><h3>This plan refreshes weekly</h3><p>${Object.keys(done).length ? `You did ${Object.keys(done).length} move${Object.keys(done).length === 1 ? '' : 's'} — we'll re-score you and tell you what changed.` : 'Run it again any time — the moves and calendar are rewritten against your latest posts.'}</p></div><a class="btn green" href="#/" data-scroll="evalForm">Run a fresh evaluation</a></div>`)
           : raw(h`<div class="upsell"><h3>Unlock your full Growth Plan</h3><p>${report.upsell?.unlock_count || 12} locked items: the remaining moves and your week-by-week calendar, written from your own posts.</p>
               <div class="paths">
@@ -603,10 +613,10 @@
     $view.querySelectorAll('[data-move]').forEach(b => b.addEventListener('click', async () => {
       const k = b.dataset.move; const now = !isDone(k);
       if (now) done[k] = Date.now(); else delete done[k];
-      lset(doneKey, done);
+      if (!isSample) lset(doneKey, done);
       b.classList.toggle('on', now); b.querySelector('.box').textContent = now ? '✓' : '';
-      if (token() && paid) { try { await api('/reports/' + encodeURIComponent(report.report_id) + '/moves', { method: 'POST', body: JSON.stringify({ key: k, done: now }) }); } catch { } }
-      report.moves_done = done; sset('sc_report_' + report.report_id, report);
+      if (token() && paid && !isSample) { try { await api('/reports/' + encodeURIComponent(report.report_id) + '/moves', { method: 'POST', body: JSON.stringify({ key: k, done: now }) }); } catch { } }
+      if (!isSample) { report.moves_done = done; sset('sc_report_' + report.report_id, report); }
       $view.querySelectorAll('.phase').forEach((ph, i) => { const p = phases[i]; if (!p || !paid) return; const total = 1 + p.moves.length; const dn = (isDone(p.key + 'm1') ? 1 : 0) + p.moves.filter(m => isDone(p.key + 'm' + m.n)).length; const el = ph.querySelector('.prog'); if (el) el.textContent = `${dn} of ${total} done`; });
     }));
     $view.querySelector('[data-action=share]').addEventListener('click', () => openShareSheet(report));
@@ -678,7 +688,7 @@
             <div class="note">${annual ? 'Two and a bit months free' : `Or $${yr(growth)} a year — ${Math.round(disc * 100)}% off`}</div>
             <div class="feats">${raw((growth.features || []).map(f => h`<div>${f}</div>`).join(''))}</div>
             <button type="button" class="btn" data-subscribe="growth_plan" ${cur('growth_plan') ? 'disabled' : ''}>${cur('growth_plan') ? 'Current plan' : 'Unlock the plan'}</button>
-            <div class="fine center">Cancel anytime. Keep the report either way.</div>
+            <div class="fine center">Cancel anytime. Keep the report either way.${SHIPPED ? raw(' · <a href="#/report/sample">See a full report</a>') : ''}</div>
           </div>
           <div class="side">
             ${pro ? raw(h`<div class="card procard ${proOpen ? 'open' : ''}">
