@@ -108,7 +108,8 @@ router.get("/health", async (req, res) => {
 router.post("/auth/signup", authLimiter, validateAuthRequest, async (req, res) => {
   try {
     const { email, password, company_name } = req.body;
-    const result = await signup(email, password, company_name);
+    const profile = { isBusiness: req.body.is_business === true || req.body.is_business === "yes", niche: typeof req.body.niche === "string" ? req.body.niche.slice(0, 40) : undefined };
+    const result = await signup(email, password, company_name, profile);
     events.track("signup", { ...events.attribution(req), accountId: result?.user?.user_id || null, props: { has_company: !!company_name } });
     res.json(result);
   } catch (err) {
@@ -170,6 +171,8 @@ router.get("/auth/me", authMiddleware, async (req, res) => {
       email: user.email,
       company_name: user.companyName,
       is_admin: isAdminEmail(user.email),
+      is_business: !!user.isBusiness,
+      niche: user.niche || null,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -417,7 +420,9 @@ router.post("/evaluate/social-snapshot", evaluateLimiter, optionalAuth, validate
     // Intake answers: the free form may send just the 90-day horizon; paid
     // runs carry the full set (sent now, or saved earlier).
     const plan_context = await resolvePlanContext(req, accountId, handle, platform);
-    const input = { handle, platform, category, email, competitors, plan_context };
+    const isBusiness = req.body.is_business === true || req.body.is_business === "yes";
+    const input = { handle, platform, category, email, competitors, plan_context, is_business: isBusiness };
+    if (req.user?.id && (isBusiness || category)) geDb.setUserProfile(req.user.id, { isBusiness, niche: category }).catch(() => { });
     if (req.body.rerun_of && typeof req.body.rerun_of === "string") input.rerun_of = req.body.rerun_of.slice(0, 60);
 
     // Create job in database
@@ -849,6 +854,21 @@ router.get("/admin/funnel", requireAdmin, async (req, res) => {
     const fn = await geDb.eventFunnel(since, events.EVENTS);
     const steps = events.FUNNEL.map((name, i) => { const a = fn.steps[name]?.actors || 0; const prev = i ? (fn.steps[events.FUNNEL[i - 1]]?.actors || 0) : null; return { name, actors: a, total: fn.steps[name]?.total || 0, from_previous: prev ? a / prev : null }; });
     res.json({ days, steps, other: Object.fromEntries(Object.entries(fn.steps).filter(([k]) => !events.FUNNEL.includes(k))), by_ref: fn.by_ref, retention_month_two: await geDb.paidRetention() });
+  } catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
+});
+// Phase-2 waitlist: business-flagged accounts and reports, JSON or CSV.
+router.get("/admin/business-accounts", requireAdmin, async (req, res) => {
+  try {
+    const data = await geDb.listBusinessAccounts();
+    if (req.query.format === "csv") {
+      const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+      const rows = [["source", "email", "handle", "platform", "niche", "score", "date"].join(",")];
+      for (const u of data.users) rows.push(["account", u.email, "", "", u.niche, "", new Date(u.created_at).toISOString().slice(0, 10)].map(esc).join(","));
+      for (const r of data.reports) rows.push(["report", r.email, r.handle, r.platform, r.category, r.overall, new Date(r.generated_at).toISOString().slice(0, 10)].map(esc).join(","));
+      res.setHeader("content-type", "text/csv"); res.setHeader("content-disposition", `attachment; filename="business-accounts-${new Date().toISOString().slice(0, 10)}.csv"`);
+      return res.send(rows.join("\n"));
+    }
+    res.json(data);
   } catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
 });
 router.get("/admin/promos", requireAdmin, async (req, res) => {

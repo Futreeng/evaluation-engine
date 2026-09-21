@@ -679,3 +679,4 @@ p { margin: 0; }
 .arow.head { background: transparent; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 2px 12px; }
 .arow.head .h, .arow.head .n { font: inherit; color: inherit; }
 .arow .n.neg { color: var(--c1t); }
+.optq.bizq { margin-top: 10px; }

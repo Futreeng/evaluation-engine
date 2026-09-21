@@ -200,6 +200,9 @@
                 <div class="field selwrap"><select name="category" aria-label="Niche">${raw(NICHES.map(([k, n]) => h`<option value="${k}" ${k === niche ? 'selected' : ''}>${n}</option>`).join(''))}</select></div>
               </div>
               <div class="field" id="otherWrap" ${niche === 'other' ? '' : 'hidden'}><input type="text" name="other" placeholder="Your niche, in a word or two" value="${last.other || ''}" aria-label="Your niche"></div>
+              <div class="optq bizq"><div class="ql">Is this a business account?</div>
+                <div class="chips" role="radiogroup" aria-label="Business account"><button type="button" class="chip ${last.is_business ? '' : 'on'}" data-biz="no" role="radio" aria-checked="${!last.is_business}">No — I'm a creator</button><button type="button" class="chip ${last.is_business ? 'on' : ''}" data-biz="yes" role="radio" aria-checked="${!!last.is_business}">Yes</button></div>
+                <div class="hint" id="bizHint" ${last.is_business ? '' : 'hidden'}>Business plans are coming — you'll get the creator scoring today and a note when the business version is ready.</div></div>
               <div class="chips" role="radiogroup" aria-label="Platform">
                 ${raw(LIVE.map(([k, n]) => h`<button type="button" class="chip ${k === platform ? 'on' : ''}" data-platform="${k}" role="radio" aria-checked="${k === platform}">${n}</button>`).join(''))}
                 ${raw(SOON.map(([k, n]) => h`<button type="button" class="chip soon" data-soon="${k}">${n} · soon</button>`).join(''))}
@@ -240,6 +243,12 @@
     const form = $view.querySelector('#evalForm');
     let chosenPlatform = platform;
     let chosenHorizon = last.horizon || null;
+    let chosenBiz = !!last.is_business;
+    form.querySelectorAll('[data-biz]').forEach(b => b.addEventListener('click', () => {
+      chosenBiz = b.dataset.biz === 'yes';
+      form.querySelectorAll('[data-biz]').forEach(x => { const on = (x.dataset.biz === 'yes') === chosenBiz; x.classList.toggle('on', on); x.setAttribute('aria-checked', on); });
+      const hint = form.querySelector('#bizHint'); if (hint) hint.hidden = !chosenBiz;
+    }));
     form.querySelectorAll('[data-horizon]').forEach(b => b.addEventListener('click', () => {
       chosenHorizon = chosenHorizon === b.dataset.horizon ? null : b.dataset.horizon; // tap again to clear
       form.querySelectorAll('[data-horizon]').forEach(x => { const on = x.dataset.horizon === chosenHorizon; x.classList.toggle('on', on); x.setAttribute('aria-checked', on); });
@@ -278,6 +287,7 @@
         email: form.email.value.trim(),
         other: otherText,
         horizon: chosenHorizon || undefined,
+        is_business: chosenBiz || undefined,
       };
       if (chosenHorizon) { payload.plan_context = { ...(sget('sc_plan_context', null) || {}), horizon: chosenHorizon }; sset('sc_plan_context', payload.plan_context); }
       const problems = [];
@@ -307,6 +317,7 @@
       const ctx = payload.plan_context || sget('sc_plan_context', null);
       if (ctx) body.plan_context = ctx;
       if (payload.rerun_of) body.rerun_of = payload.rerun_of;
+      if (payload.is_business) body.is_business = true;
       const res = await api('/evaluate/social-snapshot', { method: 'POST', body: JSON.stringify(body) });
       sset('sc_job_' + res.job_id, { ...payload, submitted_at: Date.now() });
       go('#/evaluating/' + encodeURIComponent(res.job_id));
@@ -980,6 +991,8 @@
         <div class="field"><label for="suEmail">Email</label><input id="suEmail" type="email" name="email" autocomplete="email" placeholder="you@email.com" value="${sget('sc_form', {}).email || ''}"></div>
         <div class="field"><label for="suPass">Password</label><input id="suPass" type="password" name="password" autocomplete="new-password" placeholder="At least 8 characters"></div>
         <div class="field"><label for="suPass2">Confirm password</label><input id="suPass2" type="password" name="password_confirm" autocomplete="new-password" placeholder="••••••••••"></div>
+        <div class="field"><label for="suNiche">Your niche</label><div class="selwrap"><select id="suNiche" name="niche">${raw(NICHES.map(([k, n]) => h`<option value="${k}" ${k === (sget('sc_form', {}).category || 'fitness_creator') ? 'selected' : ''}>${n}</option>`).join(''))}</select></div></div>
+        <label class="check"><input type="checkbox" name="is_business" ${sget('sc_form', {}).is_business ? 'checked' : ''}> This is a business account</label>
         <label class="check"><input type="checkbox" name="consent"> I agree to the <a href="#/legal/terms">Terms</a> and <a href="#/legal/privacy">Privacy Policy</a>.</label>
         <div class="form-error" id="signupError" hidden></div>
         <button class="btn" type="submit">Create account</button>
@@ -995,7 +1008,7 @@
       if (!form.consent.checked) { err.textContent = 'Please agree to the Terms and Privacy Policy.'; err.hidden = false; return; }
       err.hidden = true; const btn = form.querySelector('button[type=submit]'); btn.disabled = true; btn.textContent = 'Creating…';
       try {
-        const res = await api('/auth/signup', { method: 'POST', body: JSON.stringify({ email, password: pass, company_name: name || null }) }, { allow401: true });
+        const res = await api('/auth/signup', { method: 'POST', body: JSON.stringify({ email, password: pass, company_name: name || null, is_business: !!form.is_business?.checked, niche: form.niche?.value || undefined }) }, { allow401: true });
         const t = res.token || res.access_token; if (!t) throw new Error('No token in response');
         setToken(t); sessionStorage.removeItem('sc_next');
         const pendingUnlock = sget('sc_unlock_once', null);
@@ -1222,6 +1235,11 @@
         <div class="fine">Share as a link: <code>${location.origin}/?promo=CODE</code> — it applies itself.</div>
       </section>
 
+      <section class="card"><h2>Phase 2 waitlist <span class="fine">accounts and reports flagged as a business</span></h2>
+        <div id="bizList" class="fine">Loading…</div>
+        <a class="btn ghost sm" id="bizCsv" href="#" style="margin-top:10px">Download CSV</a>
+      </section>
+
       <section class="card"><h2>Recent reports <span class="fine">last ${reports.reports.length}</span></h2>
         <div class="alist">${raw(reports.reports.map(reportRow).join('') || '<div class="fine">None yet.</div>')}</div>
       </section>
@@ -1231,6 +1249,13 @@
       </section>
     </div></div>${raw(footer())}`;
 
+    // business-flagged accounts (phase 2 waitlist)
+    api('/admin/business-accounts').then(d => { const el = $view.querySelector('#bizList'); el.textContent = `${d.users.length} account${d.users.length === 1 ? '' : 's'} · ${d.reports.length} report${d.reports.length === 1 ? '' : 's'} flagged`; }).catch(() => { });
+    $view.querySelector('#bizCsv').addEventListener('click', async e => {
+      e.preventDefault();
+      try { const res = await fetch(API + '/admin/business-accounts?format=csv', { headers: { Authorization: 'Bearer ' + token() } }); const blob = await res.blob(); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'business-accounts.csv'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); }
+      catch (e2) { toast(e2.message); }
+    });
     // promo list + create
     const kindLabel = p => p.kind === 'free_months' ? `${p.value} month${p.value === 1 ? '' : 's'} free` : p.kind === 'percent' ? `${p.value}% off` : p.kind === 'amount' ? `$${(p.value / 100).toFixed(p.value % 100 ? 2 : 0)} off` : 'free 60-day plan';
     const applyLabel = a => ({ any: 'any', growth_plan: 'Growth Plan', plan_unlock: '60-day' }[a] || a);

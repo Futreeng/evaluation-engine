@@ -137,6 +137,8 @@ async function initSchema() {
       )`);
     await client.query(`ALTER TABLE entitlements ADD COLUMN IF NOT EXISTS cancel_at BIGINT`);
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_paused BOOLEAN DEFAULT FALSE`);
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_business BOOLEAN DEFAULT FALSE`);
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS niche TEXT`);
     await client.query(`
       CREATE TABLE IF NOT EXISTS growth_engine_password_resets (
         token_hash TEXT PRIMARY KEY,
@@ -247,7 +249,7 @@ async function createUser(email, passwordHash, companyName = null) {
 
 function userRow(row) {
   return row
-    ? { userId: row.user_id, email: row.email, passwordHash: row.password_hash, companyName: row.company_name, createdAt: Number(row.created_at), updatedAt: Number(row.updated_at), emailPaused: !!row.email_paused }
+    ? { userId: row.user_id, email: row.email, passwordHash: row.password_hash, companyName: row.company_name, createdAt: Number(row.created_at), updatedAt: Number(row.updated_at), emailPaused: !!row.email_paused, isBusiness: !!row.is_business, niche: row.niche || null }
     : null;
 }
 async function getUserByEmail(email) {
@@ -255,6 +257,17 @@ async function getUserByEmail(email) {
 }
 async function getUserById(userId) {
   return userRow((await q(`SELECT * FROM users WHERE user_id = $1`, [userId])).rows[0]);
+}
+async function setUserProfile(userId, { isBusiness, niche } = {}) {
+  if (isBusiness !== undefined) await q(`UPDATE users SET is_business = $1, updated_at = $2 WHERE user_id = $3`, [!!isBusiness, Date.now(), userId]);
+  if (niche !== undefined) await q(`UPDATE users SET niche = $1, updated_at = $2 WHERE user_id = $3`, [niche || null, Date.now(), userId]);
+  return getUserById(userId);
+}
+async function listBusinessAccounts() {
+  const users = (await q(`SELECT user_id, email, niche, created_at FROM users WHERE is_business = TRUE ORDER BY created_at DESC`)).rows.map((u) => ({ ...u, created_at: Number(u.created_at) }));
+  const reports = (await q(`SELECT r.account_id, r.handle, r.platform, r.category, r.generated_at, r.report_body, u.email AS user_email FROM growth_engine_reports r LEFT JOIN users u ON u.user_id = r.account_id WHERE r.report_body LIKE '%"is_business_account":true%' ORDER BY r.generated_at DESC NULLS LAST`)).rows
+    .map((r) => { const b = parseJson(r.report_body) || {}; return { account_id: r.account_id, email: b.email || r.user_email || null, handle: r.handle, platform: r.platform, category: r.category, overall: b.scores?.overall ?? null, generated_at: Number(r.generated_at) }; });
+  return { users, reports };
 }
 async function setEmailPaused(userId, paused) {
   await q(`UPDATE users SET email_paused = $1, updated_at = $2 WHERE user_id = $3`, [!!paused, Date.now(), userId]);
@@ -731,6 +744,8 @@ module.exports = {
   updateUserPassword,
   setEmailPaused,
   isEmailPaused,
+  setUserProfile,
+  listBusinessAccounts,
   // Jobs
   createJob,
   getJob,

@@ -23,7 +23,7 @@ async function verifyJWT(token) {
   }
 }
 
-async function signup(email, password, companyName) {
+async function signup(email, password, companyName, profile = null) {
   if (!email || !password) {
     throw new Error("Email and password required");
   }
@@ -36,7 +36,8 @@ async function signup(email, password, companyName) {
   const salt = await bcrypt.genSalt(10);
   const passwordHash = await bcrypt.hash(password, salt);
 
-  const user = await geDb.createUser(email, passwordHash, companyName);
+  let user = await geDb.createUser(email, passwordHash, companyName);
+  if (profile && (profile.isBusiness !== undefined || profile.niche !== undefined)) { try { user = await geDb.setUserProfile(user.userId, profile); } catch { /* optional */ } }
   // Claim any free reports this email ran before signing up.
   try { await geDb.adoptAnonymousReports(user.userId, email); } catch (err) { console.warn("[Auth] adopt reports failed:", err.message); }
 

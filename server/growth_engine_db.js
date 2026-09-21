@@ -167,6 +167,9 @@ function initSchema() {
   try { db.run(`ALTER TABLE entitlements ADD COLUMN cancel_at INTEGER`); } catch { /* exists */ }
   // "Pause these emails": check-ins, score changes and plan-ended stop; reset + report-ready still send.
   try { db.run(`ALTER TABLE users ADD COLUMN email_paused INTEGER DEFAULT 0`); } catch { /* exists */ }
+  // Phase-2 signals (spec 1.9): business flag + confirmed niche on the account
+  try { db.run(`ALTER TABLE users ADD COLUMN is_business INTEGER DEFAULT 0`); } catch { /* exists */ }
+  try { db.run(`ALTER TABLE users ADD COLUMN niche TEXT`); } catch { /* exists */ }
 
   // Password reset tokens: sha256 of the emailed token, single use, 1h.
   db.run(`
@@ -1105,6 +1108,8 @@ async function getUserByEmail(email) {
     createdAt: row[columns.indexOf("created_at")],
     updatedAt: row[columns.indexOf("updated_at")],
     emailPaused: columns.includes("email_paused") ? !!row[columns.indexOf("email_paused")] : false,
+    isBusiness: columns.includes("is_business") ? !!row[columns.indexOf("is_business")] : false,
+    niche: columns.includes("niche") ? row[columns.indexOf("niche")] || null : null,
   };
 }
 
@@ -1131,9 +1136,26 @@ async function getUserById(userId) {
     createdAt: row[columns.indexOf("created_at")],
     updatedAt: row[columns.indexOf("updated_at")],
     emailPaused: columns.includes("email_paused") ? !!row[columns.indexOf("email_paused")] : false,
+    isBusiness: columns.includes("is_business") ? !!row[columns.indexOf("is_business")] : false,
+    niche: columns.includes("niche") ? row[columns.indexOf("niche")] || null : null,
   };
 }
 
+async function setUserProfile(userId, { isBusiness, niche } = {}) {
+  if (!db) throw new Error("Database not initialized");
+  if (isBusiness !== undefined) db.run(`UPDATE users SET is_business = ?, updated_at = ? WHERE user_id = ?`, [isBusiness ? 1 : 0, Date.now(), userId]);
+  if (niche !== undefined) db.run(`UPDATE users SET niche = ?, updated_at = ? WHERE user_id = ?`, [niche || null, Date.now(), userId]);
+  saveDb();
+  return getUserById(userId);
+}
+// Phase-2 waitlist: every account or report flagged as a business.
+async function listBusinessAccounts() {
+  if (!db) throw new Error("Database not initialized");
+  const users = rowsOf(`SELECT user_id, email, niche, created_at FROM users WHERE is_business = 1 ORDER BY created_at DESC`);
+  const reports = rowsOf(`SELECT r.account_id, r.business_handle AS handle, r.business_platform AS platform, r.business_category AS category, r.generated_at, r.report_body, u.email AS user_email FROM growth_engine_reports r LEFT JOIN users u ON u.user_id = r.account_id WHERE r.report_body LIKE '%"is_business_account":true%' ORDER BY r.generated_at DESC`)
+    .map((r) => { let b = {}; try { b = JSON.parse(r.report_body); } catch { /* skip */ } return { account_id: r.account_id, email: b.email || r.user_email || null, handle: r.handle, platform: r.platform, category: r.category, overall: b.scores?.overall ?? null, generated_at: Number(r.generated_at) }; });
+  return { users: users.map((u) => ({ ...u, created_at: Number(u.created_at) })), reports };
+}
 async function setEmailPaused(userId, paused) {
   if (!db) throw new Error("Database not initialized");
   db.run(`UPDATE users SET email_paused = ?, updated_at = ? WHERE user_id = ?`, [paused ? 1 : 0, Date.now(), userId]);
@@ -1215,4 +1237,6 @@ module.exports = {
   updateUserPassword,
   setEmailPaused,
   isEmailPaused,
+  setUserProfile,
+  listBusinessAccounts,
 };

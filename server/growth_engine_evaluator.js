@@ -680,6 +680,7 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
       platform,
       category,
       business_name: null,
+      is_business_account: !!inputParams.is_business,
       followers,
     },
     generated_at: Date.now(),
@@ -959,6 +960,7 @@ async function evaluateTier2(accountId, inputParams) {
       platform,
       category,
       business_name: null,
+      is_business_account: !!inputParams.is_business,
     },
     generated_at: Date.now(),
     refresh_due_at: Date.now() + 14 * 24 * 60 * 60 * 1000, // 14 days for bi-weekly refresh
