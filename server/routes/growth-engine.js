@@ -338,7 +338,11 @@ router.post("/events", optionalAuth, (req, res) => {
   res.json({ ok: true });
 });
 
-router.post("/evaluate/social-snapshot", optionalAuth, validateEvaluationRequest, async (req, res) => {
+// Per-IP ceiling on evaluations (spec 1.5): a burst from one address is a
+// script, not a creator. Paid runs are already metered per account.
+const evaluateLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: Number(process.env.EVALS_PER_IP_PER_HOUR || 10), standardHeaders: true, legacyHeaders: false, message: { error: "That's a lot of evaluations from one connection. Try again in an hour.", code: "IP_LIMIT_REACHED", status: 429 } });
+
+router.post("/evaluate/social-snapshot", evaluateLimiter, optionalAuth, validateEvaluationRequest, async (req, res) => {
   try {
     const { handle, platform, category } = req.body;
     const email = req.body.email || req.user?.email || null;
@@ -390,6 +394,23 @@ router.post("/evaluate/social-snapshot", optionalAuth, validateEvaluationRequest
       if (existing && existing.jobId) {
         // Same account is being scored right now — hand back that job.
         return res.json({ job_id: existing.jobId, status: "queued", tier, deduplicated: true });
+      }
+      // …and per email (spec 1.5): a handle is the thing that costs money, but
+      // one person scoring twenty accounts on one address is the same leak.
+      const perEmail = Number(process.env.FREE_SNAPSHOTS_PER_EMAIL || 1);
+      if (email && Number.isFinite(perEmail) && perEmail > 0) {
+        const used = await geDb.countFreeSnapshotsByEmail(email);
+        if (used >= perEmail) {
+          const prior = await geDb.latestFreeSnapshotForEmail(email).catch(() => null);
+          return res.status(402).json({
+            error: `That email has already had its free Snapshot. Open your report, or start a Growth Plan to score more accounts.`,
+            code: "FREE_LIMIT_REACHED",
+            status: 402,
+            report_id: prior?.reportId || null,
+            generated_at: prior?.generatedAt || null,
+            upgrade_tier: "growth_plan",
+          });
+        }
       }
     }
 

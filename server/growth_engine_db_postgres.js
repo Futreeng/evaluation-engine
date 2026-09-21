@@ -366,6 +366,11 @@ async function adoptAnonymousReports(accountId, email) {
 }
 
 // Free-tier quota: non-failed snapshot jobs for an email.
+async function latestFreeSnapshotForEmail(email) {
+  const r = await q(`SELECT result_payload, created_at FROM growth_engine_jobs WHERE tier = 'social_snapshot' AND status = 'complete' AND lower(input_params->>'email') = $1 ORDER BY created_at DESC LIMIT 1`, [String(email).trim().toLowerCase()]);
+  const row = r.rows[0]; if (!row) return null;
+  const p = parseJson(row.result_payload) || {}; return { reportId: p.report_id || null, generatedAt: Number(row.created_at) };
+}
 async function countFreeSnapshotsByEmail(email) {
   const r = await q(
     `SELECT COUNT(*) AS n FROM growth_engine_jobs
@@ -731,6 +736,7 @@ module.exports = {
   getJob,
   updateJobStatus,
   countFreeSnapshotsByEmail,
+  latestFreeSnapshotForEmail,
   findFreeSnapshotForHandle,
   adoptAnonymousReports,
   getCachedProfile,

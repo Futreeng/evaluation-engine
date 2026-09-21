@@ -199,6 +199,8 @@
       if (!handle || !body.platform || !body.category || !body.email) return json(400, { error: 'handle, platform, category and email are required', code: 'INVALID_HANDLE' });
       const paid = entitlement.current_tier !== 'social_snapshot' && (init.headers || {}).Authorization;
       const prior = [...jobs.values()].find(j => !j.paid && !j.fail && j.report && j.handle === handle.toLowerCase() && j.platform === body.platform);
+      const priorEmail = !paid && [...jobs.values()].find(j => !j.paid && !j.fail && j.report && j.email === body.email);
+      if (!paid && !prior && priorEmail) return json(402, { error: 'That email has already had its free Snapshot. Open your report, or start a Growth Plan to score more accounts.', code: 'FREE_LIMIT_REACHED', report_id: priorEmail.report.report_id, generated_at: priorEmail.report.created_at, upgrade_tier: 'growth_plan' });
       if (!paid && prior) return json(402, { error: `@${handle} has already been scored for free. Open that report, or start a Growth Plan to score it again and watch it change.`, code: 'FREE_LIMIT_REACHED', report_id: prior.report.report_id, generated_at: prior.report.created_at, upgrade_tier: 'growth_plan' });
       const id = 'job_' + Math.random().toString(36).slice(2, 10);
       jobs.set(id, { paid: !!paid,

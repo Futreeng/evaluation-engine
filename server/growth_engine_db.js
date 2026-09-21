@@ -532,6 +532,15 @@ async function countFreeSnapshotsByEmail(email) {
   return result.length ? Number(result[0].values[0][0]) : 0;
 }
 
+// Latest completed free report for an email (any handle) — what the 402 points at.
+async function latestFreeSnapshotForEmail(email) {
+  if (!db) throw new Error("Database not initialized");
+  const needle = `%"email":${JSON.stringify(String(email).trim().toLowerCase())}%`;
+  const r = rowsOf(`SELECT result_payload, created_at FROM growth_engine_jobs WHERE tier = 'social_snapshot' AND status = 'complete' AND lower(input_params) LIKE ? ORDER BY created_at DESC LIMIT 1`, [needle]);
+  if (!r.length) return null;
+  try { const p = JSON.parse(r[0].result_payload); return { reportId: p.report_id || null, generatedAt: Number(r[0].created_at) }; } catch { return null; }
+}
+
 async function getJob(jobId) {
   if (!db) throw new Error("Database not initialized");
 
@@ -1151,6 +1160,7 @@ async function updateUserPassword(userId, passwordHash) {
 
 module.exports = {
   countFreeSnapshotsByEmail,
+  latestFreeSnapshotForEmail,
   findFreeSnapshotForHandle,
   adoptAnonymousReports,
   getCachedProfile,
