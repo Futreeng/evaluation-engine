@@ -135,6 +135,48 @@ async function initSchema() {
         platform TEXT NOT NULL,
         created_at BIGINT NOT NULL
       )`);
+    await client.query(`ALTER TABLE entitlements ADD COLUMN IF NOT EXISTS cancel_at BIGINT`);
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_paused BOOLEAN DEFAULT FALSE`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_password_resets (
+        token_hash TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        expires_at BIGINT NOT NULL,
+        used_at BIGINT
+      )`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_promo_codes (
+        code TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        value INTEGER NOT NULL DEFAULT 0,
+        applies_to TEXT NOT NULL DEFAULT 'any',
+        max_redemptions INTEGER,
+        redemptions INTEGER NOT NULL DEFAULT 0,
+        expires_at BIGINT,
+        active BOOLEAN NOT NULL DEFAULT TRUE,
+        note TEXT,
+        stripe_coupon_id TEXT,
+        created_at BIGINT NOT NULL
+      )`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_promo_redemptions (
+        id TEXT PRIMARY KEY,
+        code TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        product TEXT NOT NULL,
+        amount_off INTEGER NOT NULL DEFAULT 0,
+        created_at BIGINT NOT NULL,
+        UNIQUE (code, account_id)
+      )`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_plan_context (
+        id TEXT PRIMARY KEY,
+        account_id TEXT NOT NULL,
+        handle TEXT NOT NULL,
+        platform TEXT NOT NULL,
+        context TEXT NOT NULL,
+        updated_at BIGINT NOT NULL
+      )`);
     await client.query(`
       CREATE TABLE IF NOT EXISTS growth_engine_tier_history (
         id TEXT PRIMARY KEY,
@@ -174,7 +216,7 @@ async function createUser(email, passwordHash, companyName = null) {
 
 function userRow(row) {
   return row
-    ? { userId: row.user_id, email: row.email, passwordHash: row.password_hash, companyName: row.company_name, createdAt: Number(row.created_at), updatedAt: Number(row.updated_at) }
+    ? { userId: row.user_id, email: row.email, passwordHash: row.password_hash, companyName: row.company_name, createdAt: Number(row.created_at), updatedAt: Number(row.updated_at), emailPaused: !!row.email_paused }
     : null;
 }
 async function getUserByEmail(email) {
@@ -182,6 +224,14 @@ async function getUserByEmail(email) {
 }
 async function getUserById(userId) {
   return userRow((await q(`SELECT * FROM users WHERE user_id = $1`, [userId])).rows[0]);
+}
+async function setEmailPaused(userId, paused) {
+  await q(`UPDATE users SET email_paused = $1, updated_at = $2 WHERE user_id = $3`, [!!paused, Date.now(), userId]);
+  return getUserById(userId);
+}
+async function isEmailPaused(email) {
+  const u = await getUserByEmail(String(email || "").toLowerCase());
+  return !!(u && u.emailPaused);
 }
 async function updateUserPassword(userId, passwordHash) {
   await q(`UPDATE users SET password_hash = $1, updated_at = $2 WHERE user_id = $3`, [passwordHash, Date.now(), userId]);
@@ -369,8 +419,39 @@ function entRow(row) {
         billingPeriodStart: row.billing_period_start ? Number(row.billing_period_start) : null, billing_period_start: row.billing_period_start ? Number(row.billing_period_start) : null,
         billingPeriodEnd: row.billing_period_end ? Number(row.billing_period_end) : null, billing_period_end: row.billing_period_end ? Number(row.billing_period_end) : null,
         stripeSubscriptionId: row.stripe_subscription_id || null,
+        cancelAt: row.cancel_at ? Number(row.cancel_at) : null, cancel_at: row.cancel_at ? Number(row.cancel_at) : null,
       }
     : null;
+}
+async function getEffectiveEntitlement(accountId) {
+  const ent = await getOrCreateEntitlement(accountId);
+  if (ent.cancelAt && ent.cancelAt <= Date.now() && ent.currentTier !== "social_snapshot") {
+    await upgradeTier(accountId, "social_snapshot");
+    await q(`UPDATE entitlements SET cancel_at = NULL, updated_at = $1 WHERE user_id = $2`, [Date.now(), accountId]);
+    return getEntitlement(accountId);
+  }
+  return ent;
+}
+async function setCancelAt(accountId, cancelAt) {
+  await getOrCreateEntitlement(accountId);
+  await q(`UPDATE entitlements SET cancel_at = $1, updated_at = $2 WHERE user_id = $3`, [cancelAt || null, Date.now(), accountId]);
+  return getEntitlement(accountId);
+}
+async function setBillingPeriod(accountId, start, end) {
+  await getOrCreateEntitlement(accountId);
+  await q(`UPDATE entitlements SET billing_period_start = $1, billing_period_end = $2, updated_at = $3 WHERE user_id = $4`, [start || null, end || null, Date.now(), accountId]);
+  return getEntitlement(accountId);
+}
+async function createPasswordReset(userId, tokenHash, expiresAt) {
+  await q(`DELETE FROM growth_engine_password_resets WHERE user_id = $1 OR expires_at < $2`, [userId, Date.now()]);
+  await q(`INSERT INTO growth_engine_password_resets (token_hash, user_id, expires_at) VALUES ($1, $2, $3)`, [tokenHash, userId, expiresAt]);
+}
+async function consumePasswordReset(tokenHash) {
+  const r = await q(`SELECT user_id, expires_at, used_at FROM growth_engine_password_resets WHERE token_hash = $1`, [tokenHash]);
+  const row = r.rows[0];
+  if (!row || row.used_at || Number(row.expires_at) < Date.now()) return null;
+  await q(`UPDATE growth_engine_password_resets SET used_at = $1 WHERE token_hash = $2`, [Date.now(), tokenHash]);
+  return row.user_id;
 }
 async function getEntitlement(accountId) {
   return entRow((await q(`SELECT * FROM entitlements WHERE user_id = $1`, [accountId])).rows[0]);
@@ -420,6 +501,90 @@ async function deleteAccount(accountId) {
 async function addWaitlist(email, platform) {
   await q(`INSERT INTO growth_engine_waitlist (id, email, platform, created_at) VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO NOTHING`,
     [`${platform}|${email}`, email, platform, Date.now()]);
+}
+
+async function getPlanContext(accountId, handle, platform) {
+  const r = await q(`SELECT context, updated_at FROM growth_engine_plan_context WHERE id = $1`, [`${accountId}|${platform}|${String(handle).toLowerCase()}`]);
+  if (!r.rows.length) return null;
+  try { return { ...JSON.parse(r.rows[0].context), updated_at: Number(r.rows[0].updated_at) }; } catch { return null; }
+}
+async function setPlanContext(accountId, handle, platform, context) {
+  const { updated_at, ...ctx } = context || {};
+  const now = Date.now();
+  await q(`INSERT INTO growth_engine_plan_context (id, account_id, handle, platform, context, updated_at) VALUES ($1, $2, $3, $4, $5, $6)
+           ON CONFLICT (id) DO UPDATE SET context = EXCLUDED.context, updated_at = EXCLUDED.updated_at`,
+    [`${accountId}|${platform}|${String(handle).toLowerCase()}`, accountId, String(handle).toLowerCase(), platform, JSON.stringify(ctx), now]);
+  return { ...ctx, updated_at: now };
+}
+async function listPaidReportsBetween(fromTs, toTs) {
+  const r = await q(`SELECT * FROM growth_engine_reports WHERE tier <> 'social_snapshot' AND generated_at >= $1 AND generated_at <= $2 ORDER BY generated_at ASC`, [fromTs, toTs]);
+  return r.rows.map(reportRow);
+}
+
+
+// ===================== ADMIN =====================
+async function adminOverview() {
+  const now = Date.now(), day = 86400000, today = dayKey();
+  const usage = (await q(`SELECT kind, SUM(count) AS n FROM growth_engine_usage WHERE day = $1 GROUP BY kind`, [today])).rows;
+  const u = Object.fromEntries(usage.map((r) => [r.kind, Number(r.n)]));
+  const tiers = (await q(`SELECT current_tier, COUNT(*) AS n, SUM(CASE WHEN cancel_at IS NOT NULL THEN 1 ELSE 0 END) AS pending FROM entitlements GROUP BY current_tier`)).rows;
+  const s7 = Number((await q(`SELECT COUNT(*) AS n FROM users WHERE created_at > $1`, [now - 7 * day])).rows[0].n);
+  const s30 = Number((await q(`SELECT COUNT(*) AS n FROM users WHERE created_at > $1`, [now - 30 * day])).rows[0].n);
+  const reports = (await q(`SELECT tier, COUNT(*) AS n FROM growth_engine_reports WHERE generated_at > $1 GROUP BY tier`, [now - day])).rows;
+  const oneTime = Number((await q(`SELECT COUNT(*) AS n FROM growth_engine_reports WHERE report_body LIKE '%"one_time_unlock":{%'`)).rows[0].n);
+  const jobs = (await q(`SELECT status, COUNT(*) AS n FROM growth_engine_jobs WHERE created_at > $1 GROUP BY status`, [now - day])).rows;
+  const waitlist = (await q(`SELECT platform, COUNT(*) AS n FROM growth_engine_waitlist GROUP BY platform ORDER BY n DESC`)).rows;
+  const users = Number((await q(`SELECT COUNT(*) AS n FROM users`)).rows[0].n);
+  return {
+    today: { free_scores: u.free_eval || 0, paid_runs: u.eval || 0, competitor_pulls: u.competitor || 0, jobs: Object.fromEntries(jobs.map((j) => [j.status, Number(j.n)])), reports: Object.fromEntries(reports.map((r) => [r.tier, Number(r.n)])) },
+    people: { users, signups_7d: s7, signups_30d: s30, tiers: tiers.map((t) => ({ tier: t.current_tier, n: Number(t.n), cancel_pending: Number(t.pending) })), one_time_buyers: oneTime, waitlist: waitlist.map((w) => ({ platform: w.platform, n: Number(w.n) })) },
+  };
+}
+async function adminRecentReports(limit = 50) {
+  const r = await q(`SELECT report_id, account_id, tier, handle, platform, category, generated_at, report_body FROM growth_engine_reports ORDER BY generated_at DESC NULLS LAST LIMIT $1`, [limit]);
+  return r.rows.map((x) => { const b = parseJson(x.report_body) || {}; return { report_id: x.report_id, account_id: x.account_id, tier: x.tier, handle: x.handle, platform: x.platform, category: x.category, generated_at: Number(x.generated_at), overall: b.scores?.overall ?? null, email: b.email || null, one_time: !!b.one_time_unlock, partial: !!b.plan_incomplete }; });
+}
+async function adminFailedJobs(limit = 30) {
+  const r = await q(`SELECT job_id, account_id, tier, stage, error, input_params, created_at FROM growth_engine_jobs WHERE status = 'failed' ORDER BY created_at DESC LIMIT $1`, [limit]);
+  return r.rows.map((j) => { const p = parseJson(j.input_params) || {}; return { job_id: j.job_id, account_id: j.account_id, tier: j.tier, stage: j.stage, error: j.error, handle: p.handle, platform: p.platform, email: p.email || null, created_at: Number(j.created_at) }; });
+}
+async function adminFindAccount(query) {
+  const s = String(query || "").trim().toLowerCase().replace(/^@/, "");
+  if (!s) return null;
+  let user = await getUserByEmail(s);
+  if (!user) {
+    const r = await q(`SELECT account_id FROM growth_engine_reports WHERE lower(handle) = $1 AND account_id <> 'demo-account' ORDER BY generated_at DESC NULLS LAST LIMIT 1`, [s]);
+    if (r.rows[0]) user = await getUserById(r.rows[0].account_id);
+  }
+  if (!user) return null;
+  const ent = await getEffectiveEntitlement(user.userId);
+  const reports = (await listReportsByAccount(user.userId)).map((x) => ({ report_id: x.reportId, tier: x.tier, handle: x.business?.handle, platform: x.business?.platform, generated_at: x.generatedAt, overall: x.reportBody?.scores?.overall ?? null, moves_done: Object.keys(x.reportBody?.moves_done || {}).length, checkins: x.reportBody?.checkins || null, emails_sent: x.reportBody?.emails_sent || [], one_time: !!x.reportBody?.one_time_unlock }));
+  const ctx = (await q(`SELECT handle, platform, context, updated_at FROM growth_engine_plan_context WHERE account_id = $1`, [user.userId])).rows.map((c) => ({ handle: c.handle, platform: c.platform, ...(parseJson(c.context) || {}), updated_at: Number(c.updated_at) }));
+  const usage = (await q(`SELECT kind, count FROM growth_engine_usage WHERE account_id = $1 AND day = $2`, [user.userId, dayKey()])).rows;
+  return { user: { user_id: user.userId, email: user.email, created_at: user.createdAt, email_paused: !!user.emailPaused }, entitlement: { tier: ent.currentTier, cancel_at: ent.cancelAt || null, period_end: ent.billingPeriodEnd || null }, reports, plan_contexts: ctx, usage_today: Object.fromEntries(usage.map((x) => [x.kind, Number(x.count)])) };
+}
+
+
+// ===================== PROMO CODES =====================
+const promoRow = (r) => r ? { ...r, max_redemptions: r.max_redemptions == null ? null : Number(r.max_redemptions), redemptions: Number(r.redemptions || 0), expires_at: r.expires_at == null ? null : Number(r.expires_at), active: !!r.active, value: Number(r.value || 0), created_at: Number(r.created_at) } : null;
+async function createPromo(p) {
+  await q(`INSERT INTO growth_engine_promo_codes (code, kind, value, applies_to, max_redemptions, redemptions, expires_at, active, note, stripe_coupon_id, created_at) VALUES ($1, $2, $3, $4, $5, 0, $6, $7, $8, $9, $10)`,
+    [p.code, p.kind, p.value, p.applies_to, p.max_redemptions, p.expires_at, !!p.active, p.note || null, p.stripe_coupon_id || null, Date.now()]);
+  return getPromo(p.code);
+}
+async function getPromo(code) { return promoRow((await q(`SELECT * FROM growth_engine_promo_codes WHERE code = $1`, [String(code || "").toUpperCase()])).rows[0]); }
+async function listPromos() { return (await q(`SELECT * FROM growth_engine_promo_codes ORDER BY created_at DESC`)).rows.map(promoRow); }
+async function setPromoActive(code, active) { await q(`UPDATE growth_engine_promo_codes SET active = $1 WHERE code = $2`, [!!active, String(code).toUpperCase()]); return getPromo(code); }
+async function hasRedeemed(code, accountId) { return (await q(`SELECT 1 FROM growth_engine_promo_redemptions WHERE code = $1 AND account_id = $2`, [String(code).toUpperCase(), accountId])).rows.length > 0; }
+async function redeemPromo(code, accountId, product, amountOff) {
+  const c = String(code).toUpperCase();
+  await q(`INSERT INTO growth_engine_promo_redemptions (id, code, account_id, product, amount_off, created_at) VALUES ($1, $2, $3, $4, $5, $6)`, ["pr_" + uid(), c, accountId, product, Number(amountOff) || 0, Date.now()]);
+  await q(`UPDATE growth_engine_promo_codes SET redemptions = redemptions + 1 WHERE code = $1`, [c]);
+  return getPromo(c);
+}
+async function listRedemptions(code, limit = 100) {
+  const r = await q(`SELECT r.*, u.email FROM growth_engine_promo_redemptions r LEFT JOIN users u ON u.user_id = r.account_id WHERE r.code = $1 ORDER BY r.created_at DESC LIMIT $2`, [String(code).toUpperCase(), limit]);
+  return r.rows.map((x) => ({ ...x, amount_off: Number(x.amount_off), created_at: Number(x.created_at) }));
 }
 
 // ===================== CATEGORY BASELINES =====================
@@ -479,6 +644,8 @@ module.exports = {
   getUserByEmail,
   getUserById,
   updateUserPassword,
+  setEmailPaused,
+  isEmailPaused,
   // Jobs
   createJob,
   getJob,
@@ -493,6 +660,9 @@ module.exports = {
   getUsage,
   bumpUsage,
   addWaitlist,
+  getPlanContext,
+  setPlanContext,
+  listPaidReportsBetween,
   deleteAccount,
   // Reports
   createReport,
@@ -505,6 +675,16 @@ module.exports = {
   // Entitlements
   getOrCreateEntitlement,
   getEntitlement,
+  getEffectiveEntitlement,
+  adminOverview,
+  adminRecentReports,
+  adminFailedJobs,
+  adminFindAccount,
+  createPromo, getPromo, listPromos, setPromoActive, hasRedeemed, redeemPromo, listRedemptions,
+  setCancelAt,
+  setBillingPeriod,
+  createPasswordReset,
+  consumePasswordReset,
   upgradeTier,
   updateEntitlement,
   getTierHistory,

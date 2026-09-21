@@ -13,6 +13,29 @@ const path = require("path");
 const geDb = require("./growth_engine_db_select");
 const { compareCompetitors } = require("./growth_engine_competitors");
 const { saveReportAsMarkdown } = require("./report_saver");
+const mailer = require("./mailer");
+
+// Weekly refresh: does what the creator told us still match what they're
+// doing? At most one nudge per phase; the report and the score-changed
+// email carry it, one tap accepts it.
+function detectNudge(reportBody, prevReport, inputParams) {
+  const ctx = reportBody.plan_context;
+  if (!ctx || !inputParams.scheduled) return null;
+  const posts = Array.isArray(reportBody.recent_posts_dates) ? reportBody.recent_posts_dates : null;
+  const newPosts = Number(reportBody.posts_last_14d);
+  const movesDone = Object.keys(prevReport?.reportBody?.moves_done || {}).length;
+  const phase = Math.min(3, Math.floor((Date.now() - (reportBody.plan_started_at || Date.now())) / (30 * 86400000)) + 1);
+  const already = (prevReport?.reportBody?.nudges_sent || []).some((n) => n.phase === phase);
+  if (already) return null;
+  if (ctx.horizon === "fewer_shoots" && Number.isFinite(newPosts) && newPosts >= 6) {
+    return { key: "shooting_again", phase, title: "Looks like you're shooting again.", text: `${newPosts} new posts in two weeks — your plan was written for fewer shoots. Want it to use new footage?`, cta: "Yes, use new footage", apply: { horizon: "usual" } };
+  }
+  if ((ctx.hours === "5_10" || ctx.hours === "10plus") && Number.isFinite(newPosts) && newPosts === 0 && movesDone === 0) {
+    return { key: "slow", phase, title: "Slow fortnight.", text: "No posts and no moves marked done in two weeks. Want a lighter plan for the next 30 days?", cta: "Yes, lighten the plan", apply: { hours: "2_5" } };
+  }
+  void posts;
+  return null;
+}
 
 class JobQueue {
   constructor(numWorkers = 2) {
@@ -113,10 +136,23 @@ class JobQueue {
         console.warn("[Growth Engine] Baseline update failed:", err.message);
       }
 
-      // One-time unlock: full plan, but it never refreshes and says so.
+      // One-time unlock: a 60-day plan that never refreshes and says so.
       if (inputParams.one_time_unlock) {
         reportBody.refresh_due_at = null;
-        reportBody.one_time_unlock = { of: inputParams.unlock_of || null, payment_id: inputParams.payment_id || null };
+        reportBody.one_time_unlock = { of: inputParams.unlock_of || null, payment_id: inputParams.payment_id || null, days: 60 };
+      }
+      // When a plan started: a refresh or re-run inherits the original start
+      // so day-30/60 check-ins and the 60-day end are measured from purchase.
+      if (tier !== "social_snapshot") {
+        let started = Date.now();
+        if (inputParams.refresh_of || inputParams.rerun_of) {
+          try { const src = await geDb.getReport(inputParams.refresh_of || inputParams.rerun_of); if (src?.reportBody?.plan_started_at) started = src.reportBody.plan_started_at; } catch { /* keep now */ }
+        }
+        reportBody.plan_started_at = started;
+        if (inputParams.checkins) reportBody.checkins = inputParams.checkins;
+        // Recipient for scheduled emails (check-ins, plan ended). Owner-only
+        // reports, so this never leaves the account that owns it.
+        if (inputParams.email) reportBody.email = inputParams.email;
       }
 
       // (6) Followers on every report — the number a creator checks first.
@@ -137,6 +173,18 @@ class JobQueue {
             let movesDone = [];
             try { const prevReport = await geDb.getReport(prev.report_id); movesDone = Object.keys(prevReport?.reportBody?.moves_done || {}); } catch { /* fine */ }
             const followerDelta = Number.isFinite(prev.followers) && Number.isFinite(reportBody.business?.followers) ? reportBody.business.followers - prev.followers : null;
+            // Refreshes carry check-ins and nudge history forward.
+            try {
+              const prevReport = await geDb.getReport(prev.report_id);
+              if (inputParams.scheduled || inputParams.rerun_of) {
+                if (prevReport?.reportBody?.checkins && !reportBody.checkins) reportBody.checkins = prevReport.reportBody.checkins;
+                if (prevReport?.reportBody?.nudges_sent) reportBody.nudges_sent = prevReport.reportBody.nudges_sent;
+                if (prevReport?.reportBody?.emails_sent) reportBody.emails_sent = prevReport.reportBody.emails_sent;
+                if (prevReport?.reportBody?.moves_done && !reportBody.moves_done) reportBody.moves_done = prevReport.reportBody.moves_done;
+              }
+              const nudge = detectNudge(reportBody, prevReport, inputParams);
+              if (nudge) { reportBody.nudge = nudge; reportBody.nudges_sent = [...(reportBody.nudges_sent || []), { key: nudge.key, phase: nudge.phase, at: Date.now() }]; }
+            } catch { /* best-effort */ }
             reportBody.history = {
               runs: prior.length + 1,
               previous: { report_id: prev.report_id, generated_at: prev.generated_at, overall: prev.overall, followers: prev.followers ?? null },
@@ -180,6 +228,25 @@ class JobQueue {
 
       const { reportId } = await geDb.createReport(accountId, tier, inputParams, reportBody);
       reportBody.report_id = reportId;
+
+      // Emails: report ready on a fresh run; score changed on a weekly refresh.
+      try {
+        const to = inputParams.email || null;
+        const first = reportBody.growth_path?.phases?.[0];
+        const firstMove = first ? { action: first.visible_action, why: first.detail } : null;
+        const grade = reportBody.scores?.overall >= 70 ? "Strong" : reportBody.scores?.overall >= 40 ? "Fair" : "Weak";
+        if (inputParams.scheduled && reportBody.history) {
+          const h = reportBody.history;
+          const biggest = (h.delta_dimensions || []).filter((d) => d.delta != null).sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))[0];
+          if (h.delta_overall !== 0 || reportBody.nudge) {
+            await mailer.scoreChanged({ to, userId: accountId, handle: inputParams.handle, reportId, oldScore: h.previous.overall, newScore: reportBody.scores.overall, dimension: biggest?.label || "Overall", delta: biggest?.delta ?? h.delta_overall, movesDone: (h.moves_done_since || []).length, nudge: reportBody.nudge || null });
+          }
+        } else if (!inputParams.rerun_of && reportBody.scores) {
+          await mailer.reportReady({ to, handle: inputParams.handle, reportId, overall: reportBody.scores.overall, grade, summary: reportBody.scores.summary, firstMove, paid: tier !== "social_snapshot" });
+        }
+      } catch (err) {
+        console.warn("[JobQueue] email failed:", err.message);
+      }
 
       // Mark complete
       await geDb.updateJobStatus(jobId, "complete", {

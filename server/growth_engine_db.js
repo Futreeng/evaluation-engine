@@ -120,6 +120,19 @@ function initSchema() {
     )
   `);
 
+  // Plan context: the four intake answers (next 90 days, hours, goal, style)
+  // per account + handle + platform. Reused by every refresh and re-run.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS growth_engine_plan_context (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      handle TEXT NOT NULL,
+      platform TEXT NOT NULL,
+      context TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `);
+
   // Reports table: stores generated reports
   db.run(`
     CREATE TABLE IF NOT EXISTS growth_engine_reports (
@@ -147,6 +160,50 @@ function initSchema() {
       billing_period_end INTEGER,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
+    )
+  `);
+
+  // Cancel-at-period-end: tier stays until this timestamp, then reads as free.
+  try { db.run(`ALTER TABLE entitlements ADD COLUMN cancel_at INTEGER`); } catch { /* exists */ }
+  // "Pause these emails": check-ins, score changes and plan-ended stop; reset + report-ready still send.
+  try { db.run(`ALTER TABLE users ADD COLUMN email_paused INTEGER DEFAULT 0`); } catch { /* exists */ }
+
+  // Password reset tokens: sha256 of the emailed token, single use, 1h.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS growth_engine_password_resets (
+      token_hash TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      used_at INTEGER
+    )
+  `);
+
+
+  // Promo codes + redemptions (see growth_engine_promos.js for the rules)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS growth_engine_promo_codes (
+      code TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      value INTEGER NOT NULL DEFAULT 0,
+      applies_to TEXT NOT NULL DEFAULT 'any',
+      max_redemptions INTEGER,
+      redemptions INTEGER NOT NULL DEFAULT 0,
+      expires_at INTEGER,
+      active INTEGER NOT NULL DEFAULT 1,
+      note TEXT,
+      stripe_coupon_id TEXT,
+      created_at INTEGER NOT NULL
+    )
+  `);
+  db.run(`
+    CREATE TABLE IF NOT EXISTS growth_engine_promo_redemptions (
+      id TEXT PRIMARY KEY,
+      code TEXT NOT NULL,
+      account_id TEXT NOT NULL,
+      product TEXT NOT NULL,
+      amount_off INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      UNIQUE (code, account_id)
     )
   `);
 
@@ -357,6 +414,42 @@ async function addWaitlist(email, platform) {
   db.run(`INSERT OR REPLACE INTO growth_engine_waitlist (id, email, platform, created_at) VALUES (?, ?, ?, ?)`,
     [`${platform}|${email}`, email, platform, Date.now()]);
   saveDb();
+}
+
+async function getPlanContext(accountId, handle, platform) {
+  if (!db) throw new Error("Database not initialized");
+  const r = db.exec(`SELECT context, updated_at FROM growth_engine_plan_context WHERE id = ?`, [`${accountId}|${platform}|${String(handle).toLowerCase()}`]);
+  if (!r.length || !r[0].values.length) return null;
+  try { return { ...JSON.parse(r[0].values[0][0]), updated_at: r[0].values[0][1] }; } catch { return null; }
+}
+async function setPlanContext(accountId, handle, platform, context) {
+  if (!db) throw new Error("Database not initialized");
+  const { updated_at, ...ctx } = context || {};
+  db.run(`INSERT OR REPLACE INTO growth_engine_plan_context (id, account_id, handle, platform, context, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+    [`${accountId}|${platform}|${String(handle).toLowerCase()}`, accountId, String(handle).toLowerCase(), platform, JSON.stringify(ctx), Date.now()]);
+  saveDb();
+  return { ...ctx, updated_at: Date.now() };
+}
+
+// Paid reports generated inside a window — the scheduled-email sweeper uses
+// this to find plans at day 28 / 58 / 60.
+async function listPaidReportsBetween(fromTs, toTs) {
+  if (!db) throw new Error("Database not initialized");
+  const result = db.exec(
+    `SELECT * FROM growth_engine_reports WHERE tier != 'social_snapshot' AND generated_at >= ? AND generated_at <= ? ORDER BY generated_at ASC`,
+    [fromTs, toTs]
+  );
+  if (!result || result.length === 0) return [];
+  const columns = result[0].columns;
+  return result[0].values.map((row) => ({
+    reportId: row[columns.indexOf("report_id")],
+    accountId: row[columns.indexOf("account_id")],
+    tier: row[columns.indexOf("tier")],
+    business: { handle: row[columns.indexOf("business_handle")], platform: row[columns.indexOf("business_platform")], category: row[columns.indexOf("business_category")] },
+    generatedAt: row[columns.indexOf("generated_at")],
+    refreshDueAt: row[columns.indexOf("refresh_due_at")],
+    reportBody: JSON.parse(row[columns.indexOf("report_body")]),
+  }));
 }
 
 // Free-tier quota by account: has this handle on this platform already been
@@ -612,6 +705,104 @@ async function listReportsDueForRefresh(beforeTimestamp) {
   }));
 }
 
+
+// ===================== ADMIN =====================
+// Read-only aggregates for #/admin. Each returns plain objects.
+function rowsOf(sql, params = []) {
+  const r = db.exec(sql, params);
+  if (!r.length) return [];
+  const cols = r[0].columns;
+  return r[0].values.map((v) => Object.fromEntries(cols.map((c, i) => [c, v[i]])));
+}
+const one = (sql, params) => rowsOf(sql, params)[0] || {};
+async function adminOverview() {
+  if (!db) throw new Error("Database not initialized");
+  const now = Date.now(), day = 86400000, today = dayKey();
+  const usage = rowsOf(`SELECT kind, SUM(count) AS n FROM growth_engine_usage WHERE day = ? GROUP BY kind`, [today]);
+  const u = Object.fromEntries(usage.map((r) => [r.kind, Number(r.n)]));
+  const tiers = rowsOf(`SELECT current_tier, COUNT(*) AS n, SUM(CASE WHEN cancel_at IS NOT NULL THEN 1 ELSE 0 END) AS pending FROM entitlements GROUP BY current_tier`);
+  const signups = [7, 30].map((d) => Number(one(`SELECT COUNT(*) AS n FROM users WHERE created_at > ?`, [now - d * day]).n || 0));
+  const reports = rowsOf(`SELECT tier, COUNT(*) AS n FROM growth_engine_reports WHERE generated_at > ? GROUP BY tier`, [now - day]);
+  const oneTime = Number(one(`SELECT COUNT(*) AS n FROM growth_engine_reports WHERE report_body LIKE '%"one_time_unlock":{%'`).n || 0);
+  const jobs = rowsOf(`SELECT status, COUNT(*) AS n FROM growth_engine_jobs WHERE created_at > ? GROUP BY status`, [now - day]);
+  const waitlist = rowsOf(`SELECT platform, COUNT(*) AS n FROM growth_engine_waitlist GROUP BY platform ORDER BY n DESC`);
+  return {
+    today: { free_scores: u.free_eval || 0, paid_runs: u.eval || 0, competitor_pulls: u.competitor || 0, jobs: Object.fromEntries(jobs.map((j) => [j.status, Number(j.n)])), reports: Object.fromEntries(reports.map((r) => [r.tier, Number(r.n)])) },
+    people: { users: Number(one(`SELECT COUNT(*) AS n FROM users`).n || 0), signups_7d: signups[0], signups_30d: signups[1], tiers: tiers.map((t) => ({ tier: t.current_tier, n: Number(t.n), cancel_pending: Number(t.pending) })), one_time_buyers: oneTime, waitlist: waitlist.map((w) => ({ platform: w.platform, n: Number(w.n) })) },
+  };
+}
+async function adminRecentReports(limit = 50) {
+  if (!db) throw new Error("Database not initialized");
+  return rowsOf(`SELECT report_id, account_id, tier, business_handle AS handle, business_platform AS platform, business_category AS category, generated_at, report_body FROM growth_engine_reports ORDER BY generated_at DESC LIMIT ?`, [limit]).map((r) => {
+    let b = {}; try { b = JSON.parse(r.report_body); } catch { /* skip */ }
+    return { report_id: r.report_id, account_id: r.account_id, tier: r.tier, handle: r.handle, platform: r.platform, category: r.category, generated_at: Number(r.generated_at), overall: b.scores?.overall ?? null, email: b.email || null, one_time: !!b.one_time_unlock, partial: !!b.plan_incomplete };
+  });
+}
+async function adminFailedJobs(limit = 30) {
+  if (!db) throw new Error("Database not initialized");
+  return rowsOf(`SELECT job_id, account_id, tier, stage, error, input_params, created_at FROM growth_engine_jobs WHERE status = 'failed' ORDER BY created_at DESC LIMIT ?`, [limit]).map((j) => {
+    let p = {}; try { p = JSON.parse(j.input_params); } catch { /* skip */ }
+    return { job_id: j.job_id, account_id: j.account_id, tier: j.tier, stage: j.stage, error: j.error, handle: p.handle, platform: p.platform, email: p.email || null, created_at: Number(j.created_at) };
+  });
+}
+async function adminFindAccount(query) {
+  if (!db) throw new Error("Database not initialized");
+  const s = String(query || "").trim().toLowerCase().replace(/^@/, "");
+  if (!s) return null;
+  let user = await getUserByEmail(s);
+  if (!user) {
+    const r = one(`SELECT account_id FROM growth_engine_reports WHERE lower(business_handle) = ? AND account_id != 'demo-account' ORDER BY generated_at DESC LIMIT 1`, [s]);
+    if (r.account_id) user = await getUserById(r.account_id);
+  }
+  if (!user) return null;
+  const ent = await getEffectiveEntitlement(user.userId);
+  const reports = (await listReportsByAccount(user.userId)).map((r) => ({ report_id: r.reportId, tier: r.tier, handle: r.business?.handle, platform: r.business?.platform, generated_at: r.generatedAt, overall: r.reportBody?.scores?.overall ?? null, moves_done: Object.keys(r.reportBody?.moves_done || {}).length, checkins: r.reportBody?.checkins || null, emails_sent: r.reportBody?.emails_sent || [], one_time: !!r.reportBody?.one_time_unlock }));
+  const contexts = rowsOf(`SELECT handle, platform, context, updated_at FROM growth_engine_plan_context WHERE account_id = ?`, [user.userId]).map((c) => { let ctx = {}; try { ctx = JSON.parse(c.context); } catch { /* skip */ } return { handle: c.handle, platform: c.platform, ...ctx, updated_at: Number(c.updated_at) }; });
+  const usage = rowsOf(`SELECT kind, count FROM growth_engine_usage WHERE account_id = ? AND day = ?`, [user.userId, dayKey()]);
+  return { user: { user_id: user.userId, email: user.email, created_at: user.createdAt, email_paused: !!user.emailPaused }, entitlement: { tier: ent.currentTier, cancel_at: ent.cancelAt || null, period_end: ent.billingPeriodEnd || null }, reports, plan_contexts: contexts, usage_today: Object.fromEntries(usage.map((x) => [x.kind, Number(x.count)])) };
+}
+
+
+// ===================== PROMO CODES =====================
+const promoRow = (r) => r ? { ...r, max_redemptions: r.max_redemptions == null ? null : Number(r.max_redemptions), redemptions: Number(r.redemptions || 0), expires_at: r.expires_at == null ? null : Number(r.expires_at), active: !!r.active, value: Number(r.value || 0), created_at: Number(r.created_at) } : null;
+async function createPromo(p) {
+  if (!db) throw new Error("Database not initialized");
+  db.run(`INSERT INTO growth_engine_promo_codes (code, kind, value, applies_to, max_redemptions, redemptions, expires_at, active, note, stripe_coupon_id, created_at) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
+    [p.code, p.kind, p.value, p.applies_to, p.max_redemptions, p.expires_at, p.active ? 1 : 0, p.note || null, p.stripe_coupon_id || null, Date.now()]);
+  saveDb();
+  return getPromo(p.code);
+}
+async function getPromo(code) {
+  if (!db) throw new Error("Database not initialized");
+  return promoRow(rowsOf(`SELECT * FROM growth_engine_promo_codes WHERE code = ?`, [String(code || "").toUpperCase()])[0]);
+}
+async function listPromos() {
+  if (!db) throw new Error("Database not initialized");
+  return rowsOf(`SELECT * FROM growth_engine_promo_codes ORDER BY created_at DESC`).map(promoRow);
+}
+async function setPromoActive(code, active) {
+  if (!db) throw new Error("Database not initialized");
+  db.run(`UPDATE growth_engine_promo_codes SET active = ? WHERE code = ?`, [active ? 1 : 0, String(code).toUpperCase()]);
+  saveDb();
+  return getPromo(code);
+}
+async function hasRedeemed(code, accountId) {
+  if (!db) throw new Error("Database not initialized");
+  return rowsOf(`SELECT 1 AS x FROM growth_engine_promo_redemptions WHERE code = ? AND account_id = ?`, [String(code).toUpperCase(), accountId]).length > 0;
+}
+async function redeemPromo(code, accountId, product, amountOff) {
+  if (!db) throw new Error("Database not initialized");
+  const c = String(code).toUpperCase();
+  db.run(`INSERT INTO growth_engine_promo_redemptions (id, code, account_id, product, amount_off, created_at) VALUES (?, ?, ?, ?, ?, ?)`, ["pr_" + uid(), c, accountId, product, Number(amountOff) || 0, Date.now()]);
+  db.run(`UPDATE growth_engine_promo_codes SET redemptions = redemptions + 1 WHERE code = ?`, [c]);
+  saveDb();
+  return getPromo(c);
+}
+async function listRedemptions(code, limit = 100) {
+  if (!db) throw new Error("Database not initialized");
+  return rowsOf(`SELECT r.*, u.email FROM growth_engine_promo_redemptions r LEFT JOIN users u ON u.user_id = r.account_id WHERE r.code = ? ORDER BY r.created_at DESC LIMIT ?`, [String(code).toUpperCase(), limit]).map((r) => ({ ...r, amount_off: Number(r.amount_off), created_at: Number(r.created_at) }));
+}
+
 // ===================== ENTITLEMENT OPERATIONS =====================
 
 async function getOrCreateEntitlement(accountId) {
@@ -653,9 +844,55 @@ async function getEntitlement(accountId) {
     tierStartDate: row[columns.indexOf("tier_start_date")],
     billingPeriodStart: row[columns.indexOf("billing_period_start")],
     billingPeriodEnd: row[columns.indexOf("billing_period_end")],
+    cancelAt: columns.includes("cancel_at") ? row[columns.indexOf("cancel_at")] || null : null,
     createdAt: row[columns.indexOf("created_at")],
     updatedAt: row[columns.indexOf("updated_at")],
   };
+}
+
+// A cancelled plan keeps its tier until cancel_at, then reads as free. The
+// downgrade is applied lazily here so every caller sees the same answer.
+async function getEffectiveEntitlement(accountId) {
+  const ent = await getOrCreateEntitlement(accountId);
+  if (ent.cancelAt && ent.cancelAt <= Date.now() && ent.currentTier !== "social_snapshot") {
+    await upgradeTier(accountId, "social_snapshot");
+    db.run(`UPDATE entitlements SET cancel_at = NULL, updated_at = ? WHERE account_id = ?`, [Date.now(), accountId]);
+    saveDb();
+    return getEntitlement(accountId);
+  }
+  return ent;
+}
+async function setCancelAt(accountId, cancelAt) {
+  if (!db) throw new Error("Database not initialized");
+  await getOrCreateEntitlement(accountId);
+  db.run(`UPDATE entitlements SET cancel_at = ?, updated_at = ? WHERE account_id = ?`, [cancelAt || null, Date.now(), accountId]);
+  saveDb();
+  return getEntitlement(accountId);
+}
+async function setBillingPeriod(accountId, start, end) {
+  if (!db) throw new Error("Database not initialized");
+  await getOrCreateEntitlement(accountId);
+  db.run(`UPDATE entitlements SET billing_period_start = ?, billing_period_end = ?, updated_at = ? WHERE account_id = ?`, [start || null, end || null, Date.now(), accountId]);
+  saveDb();
+  return getEntitlement(accountId);
+}
+
+async function createPasswordReset(userId, tokenHash, expiresAt) {
+  if (!db) throw new Error("Database not initialized");
+  db.run(`DELETE FROM growth_engine_password_resets WHERE user_id = ? OR expires_at < ?`, [userId, Date.now()]);
+  db.run(`INSERT INTO growth_engine_password_resets (token_hash, user_id, expires_at, used_at) VALUES (?, ?, ?, NULL)`, [tokenHash, userId, expiresAt]);
+  saveDb();
+}
+// Returns the user id for a live token and burns it, or null.
+async function consumePasswordReset(tokenHash) {
+  if (!db) throw new Error("Database not initialized");
+  const r = db.exec(`SELECT user_id, expires_at, used_at FROM growth_engine_password_resets WHERE token_hash = ?`, [tokenHash]);
+  if (!r.length || !r[0].values.length) return null;
+  const [userId, expiresAt, usedAt] = r[0].values[0];
+  if (usedAt || expiresAt < Date.now()) return null;
+  db.run(`UPDATE growth_engine_password_resets SET used_at = ? WHERE token_hash = ?`, [Date.now(), tokenHash]);
+  saveDb();
+  return userId;
 }
 
 async function upgradeTier(accountId, newTier) {
@@ -750,6 +987,7 @@ async function getUserByEmail(email) {
     companyName: row[columns.indexOf("company_name")],
     createdAt: row[columns.indexOf("created_at")],
     updatedAt: row[columns.indexOf("updated_at")],
+    emailPaused: columns.includes("email_paused") ? !!row[columns.indexOf("email_paused")] : false,
   };
 }
 
@@ -775,7 +1013,19 @@ async function getUserById(userId) {
     companyName: row[columns.indexOf("company_name")],
     createdAt: row[columns.indexOf("created_at")],
     updatedAt: row[columns.indexOf("updated_at")],
+    emailPaused: columns.includes("email_paused") ? !!row[columns.indexOf("email_paused")] : false,
   };
+}
+
+async function setEmailPaused(userId, paused) {
+  if (!db) throw new Error("Database not initialized");
+  db.run(`UPDATE users SET email_paused = ?, updated_at = ? WHERE user_id = ?`, [paused ? 1 : 0, Date.now(), userId]);
+  saveDb();
+  return getUserById(userId);
+}
+async function isEmailPaused(email) {
+  const u = await getUserByEmail(String(email || "").toLowerCase());
+  return !!(u && u.emailPaused);
 }
 
 async function updateUserPassword(userId, passwordHash) {
@@ -802,6 +1052,9 @@ module.exports = {
   getUsage,
   bumpUsage,
   addWaitlist,
+  getPlanContext,
+  setPlanContext,
+  listPaidReportsBetween,
   deleteAccount,
   recordBaseline,
   getCategoryBaseline,
@@ -822,6 +1075,16 @@ module.exports = {
   // Entitlements
   getOrCreateEntitlement,
   getEntitlement,
+  getEffectiveEntitlement,
+  adminOverview,
+  adminRecentReports,
+  adminFailedJobs,
+  adminFindAccount,
+  createPromo, getPromo, listPromos, setPromoActive, hasRedeemed, redeemPromo, listRedemptions,
+  setCancelAt,
+  setBillingPeriod,
+  createPasswordReset,
+  consumePasswordReset,
   upgradeTier,
   getTierHistory,
   // Users
@@ -829,4 +1092,6 @@ module.exports = {
   getUserByEmail,
   getUserById,
   updateUserPassword,
+  setEmailPaused,
+  isEmailPaused,
 };

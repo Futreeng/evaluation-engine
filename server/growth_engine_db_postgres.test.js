@@ -69,6 +69,45 @@ const assert = require("assert");
   assert.deepEqual((await db.getCategoryBaseline("fitness")), null);
   assert.equal((await db.getBaselineSummary()).total, 21);
 
+  // plan context — upsert per account+handle+platform
+  assert.equal(await db.getPlanContext("acct_a", "Talon", "instagram"), null);
+  await db.setPlanContext("acct_a", "Talon", "instagram", { horizon: "fewer_shoots", hours: "2_5" });
+  await db.setPlanContext("acct_a", "talon", "instagram", { horizon: "usual", hours: "2_5", goal: "deals" });
+  const ctx = await db.getPlanContext("acct_a", "TALON", "instagram");
+  assert.equal(ctx.horizon, "usual"); assert.equal(ctx.goal, "deals"); assert.ok(ctx.updated_at > 0);
+  assert.equal((await db.listPaidReportsBetween(0, Date.now() + 1)).every((r) => r.tier !== "social_snapshot"), true);
+
+  // cancel at period end → lazy downgrade; password reset tokens are single-use
+  await db.upgradeTier("acct_c", "growth_plan");
+  await db.setCancelAt("acct_c", Date.now() + 60000);
+  assert.equal((await db.getEffectiveEntitlement("acct_c")).currentTier, "growth_plan");
+  await db.setCancelAt("acct_c", Date.now() - 1);
+  assert.equal((await db.getEffectiveEntitlement("acct_c")).currentTier, "social_snapshot");
+  assert.equal((await db.getEntitlement("acct_c")).cancelAt, null);
+  await db.createPasswordReset("u1", "hash1", Date.now() + 60000);
+  assert.equal(await db.consumePasswordReset("hash1"), "u1");
+  assert.equal(await db.consumePasswordReset("hash1"), null);
+  await db.createPasswordReset("u1", "hash2", Date.now() - 1);
+  assert.equal(await db.consumePasswordReset("hash2"), null);
+
+  // admin aggregates run and have the expected shape
+  const ov = await db.adminOverview();
+  assert.ok(ov.today && ov.people && typeof ov.people.users === "number");
+  assert.ok(Array.isArray(await db.adminRecentReports(5)));
+  assert.ok(Array.isArray(await db.adminFailedJobs(5)));
+  assert.equal(await db.adminFindAccount("nobody@example.test"), null);
+
+  // promo codes: create, redeem once per account, count, list
+  await db.createPromo({ code: "TEST10", kind: "percent", value: 10, applies_to: "any", max_redemptions: 2, expires_at: null, active: true, note: "t" });
+  assert.equal((await db.getPromo("test10")).kind, "percent");
+  assert.equal(await db.hasRedeemed("TEST10", "acct_a"), false);
+  assert.equal((await db.redeemPromo("TEST10", "acct_a", "growth_plan", 120)).redemptions, 1);
+  assert.equal(await db.hasRedeemed("TEST10", "acct_a"), true);
+  await assert.rejects(() => db.redeemPromo("TEST10", "acct_a", "growth_plan", 120));
+  assert.equal((await db.listRedemptions("TEST10")).length, 1);
+  assert.equal((await db.setPromoActive("TEST10", false)).active, false);
+  assert.equal((await db.listPromos()).length, 1);
+
   console.log("postgres module: all assertions passed");
   process.exit(0);
 })().catch((e) => { console.error("FAILED:", e.message); process.exit(1); });

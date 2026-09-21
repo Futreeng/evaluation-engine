@@ -5,7 +5,29 @@ const { evaluateProfile } = require("../growth_engine_evaluator");
 const BillingManager = require("../growth_engine_billing");
 const JobQueue = require("../growth_engine_job_queue");
 const { compareCompetitors, MAX_COMPETITORS } = require("../growth_engine_competitors");
-const { signup, login, verifyJWT } = require("../auth");
+const { signup, login, verifyJWT, requestPasswordReset, resetPassword } = require("../auth");
+const mailer = require("../mailer");
+const promos = require("../growth_engine_promos");
+const { TIER_PRICING, ONE_TIME_PRICING } = require("../growth_engine_billing");
+
+// Resolve a promo code for a product into a quote, or an error string.
+// product: growth_plan | plan_unlock. accountId optional (anonymous preview).
+async function resolvePromo(code, product, billingCycle, accountId) {
+  const c = promos.normalizeCode(code);
+  if (!c) return { error: "Enter a code." };
+  const promo = await geDb.getPromo(c);
+  const usable = promos.checkUsable(promo, product, { redeemedByAccount: accountId ? await geDb.hasRedeemed(c, accountId) : false });
+  if (!usable.ok) return { error: usable.reason };
+  const base = product === "growth_plan" ? (billingCycle === "annual" ? Math.floor(TIER_PRICING.growth_plan * 12 * 0.75) : TIER_PRICING.growth_plan) : ONE_TIME_PRICING.plan_unlock;
+  const qte = promos.quote(promo, product, base, billingCycle);
+  if (!qte) return { error: "That code doesn't apply here." };
+  if (!qte.applicable) return { error: qte.description };
+  return { promo, code: c, product, base_cents: base, amount_cents: qte.amountCents, free_months: qte.freeMonths, description: qte.description, stripeCouponId: promo.stripe_coupon_id || null };
+}
+const rateLimit = require("express-rate-limit");
+// Sign-in, sign-up and reset: 20 attempts per IP per 15 minutes. The router
+// already sits under the general 120/min limiter; this is the brute-force one.
+const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false, message: { error: "Too many attempts. Try again in 15 minutes.", code: "RATE_LIMITED", status: 429 } });
 const {
   sendError,
   validateAuthRequest,
@@ -36,6 +58,10 @@ const authMiddleware = async (req, res, next) => {
 
   const user = await verifyJWT(token);
   if (!user) return sendError(res, 401, "INVALID_TOKEN", "Invalid or expired token");
+  // A JWT outlives the account it was issued for (deleted, or password
+  // reset elsewhere) unless we check the account still exists.
+  try { const row = await geDb.getUserById(user.id); if (!row) return sendError(res, 401, "INVALID_TOKEN", "This account no longer exists"); }
+  catch { /* DB hiccup: fall through on the signed token */ }
 
   req.user = user;
   next();
@@ -77,7 +103,7 @@ router.get("/health", async (req, res) => {
 // ===================== AUTH ENDPOINTS =====================
 
 // POST /auth/signup
-router.post("/auth/signup", validateAuthRequest, async (req, res) => {
+router.post("/auth/signup", authLimiter, validateAuthRequest, async (req, res) => {
   try {
     const { email, password, company_name } = req.body;
     const result = await signup(email, password, company_name);
@@ -90,8 +116,35 @@ router.post("/auth/signup", validateAuthRequest, async (req, res) => {
   }
 });
 
+// Password reset. Same reply whether or not the email exists; 5 requests
+// per email per hour, in-process (enough to blunt abuse of the mailer).
+const resetHits = new Map();
+router.post("/auth/forgot", authLimiter, async (req, res) => {
+  try {
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    const ok = { ok: true, message: "If that email has an account, a reset link is on its way." };
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.json(ok);
+    const now = Date.now();
+    const hits = (resetHits.get(email) || []).filter((t) => now - t < 60 * 60 * 1000);
+    if (hits.length >= 5) return res.json(ok);
+    hits.push(now); resetHits.set(email, hits);
+    const r = await requestPasswordReset(email);
+    if (r) await mailer.passwordReset({ to: r.email, resetUrl: `${(process.env.APP_URL || "http://localhost:3005").replace(/\/$/, "")}/#/reset?token=${r.token}` });
+    res.json(ok);
+  } catch (err) { console.error("[Auth] forgot failed:", err.message); res.json({ ok: true, message: "If that email has an account, a reset link is on its way." }); }
+});
+router.post("/auth/reset", authLimiter, async (req, res) => {
+  try {
+    const password = String(req.body?.password || "");
+    if (password.length < 6) return sendError(res, 400, "INVALID_PASSWORD", "Password must be at least 6 characters");
+    if (password.length > 255) return sendError(res, 400, "INVALID_PASSWORD", "Password is too long");
+    const r = await resetPassword(String(req.body?.token || ""), password);
+    res.json(r);
+  } catch (err) { sendError(res, 400, "RESET_INVALID", err.message); }
+});
+
 // POST /auth/login
-router.post("/auth/login", validateAuthRequest, async (req, res) => {
+router.post("/auth/login", authLimiter, validateAuthRequest, async (req, res) => {
   try {
     const { email, password } = req.body;
     const result = await login(email, password);
@@ -102,6 +155,8 @@ router.post("/auth/login", validateAuthRequest, async (req, res) => {
 });
 
 // GET /auth/me
+const adminEmails = () => String(process.env.ADMIN_EMAILS || "").split(/[,\s]+/).map((e) => e.trim().toLowerCase()).filter(Boolean);
+const isAdminEmail = (email) => adminEmails().includes(String(email || "").toLowerCase());
 router.get("/auth/me", authMiddleware, async (req, res) => {
   try {
     const user = await geDb.getUserById(req.user.id);
@@ -111,6 +166,7 @@ router.get("/auth/me", authMiddleware, async (req, res) => {
       user_id: user.userId,
       email: user.email,
       company_name: user.companyName,
+      is_admin: isAdminEmail(user.email),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -140,17 +196,55 @@ router.get("/account/profile", authMiddleware, async (req, res) => {
 // GET /account/subscription-status
 router.get("/account/subscription-status", authMiddleware, async (req, res) => {
   try {
-    const ent = await geDb.getOrCreateEntitlement(req.user.id);
+    const ent = await geDb.getEffectiveEntitlement(req.user.id);
+    const pricing = billingManager.getPricing();
+    const tierInfo = [...(pricing.tiers || []), ...(pricing.business || [])].find((t) => t.tier === ent.currentTier) || null;
     res.json({
       user_id: req.user.id,
       current_tier: ent.currentTier,
+      tier_name: tierInfo?.name || (ent.currentTier === "social_snapshot" ? "Free Snapshot" : ent.currentTier),
+      monthly_price: tierInfo?.monthlyPrice ?? 0,
       tier_start_date: ent.tierStartDate,
       billing_period_start: ent.billingPeriodStart,
       billing_period_end: ent.billingPeriodEnd,
+      cancel_at: ent.cancelAt || null,
+      status: ent.currentTier === "social_snapshot" ? "free" : ent.cancelAt ? "cancel_pending" : "active",
+      email_paused: !!(await geDb.getUserById(req.user.id))?.emailPaused,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// "Pause these emails" from an email footer: signed link, no login. Report-
+// ready and password-reset emails still send; check-ins and score changes stop.
+router.get("/email/pause", async (req, res) => {
+  const u = String(req.query.u || ""), sig = String(req.query.s || "");
+  const ok = u && sig && sig === mailer.pauseSig(u);
+  if (ok) { try { await geDb.setEmailPaused(u, true); } catch { /* fall through */ } }
+  const app = (process.env.APP_URL || "").replace(/\/$/, "") || "";
+  res.type("html").send(`<!DOCTYPE html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Scalecraft</title>
+<body style="margin:0;background:#FFF6E9;font-family:Helvetica,Arial,sans-serif;color:#2A2118"><div style="max-width:520px;margin:48px auto;padding:28px;background:#FFFDF8;border:1px solid #EADFCB;border-radius:24px">
+<h1 style="margin:0;font-size:26px">${ok ? "Paused." : "That link didn't work."}</h1>
+<p style="font-size:16px;line-height:1.6;color:#5B4C3B">${ok ? "Check-ins and score updates are off. Your plan keeps running and your reports stay. Resume any time from your reports page." : "It may have been altered. Sign in and use the plan card on your reports page instead."}</p>
+<a href="${app}/#/reports" style="display:inline-block;margin-top:8px;padding:12px 18px;border-radius:12px;background:#D2603A;color:#FFF6E9;text-decoration:none;font-weight:700">Your reports</a></div>`);
+});
+router.post("/account/email/pause", authMiddleware, async (req, res) => {
+  try { const u = await geDb.setEmailPaused(req.user.id, !!req.body.paused); res.json({ email_paused: !!u.emailPaused }); }
+  catch (err) { sendError(res, 500, "PAUSE_ERROR", err.message); }
+});
+
+// Cancel at period end — one call, no questions. Reports and history stay.
+router.post("/billing/cancel", authMiddleware, async (req, res) => {
+  try {
+    const r = await billingManager.cancelSubscription(req.user.id);
+    if (req.body && typeof req.body.reason === "string" && req.body.reason.trim()) console.log(`[Billing] cancel reason from ${req.user.id}: ${req.body.reason.trim().slice(0, 200)}`);
+    res.json(r);
+  } catch (err) { sendError(res, 500, "CANCEL_ERROR", err.message); }
+});
+router.post("/billing/resume", authMiddleware, async (req, res) => {
+  try { res.json(await billingManager.resumeSubscription(req.user.id)); }
+  catch (err) { sendError(res, 500, "RESUME_ERROR", err.message); }
 });
 
 // GET /account/reports
@@ -180,7 +274,7 @@ const optionalAuth = async (req, _res, next) => {
 async function evaluationTierFor(accountId) {
   if (!accountId || accountId === "demo-account") return "social_snapshot";
   try {
-    const ent = await geDb.getOrCreateEntitlement(accountId);
+    const ent = await geDb.getEffectiveEntitlement(accountId);
     const t = ent?.current_tier || ent?.currentTier || "social_snapshot";
     if (t && t !== "social_snapshot") return "growth_plan"; // every paid tier runs the plan pipeline today
   } catch (err) {
@@ -189,9 +283,52 @@ async function evaluationTierFor(accountId) {
   return "social_snapshot";
 }
 
+// The four intake answers (plus optional link and notes). Anything else is dropped.
+const CTX_ENUM = {
+  horizon: ["usual", "fewer_shoots", "launch"],
+  hours: ["lt2", "2_5", "5_10", "10plus"],
+  goal: ["followers", "deals", "sell", "bookings", "consistency"],
+  style: ["on_camera", "behind", "photos", "help"],
+};
+function cleanPlanContext(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const out = {};
+  for (const [k, vals] of Object.entries(CTX_ENUM)) if (vals.includes(raw[k])) out[k] = raw[k];
+  if (typeof raw.link === "string" && raw.link.trim()) { const l = raw.link.trim().slice(0, 200); out.link = /^https?:\/\//i.test(l) ? l : `https://${l}`; }
+  if (typeof raw.notes === "string" && raw.notes.trim()) out.notes = raw.notes.trim().slice(0, 140);
+  if (typeof raw.contact === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw.contact.trim())) out.contact = raw.contact.trim().slice(0, 120);
+  return Object.keys(out).length ? out : null;
+}
+// Saved context for this account + handle, or the one sent with the request.
+async function resolvePlanContext(req, accountId, handle, platform) {
+  const sent = cleanPlanContext(req.body.plan_context);
+  if (sent && accountId && accountId !== "demo-account") { try { await geDb.setPlanContext(accountId, handle, platform, sent); } catch { /* best-effort */ } return sent; }
+  if (sent) return sent;
+  if (accountId && accountId !== "demo-account") { try { return await geDb.getPlanContext(accountId, handle, platform); } catch { return null; } }
+  return null;
+}
+
+router.get("/account/plan-context", authMiddleware, async (req, res) => {
+  try {
+    const { handle, platform } = req.query;
+    if (!handle || !platform) return sendError(res, 400, "MISSING", "handle and platform are required");
+    res.json({ plan_context: await geDb.getPlanContext(req.user.id, String(handle), String(platform)) });
+  } catch (err) { sendError(res, 500, "CONTEXT_ERROR", err.message); }
+});
+router.put("/account/plan-context", authMiddleware, async (req, res) => {
+  try {
+    const { handle, platform } = req.body;
+    if (!handle || !platform) return sendError(res, 400, "MISSING", "handle and platform are required");
+    const ctx = cleanPlanContext(req.body.plan_context);
+    if (!ctx) return sendError(res, 400, "INVALID_CONTEXT", "No valid answers");
+    res.json({ plan_context: await geDb.setPlanContext(req.user.id, String(handle), String(platform), ctx) });
+  } catch (err) { sendError(res, 500, "CONTEXT_ERROR", err.message); }
+});
+
 router.post("/evaluate/social-snapshot", optionalAuth, validateEvaluationRequest, async (req, res) => {
   try {
-    const { handle, platform, category, email } = req.body;
+    const { handle, platform, category } = req.body;
+    const email = req.body.email || req.user?.email || null;
     // Optional competitor handles from the form. Stored with the job; the
     // comparison itself is a Growth Plan feature and runs after the report.
     const competitors = (Array.isArray(req.body.competitors) ? req.body.competitors : [])
@@ -243,12 +380,18 @@ router.post("/evaluate/social-snapshot", optionalAuth, validateEvaluationRequest
       }
     }
 
+    // Intake answers: the free form may send just the 90-day horizon; paid
+    // runs carry the full set (sent now, or saved earlier).
+    const plan_context = await resolvePlanContext(req, accountId, handle, platform);
+    const input = { handle, platform, category, email, competitors, plan_context };
+    if (req.body.rerun_of && typeof req.body.rerun_of === "string") input.rerun_of = req.body.rerun_of.slice(0, 60);
+
     // Create job in database
-    const jobResult = await geDb.createJob(accountId, tier, { handle, platform, category, email, competitors });
+    const jobResult = await geDb.createJob(accountId, tier, input);
     const jobId = jobResult.jobId;
 
     // Process asynchronously (fire-and-forget)
-    jobQueue.processJob(jobId, accountId, tier, { handle, platform, category, email, competitors })
+    jobQueue.processJob(jobId, accountId, tier, input)
       .catch(err => console.error(`[Growth Engine] Async job ${jobId} error:`, err));
 
     res.json({ job_id: jobId, status: "queued", tier });
@@ -370,16 +513,61 @@ router.post("/reports/:reportId/unlock", authMiddleware, async (req, res) => {
     if (report.accountId !== req.user.id && report.accountId !== "demo-account") return sendError(res, 403, "NOT_YOUR_REPORT", "This report belongs to another account");
     if (report.tier && report.tier !== "social_snapshot") return res.json({ already_unlocked: true, report_id: report.reportId });
 
-    const payment = await billingManager.purchaseOneTime(req.user.id, "plan_unlock");
+    let promo = null;
+    if (req.body?.promo_code) {
+      const r = await resolvePromo(req.body.promo_code, "plan_unlock", "monthly", req.user.id);
+      if (r.error) return sendError(res, 400, "PROMO_INVALID", r.error);
+      promo = { code: r.code, amountCents: r.amount_cents, description: r.description };
+    }
+    const payment = await billingManager.purchaseOneTime(req.user.id, "plan_unlock", null, promo);
     if (payment.status !== "succeeded" && !payment.mock) return res.status(402).json({ error: "Payment did not complete", code: "PAYMENT_INCOMPLETE", status: 402, payment });
+    if (promo) { try { await geDb.redeemPromo(promo.code, req.user.id, "plan_unlock", ONE_TIME_PRICING.plan_unlock - promo.amountCents); } catch (e) { console.warn("[Promo] redemption record failed:", e.message); } }
 
     const b = report.business || {};
-    const input = { handle: b.handle, platform: b.platform, category: b.category, email: req.user.email || null, one_time_unlock: true, unlock_of: report.reportId, payment_id: payment.paymentId };
+    const plan_context = await resolvePlanContext(req, req.user.id, b.handle, b.platform);
+    const input = { handle: b.handle, platform: b.platform, category: b.category, email: req.user.email || null, one_time_unlock: true, unlock_of: report.reportId, payment_id: payment.paymentId, plan_context };
     const { jobId } = await geDb.createJob(req.user.id, "growth_plan", input);
     jobQueue.processJob(jobId, req.user.id, "growth_plan", input).catch((err) => console.error(`[Unlock] job ${jobId} failed:`, err.message));
     res.json({ job_id: jobId, status: "queued", tier: "growth_plan", one_time: true, payment: { id: payment.paymentId, amount: payment.amountFormatted } });
   } catch (err) {
     sendError(res, 500, "UNLOCK_ERROR", err.message);
+  }
+});
+
+// Phase check-in (day 30 / 60): "nothing changed" records the answer; "changed"
+// saves new answers and rewrites the plan. Also used to accept a nudge.
+router.post("/reports/:reportId/checkin", authMiddleware, async (req, res) => {
+  try {
+    const report = await geDb.getReport(req.params.reportId);
+    if (!report) return sendError(res, 404, "REPORT_NOT_FOUND", "Report not found");
+    if (report.accountId !== req.user.id) return sendError(res, 403, "NOT_YOUR_REPORT", "This report belongs to another account");
+    const body = report.reportBody || {};
+    if (!report.tier || report.tier === "social_snapshot" || body.one_time_unlock) return res.status(402).json({ error: "Check-ins and plan updates are part of the Growth Plan subscription.", code: "UPGRADE_REQUIRED", required_tier: "growth_plan", status: 402 });
+    const phase = Number(req.body.phase) || (body.nudge ? body.nudge.phase : 0);
+    const key = req.body.nudge ? `nudge_${String(req.body.nudge).slice(0, 30)}` : `p${phase}`;
+    const checkins = { ...(body.checkins || {}), [key]: { at: Date.now(), changed: !!req.body.changed } };
+    const patch = { checkins };
+    if (req.body.nudge) patch.nudge = null;
+    let ctx = null;
+    if (req.body.changed) {
+      const merged = { ...(body.plan_context || {}), ...(cleanPlanContext(req.body.plan_context) || {}), ...(req.body.nudge && body.nudge?.apply ? body.nudge.apply : {}) };
+      ctx = cleanPlanContext(merged);
+      if (ctx) await geDb.setPlanContext(req.user.id, body.business?.handle, body.business?.platform, ctx);
+    }
+    await geDb.patchReportBody(report.reportId, patch);
+    if (!req.body.changed || !ctx) return res.json({ ok: true, checkins });
+    // Rewrite the plan against the new answers. Counts as a paid run.
+    const limit = Number(process.env.PAID_RUNS_PER_DAY || 5);
+    const used = await geDb.getUsage(req.user.id, "eval");
+    if (used >= limit) return res.status(429).json({ error: `You've run ${used} evaluations today; the plan will pick up your answers at the next weekly refresh.`, code: "RUN_LIMIT_REACHED", status: 429, checkins });
+    await geDb.bumpUsage(req.user.id, "eval");
+    const b = body.business || {};
+    const input = { handle: b.handle, platform: b.platform, category: b.category, email: req.user.email || null, plan_context: ctx, rerun_of: report.reportId, checkins };
+    const { jobId } = await geDb.createJob(req.user.id, "growth_plan", input);
+    jobQueue.processJob(jobId, req.user.id, "growth_plan", input).catch((err) => console.error(`[Checkin] job ${jobId} failed:`, err.message));
+    res.json({ ok: true, checkins, job_id: jobId, status: "queued", tier: "growth_plan" });
+  } catch (err) {
+    sendError(res, 500, "CHECKIN_ERROR", err.message);
   }
 });
 
@@ -400,7 +588,13 @@ router.post("/waitlist", async (req, res) => {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return sendError(res, 400, "INVALID_EMAIL", "Email is required");
     if (!/^[a-z]{1,30}$/.test(platform)) return sendError(res, 400, "INVALID_PLATFORM", "Platform is required");
     await geDb.addWaitlist(email, platform);
-    res.json({ ok: true, platform });
+    // Founders band: hand out the founders code while it lasts.
+    let code = null;
+    if (platform === "founders" && process.env.FOUNDERS_PROMO_CODE) {
+      const p = await geDb.getPromo(process.env.FOUNDERS_PROMO_CODE).catch(() => null);
+      if (p && promos.checkUsable(p, "growth_plan").ok) code = { code: p.code, description: promos.quote(p, "growth_plan", TIER_PRICING.growth_plan, "monthly")?.description || "" };
+    }
+    res.json({ ok: true, platform, promo: code });
   } catch (err) {
     sendError(res, 500, "WAITLIST_ERROR", err.message);
   }
@@ -455,17 +649,29 @@ router.get("/billing/pricing", async (req, res) => {
 });
 
 // Subscribe to tier
+// Preview a code (pricing page, intake). Signed-in users also get the
+// "already used" check.
+router.post("/billing/promo/check", optionalAuth, async (req, res) => {
+  const product = req.body?.product === "plan_unlock" ? "plan_unlock" : "growth_plan";
+  const cycle = req.body?.billingCycle === "annual" ? "annual" : "monthly";
+  const r = await resolvePromo(req.body?.code, product, cycle, req.user?.id).catch((e) => ({ error: e.message }));
+  if (r.error) return res.status(200).json({ valid: false, reason: r.error });
+  res.json({ valid: true, code: r.code, product, description: r.description, base_cents: r.base_cents, amount_cents: r.amount_cents, free_months: r.free_months });
+});
+
 router.post("/billing/subscribe", authMiddleware, validateSubscriptionRequest, async (req, res) => {
   try {
     const { tier, billingCycle } = req.body;
     const accountId = req.user.id;
+    let promo = null;
+    if (req.body.promo_code) {
+      const r = await resolvePromo(req.body.promo_code, tier === "growth_plan" ? "growth_plan" : "other", billingCycle || "monthly", accountId);
+      if (r.error) return sendError(res, 400, "PROMO_INVALID", r.error);
+      promo = { code: r.code, amountCents: r.amount_cents, freeMonths: r.free_months, description: r.description, stripeCouponId: r.stripeCouponId };
+    }
 
-    const result = await billingManager.createSubscription(
-      accountId,
-      tier,
-      null,
-      billingCycle || "monthly"
-    );
+    const result = await billingManager.createSubscription(accountId, tier, null, billingCycle || "monthly", promo);
+    if (promo) { try { await geDb.redeemPromo(promo.code, accountId, "growth_plan", (TIER_PRICING[tier] || 0) - promo.amountCents); } catch (e) { console.warn("[Promo] redemption record failed:", e.message); } }
 
     res.json(result);
   } catch (err) {
@@ -517,7 +723,76 @@ router.post("/billing/webhook", async (req, res) => {
 });
 
 // Queue stats (admin endpoint)
-router.get("/admin/queue-stats", async (req, res) => {
+// Admin: a signed-in account whose email is in ADMIN_EMAILS, or the
+// ADMIN_TOKEN header for scripts. Neither configured → routes 404.
+async function requireAdmin(req, res, next) {
+  const want = process.env.ADMIN_TOKEN;
+  const got = req.get("x-admin-token") || req.query.token;
+  if (want && got === want) { req.admin = { via: "token" }; return next(); }
+  if (!adminEmails().length && !want) return sendError(res, 404, "NOT_FOUND", "Not found");
+  const token = req.headers.authorization?.split(" ")[1];
+  const user = token ? await verifyJWT(token) : null;
+  if (user && isAdminEmail(user.email)) { req.user = user; req.admin = { via: "email" }; return next(); }
+  return sendError(res, user ? 403 : 401, user ? "NOT_ADMIN" : "MISSING_TOKEN", user ? "This account is not an admin" : "Sign in as an admin");
+}
+router.get("/admin/overview", requireAdmin, async (req, res) => {
+  try { res.json({ ...(await geDb.adminOverview()), caps: { free_runs_per_day_global: Number(process.env.FREE_RUNS_PER_DAY_GLOBAL || 500), paid_runs_per_day: Number(process.env.PAID_RUNS_PER_DAY || 5), competitor_pulls_per_day: Number(process.env.COMPETITOR_PULLS_PER_DAY || 15) }, cost: { instagram: 0.003, tiktok: 0.06 }, queue: jobQueue.getStats(), outcomes: await geDb.getOutcomeSummary().catch(() => null), baselines: await geDb.getBaselineSummary().catch(() => null), mail: { configured: mailer.configured() } }); }
+  catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
+});
+router.get("/admin/reports", requireAdmin, async (req, res) => {
+  try { res.json({ reports: await geDb.adminRecentReports(Math.min(200, Number(req.query.limit) || 50)) }); } catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
+});
+router.get("/admin/failed-jobs", requireAdmin, async (req, res) => {
+  try { res.json({ jobs: await geDb.adminFailedJobs(Math.min(200, Number(req.query.limit) || 30)) }); } catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
+});
+router.get("/admin/account", requireAdmin, async (req, res) => {
+  try { const a = await geDb.adminFindAccount(String(req.query.q || "")); if (!a) return sendError(res, 404, "NOT_FOUND", "No account matches that email or handle"); res.json(a); } catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
+});
+// Account actions: resend the latest report email, comp a month, delete.
+router.post("/admin/account/:userId/resend", requireAdmin, async (req, res) => {
+  try {
+    const user = await geDb.getUserById(req.params.userId); if (!user) return sendError(res, 404, "NOT_FOUND", "No such account");
+    const reports = await geDb.listReportsByAccount(user.userId); const r = reports[0]; if (!r) return sendError(res, 404, "NO_REPORT", "No reports for this account");
+    const b = r.reportBody || {}; const first = b.growth_path?.phases?.[0];
+    const out = await mailer.reportReady({ to: user.email, handle: r.business?.handle, reportId: r.reportId, overall: b.scores?.overall, grade: b.scores?.overall >= 70 ? "Strong" : b.scores?.overall >= 40 ? "Fair" : "Weak", summary: b.scores?.summary, firstMove: first ? { action: first.visible_action, why: first.detail } : null, paid: r.tier !== "social_snapshot" });
+    res.json({ ok: true, sent: out });
+  } catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
+});
+router.post("/admin/account/:userId/comp", requireAdmin, async (req, res) => {
+  try {
+    const user = await geDb.getUserById(req.params.userId); if (!user) return sendError(res, 404, "NOT_FOUND", "No such account");
+    const days = Math.min(365, Math.max(1, Number(req.body?.days) || 30));
+    const ent = await geDb.getEffectiveEntitlement(user.userId);
+    if (ent.currentTier === "social_snapshot") await geDb.upgradeTier(user.userId, "growth_plan");
+    const end = Math.max(ent.billingPeriodEnd || 0, Date.now()) + days * 86400000;
+    await geDb.setBillingPeriod(user.userId, Date.now(), end); await geDb.setCancelAt(user.userId, end);
+    console.log(`[Admin] ${req.admin.via} comped ${days}d to ${user.email}`);
+    res.json({ ok: true, tier: "growth_plan", until: end });
+  } catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
+});
+router.delete("/admin/account/:userId", requireAdmin, async (req, res) => {
+  try { const user = await geDb.getUserById(req.params.userId); if (!user) return sendError(res, 404, "NOT_FOUND", "No such account"); console.log(`[Admin] ${req.admin.via} deleted ${user.email}`); res.json(await geDb.deleteAccount(user.userId)); }
+  catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
+});
+router.get("/admin/promos", requireAdmin, async (req, res) => {
+  try { res.json({ promos: await geDb.listPromos() }); } catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
+});
+router.post("/admin/promos", requireAdmin, async (req, res) => {
+  try {
+    const shape = promos.validateShape(req.body || {});
+    if (await geDb.getPromo(shape.code)) return sendError(res, 409, "EXISTS", `${shape.code} already exists`);
+    console.log(`[Admin] ${req.admin.via} created promo ${shape.code} (${shape.kind} ${shape.value})`);
+    res.json({ promo: await geDb.createPromo(shape) });
+  } catch (err) { sendError(res, 400, "INVALID_PROMO", err.message); }
+});
+router.patch("/admin/promos/:code", requireAdmin, async (req, res) => {
+  try { const p = await geDb.setPromoActive(req.params.code, !!req.body?.active); if (!p) return sendError(res, 404, "NOT_FOUND", "No such code"); res.json({ promo: p }); }
+  catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
+});
+router.get("/admin/promos/:code/redemptions", requireAdmin, async (req, res) => {
+  try { res.json({ redemptions: await geDb.listRedemptions(req.params.code) }); } catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
+});
+router.get("/admin/queue-stats", requireAdmin, async (req, res) => {
   try {
     const stats = jobQueue.getStats();
     res.json(stats);

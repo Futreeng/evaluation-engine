@@ -127,10 +127,10 @@
     discount: { annual: '25% off', note: 'Annual billing includes 25% discount' },
     refund: 'Not useful in the first 7 days? Reply to any email and we refund it.',
     business_checkout_enabled: false,
-    one_time: [{ product: 'plan_unlock', name: 'Unlock this report', description: 'The full plan for one report. No subscription, no refresh.', price: 15, features: ['Every move, 01 through 13', 'Your 12-week calendar', 'Keep it forever'], cta: 'Unlock once' }],
+    one_time: [{ product: 'plan_unlock', name: '60-day plan', days: 60, description: 'Phases 1 and 2 of this report\'s plan, written once. No subscription, no refresh.', price: 15, features: ['Days 1–60: moves 01 through 09, with the how and examples', 'Your 8-week calendar', 'Keep it forever'], not_included: ['Days 61–90 (phase 3)', 'Weekly re-score and what changed', 'Day-30 and day-60 check-ins', 'Competitors', 'Score and follower history', 'A fresh plan every 90 days'], cta: 'Get the 60-day plan' }],
     tiers: [
       { tier: 'social_snapshot', name: 'Snapshot', monthlyPrice: 0, annualPrice: 0, note: 'One report per email', features: ['Your score and the four dimensions', 'Why each one landed where it did', 'Your best and worst posts', 'The first move of each phase'], cta: 'Score my account' },
-      { tier: 'growth_plan', name: 'Growth Plan', monthlyPrice: 12, annualPrice: 108, popular: true, features: ['Every move, 01 through 13, with the reason for each', 'Your 12-week posting calendar with a brief per post', 'Re-scored every week — see what each move changed', 'Up to 5 competitors, scored the same way', 'Score and follower history'], cta: 'Start Growth Plan' },
+      { tier: 'growth_plan', name: 'Growth Plan', monthlyPrice: 12, annualPrice: 108, popular: true, features: ['All 90 days: every move, 01 through 13, with the how and a paste-ready example', 'Your 12-week posting calendar with a brief per post', 'Written around your next 90 days — time, goal, what you can shoot', 'Re-scored every week — see what each move changed', 'Day-30 and day-60 check-ins that reshape the plan if life changes', 'Up to 5 competitors, scored the same way', 'Score and follower history, and a fresh plan every 90 days'], cta: 'Start Growth Plan' },
       { tier: 'growth_plan_pro', name: 'Growth Plan Pro', monthlyPrice: 29, annualPrice: 261, optional: true, features: ["Every platform you're on, scored together", 'Priority refresh — rescored within the hour', 'One plan that balances all of them'], cta: 'Choose Pro' }
     ],
     business: [
@@ -142,6 +142,7 @@
   // ---- in-memory state ----
   const jobs = new Map();
   const reports = new Map();
+  let savedContext = null;
   let entitlement = { account_id: 'acct_mock', current_tier: 'social_snapshot' };
   let queueDepth = 2;
 
@@ -158,7 +159,8 @@
     if (t < QUEUED_MS + STAGE_MS * STAGES.length) return running(job, t);
     if (!job.report) {
       job.report = sampleReport(job.handle, job.platform, job.category);
-      if (job.paid || entitlement.current_tier !== 'social_snapshot') { job.report.tier = 'growth_plan'; job.report.growth_path.phases.forEach((p, i) => { p.moves = (p.locked.items || []).map((it, k) => ({ n: i * 5 + k + 2, title: it.meta.replace(/^MOVE \d+ · /, '').split(' · ')[0], action: it.meta.split(' · ').slice(1).join(' · '), why: '' })); p.locked = { count: 0, teaser: '' }; }); job.report.calendar = { posting_days: ['Mon', 'Wed', 'Sat'], posting_time: '7:15am', weeks: Array.from({ length: 12 }, (_, w) => ({ week: w + 1, phase: Math.floor(w / 4) + 1, slots: ['Mon', 'Wed', 'Sat'].map(d => ({ day: d, format: 'reel', angle: 'Coach on camera, one cue', prompt: 'Film in one take; open with the cue in the first two seconds.' })) })) }; if (job.oneTime) job.report.one_time_unlock = { of: null, payment_id: 'pay_mock' }; }
+      job.report.plan_context = job.plan_context || null;
+      if (job.paid || entitlement.current_tier !== 'social_snapshot') { job.report.tier = 'growth_plan'; job.report.growth_path.phases.forEach((p, i) => { p.moves = (p.locked.items || []).map((it, k) => ({ n: i * 5 + k + 2, title: it.meta.replace(/^MOVE \d+ · /, '').split(' · ')[0], action: it.meta.split(' · ').slice(1).join(' · '), why: '', how: ['Open Instagram → your profile → Edit profile.', 'Make the change described above; keep the wording in your own voice.', 'Post or save, then check it from a logged-out browser.'], example: k === 0 ? 'Coach on camera, one cue per reel.\nNew class times every Monday → link below.' : null, done_when: 'You can see the change on your public profile.', time: k === 0 ? '20 min, once' : '10 min per post, ongoing' })); p.opener = { how: ['Pick the two days you already post most.', 'Put them in your calendar as recurring reminders.', 'Film both reels in one session on Sunday.'], example: null, done_when: 'Two reels published on the fixed days this week.', time: '1 hour this week' }; p.locked = { count: 0, teaser: '' }; if (job.oneTime && i === 2) { p.moves = []; p.opener = null; p.locked = { count: 4, teaser: 'Days 61–90 unlock with the Growth Plan' }; p.not_included = true; } }); const nWeeks = job.oneTime ? 8 : 12; job.report.calendar = { posting_days: ['Mon', 'Wed', 'Sat'], posting_time: '7:15am', weeks: Array.from({ length: nWeeks }, (_, w) => ({ week: w + 1, phase: Math.floor(w / 4) + 1, slots: ['Mon', 'Wed', 'Sat'].map((d, k) => ({ day: d, format: k === 1 ? 'carousel' : 'reel', source: ['new', 'archive', 'no_camera'][(w + k) % 3], angle: 'Coach on camera, one cue', prompt: 'Film in one take; open with the cue in the first two seconds.' })) })) }; job.report.plan_days = job.oneTime ? 60 : 90; job.report.plan_started_at = Date.now() - (job.rerun ? 27 * 86400000 : 0); job.report.plan_context = job.plan_context || null; if (job.oneTime) job.report.one_time_unlock = { of: null, payment_id: 'pay_mock', days: 60 }; }
       reports.set(job.report.report_id, job.report);
     }
     return { status: 'complete', stage: 'complete', resultPayload: job.report };
@@ -200,7 +202,7 @@
       if (!paid && prior) return json(402, { error: `@${handle} has already been scored for free. Open that report, or start a Growth Plan to score it again and watch it change.`, code: 'FREE_LIMIT_REACHED', report_id: prior.report.report_id, generated_at: prior.report.created_at, upgrade_tier: 'growth_plan' });
       const id = 'job_' + Math.random().toString(36).slice(2, 10);
       jobs.set(id, { paid: !!paid,
-        id, handle, platform: body.platform, category: body.category, email: body.email,
+        id, handle, platform: body.platform, category: body.category, email: body.email, plan_context: body.plan_context || (paid ? savedContext : null),
         started: Date.now(), fail: handle.toLowerCase().includes(FAIL_KEY),
         ref: (Math.random().toString(16).slice(2, 4) + '-' + Math.floor(1000 + Math.random() * 9000)).toUpperCase()
       });
@@ -217,16 +219,20 @@
     if (method === 'GET' && path === '/reports') return json(200, { reports: [...reports.values()] });
     if (method === 'GET' && path === '/entitlements') return json(200, entitlement);
     if (method === 'GET' && path === '/health') return json(200, { status: 'ok', mock: true });
-    if (method === 'POST' && path === '/waitlist') return json(200, { ok: true, platform: body.platform });
+    if (method === 'POST' && path === '/waitlist') return json(200, { ok: true, platform: body.platform, promo: body.platform === 'founders' ? { code: 'FOUNDER50', description: 'First month free, then $12/mo' } : null });
     if (method === 'DELETE' && path === '/account') { entitlement = { account_id: 'acct_mock', current_tier: 'social_snapshot' }; return json(200, { deleted: true, reports: reports.size }); }
-    if (method === 'POST' && (m = path.match(/^\/reports\/([^/]+)\/unlock$/))) { const r = reports.get(m[1]); if (!r) return json(404, { error: 'Report not found' }); const id = 'job_' + Math.random().toString(36).slice(2, 10); jobs.set(id, { id, handle: r.business.handle, platform: r.business.platform, category: r.business.category, email: 'x', started: Date.now() - QUEUED_MS, fail: false, paid: true, oneTime: true, ref: 'MOCK' }); return json(200, { job_id: id, status: 'queued', tier: 'growth_plan', one_time: true, payment: { id: 'pay_mock', amount: '$15.00' } }); }
+    if (method === 'POST' && (m = path.match(/^\/reports\/([^/]+)\/unlock$/))) { const r = reports.get(m[1]); if (!r) return json(404, { error: 'Report not found' }); const id = 'job_' + Math.random().toString(36).slice(2, 10); jobs.set(id, { id, handle: r.business.handle, platform: r.business.platform, category: r.business.category, email: 'x', started: Date.now() - QUEUED_MS, fail: false, paid: true, oneTime: true, ref: 'MOCK', plan_context: body.plan_context || savedContext }); return json(200, { job_id: id, status: 'queued', tier: 'growth_plan', one_time: true, payment: { id: 'pay_mock', amount: '$15.00' } }); }
+    if (method === 'PUT' && path === '/account/plan-context') { savedContext = body.plan_context || null; return json(200, { plan_context: savedContext }); }
+    if (method === 'GET' && path.startsWith('/account/plan-context')) return json(200, { plan_context: savedContext });
+    if (method === 'POST' && (m = path.match(/^\/reports\/([^/]+)\/checkin$/))) { const r = reports.get(m[1]); if (!r) return json(404, { error: 'Report not found' }); if (r.one_time_unlock) return json(402, { error: 'Check-ins and plan updates are part of the Growth Plan subscription.', code: 'UPGRADE_REQUIRED', status: 402 }); r.checkins = { ...(r.checkins || {}), [body.nudge ? 'nudge_' + body.nudge : 'p' + body.phase]: { at: Date.now(), changed: !!body.changed } }; if (body.nudge) r.nudge = null; if (!body.changed) return json(200, { ok: true, checkins: r.checkins }); if (body.plan_context) savedContext = body.plan_context; const id = 'job_' + Math.random().toString(36).slice(2, 10); jobs.set(id, { id, handle: r.business.handle, platform: r.business.platform, category: r.business.category, email: 'x', started: Date.now() - QUEUED_MS, fail: false, paid: true, rerun: true, ref: 'MOCK', plan_context: savedContext }); return json(200, { ok: true, checkins: r.checkins, job_id: id, status: 'queued', tier: 'growth_plan' }); }
     if (method === 'POST' && (m = path.match(/^\/reports\/([^/]+)\/moves$/))) { const r = reports.get(m[1]); if (!r) return json(404, { error: 'Report not found' }); r.moves_done = r.moves_done || {}; if (body.done) r.moves_done[body.key] = Date.now(); else delete r.moves_done[body.key]; return json(200, { moves_done: r.moves_done }); }
     if (method === 'GET' && path === '/billing/pricing') return json(200, PRICING);
     if (method === 'POST' && path === '/billing/subscribe') {
       const tier = [...PRICING.tiers, ...PRICING.business].find(t => t.tier === body.tier);
       if (!tier) return json(400, { error: 'Unknown tier' });
       entitlement = { ...entitlement, current_tier: tier.tier, billing_cycle: body.billingCycle || 'monthly' };
-      return json(200, { ok: true, entitlement });
+      const promo = body.promo_code ? { code: String(body.promo_code).toUpperCase(), description: String(body.promo_code).toUpperCase() === 'FOUNDER50' ? 'First month free, then $12/mo' : '20% off your first month' } : null;
+      return json(200, { ok: true, entitlement, tier: tier.tier, promo });
     }
     if (method === 'POST' && path === '/billing/check-access') {
       const order = ['social_snapshot', 'growth_plan', 'growth_plan_pro', 'business_growth', 'business_evaluator', 'agency'];
@@ -234,6 +240,13 @@
       return ok ? json(200, { access: true }) : json(402, { error: 'Upgrade required', required_tier: body.requiredTier });
     }
     // Auth — same shape as routes/growth-engine.js
+    if (method === 'POST' && path === '/billing/promo/check') { const c = String(body.code || '').toUpperCase(); const product = body.product === 'plan_unlock' ? 'plan_unlock' : 'growth_plan'; const cycle = body.billingCycle === 'annual' ? 'annual' : 'monthly'; const base = product === 'growth_plan' ? (cycle === 'annual' ? 10800 : 1200) : 1500; if (c === 'FOUNDER50') { if (product !== 'growth_plan') return json(200, { valid: false, reason: 'That code is for the Growth Plan subscription.' }); if (cycle !== 'monthly') return json(200, { valid: false, reason: 'Free-month codes apply to monthly billing — switch to monthly to use it.' }); return json(200, { valid: true, code: c, product, description: 'First month free, then $12/mo', base_cents: base, amount_cents: 0, free_months: 1 }); } if (c === 'CREATOR20') return json(200, { valid: true, code: c, product, description: '20% off' + (product === 'growth_plan' ? ' your first month' : ''), base_cents: base, amount_cents: Math.round(base * 0.8), free_months: 0 }); if (c === 'PODCAST') { if (product !== 'plan_unlock') return json(200, { valid: false, reason: 'That code is for the 60-day plan.' }); return json(200, { valid: true, code: c, product, description: '60-day plan, free', base_cents: base, amount_cents: 0, free_months: 0 }); } return json(200, { valid: false, reason: "That code doesn't exist." }); }
+    if (method === 'GET' && path === '/admin/promos') return json(200, { promos: [{ code: 'FOUNDER50', kind: 'free_months', value: 1, applies_to: 'growth_plan', max_redemptions: 50, redemptions: 12, expires_at: null, active: true, note: 'founders band' }, { code: 'CREATOR20', kind: 'percent', value: 20, applies_to: 'any', max_redemptions: null, redemptions: 3, expires_at: null, active: true, note: '' }] });
+    if (method === 'GET' && path === '/account/subscription-status') { const free = entitlement.current_tier === 'social_snapshot'; return json(200, { current_tier: entitlement.current_tier, tier_name: free ? 'Free Snapshot' : 'Growth Plan', monthly_price: free ? 0 : 12, billing_period_end: free ? null : (entitlement.period_end || (entitlement.period_end = Date.now() + 30 * 86400000)), cancel_at: entitlement.cancel_at || null, status: free ? 'free' : entitlement.cancel_at ? 'cancel_pending' : 'active' }); }
+    if (method === 'POST' && path === '/billing/cancel') { entitlement.cancel_at = entitlement.period_end || Date.now() + 30 * 86400000; return json(200, { status: 'cancel_pending', endsAt: entitlement.cancel_at }); }
+    if (method === 'POST' && path === '/billing/resume') { delete entitlement.cancel_at; return json(200, { status: 'active' }); }
+    if (method === 'POST' && path === '/auth/forgot') return json(200, { ok: true, message: 'If that email has an account, a reset link is on its way.' });
+    if (method === 'POST' && path === '/auth/reset') { if (body.token === 'expired') return json(400, { error: 'This reset link has expired or was already used. Request a new one.' }); return json(200, { token: 'mock-token', user: { email: 'you@example.com' } }); }
     if (method === 'POST' && (path === '/auth/login' || path === '/auth/signup')) {
       if (!body.email || !body.password) return json(400, { error: 'Email and password required', code: 'INVALID_EMAIL' });
       if (path === '/auth/login' && body.password === 'wrong') return json(401, { error: 'Invalid email or password', code: 'AUTH_FAILED' });

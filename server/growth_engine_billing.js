@@ -54,16 +54,24 @@ class BillingManager {
    * One-time purchase against a report (no entitlement change).
    * Mock mode records a charge; production goes through Stripe PaymentIntents.
    */
-  async purchaseOneTime(accountId, product, stripeCustomerId = null) {
-    const cents = ONE_TIME_PRICING[product];
-    if (!cents) throw new Error(`Unknown product: ${product}`);
+  async purchaseOneTime(accountId, product, stripeCustomerId = null, promo = null) {
+    const list = ONE_TIME_PRICING[product];
+    if (!list) throw new Error(`Unknown product: ${product}`);
+    // promo = { code, amountCents, description } already validated by the route
+    const cents = promo ? promo.amountCents : list;
+    const fmt = `$${(cents / 100).toFixed(2)}`;
+    if (cents === 0) {
+      const paymentId = "pay_free_" + require("crypto").randomBytes(8).toString("hex");
+      console.log(`[Billing] ${product} free via ${promo?.code} for ${accountId}`);
+      return { paymentId, product, amountInCents: 0, amountFormatted: "$0.00", status: "succeeded", free: true, promo: promo?.code || null };
+    }
     if (this.isProduction && this.stripe) {
-      const intent = await this.stripe.paymentIntents.create({ amount: cents, currency: "usd", customer: stripeCustomerId || undefined, metadata: { accountId, product } });
-      return { paymentId: intent.id, product, amountInCents: cents, amountFormatted: `$${(cents / 100).toFixed(2)}`, status: intent.status };
+      const intent = await this.stripe.paymentIntents.create({ amount: cents, currency: "usd", customer: stripeCustomerId || undefined, metadata: { accountId, product, promo: promo?.code || "" } });
+      return { paymentId: intent.id, product, amountInCents: cents, amountFormatted: fmt, status: intent.status, promo: promo?.code || null };
     }
     const paymentId = "pay_mock_" + require("crypto").randomBytes(8).toString("hex");
-    console.log(`[Billing] Mock one-time charge ${paymentId}: ${product} $${(cents / 100).toFixed(2)} for ${accountId}`);
-    return { paymentId, product, amountInCents: cents, amountFormatted: `$${(cents / 100).toFixed(2)}`, status: "succeeded", mock: true };
+    console.log(`[Billing] Mock one-time charge ${paymentId}: ${product} ${fmt}${promo ? ` (${promo.code})` : ""} for ${accountId}`);
+    return { paymentId, product, amountInCents: cents, amountFormatted: fmt, status: "succeeded", mock: true, promo: promo?.code || null };
   }
 
   /**
@@ -71,7 +79,7 @@ class BillingManager {
    * Mock mode: Simulates payment processing (for development)
    * Production: Uses real Stripe API
    */
-  async createSubscription(accountId, tier, stripeCustomerId, billingCycle = "monthly") {
+  async createSubscription(accountId, tier, stripeCustomerId, billingCycle = "monthly", promo = null) {
     if (tier === "social_snapshot") {
       // Free tier: just create entitlement
       return await geDb.upgradeTier(accountId, tier);
@@ -88,13 +96,22 @@ class BillingManager {
       amount = Math.floor(priceInCents * 12 * (1 - ANNUAL_DISCOUNT));
     }
 
+    // Promo already validated by the route: { code, amountCents, freeMonths, description }
+    const charged = promo ? promo.amountCents : amount;
+
     if (this.isProduction && this.stripe) {
-      // Production: use real Stripe
-      return await this._createStripeSubscription(accountId, tier, stripeCustomerId, amount, billingCycle);
+      // Production: use real Stripe (pass promo.stripeCouponId as the coupon)
+      return await this._createStripeSubscription(accountId, tier, stripeCustomerId, charged, billingCycle, promo);
     }
 
     // Mock mode: Simulate payment processing
-    return await this._createMockSubscription(accountId, tier, amount, billingCycle);
+    const r = await this._createMockSubscription(accountId, tier, charged, billingCycle);
+    if (promo) {
+      r.promo = { code: promo.code, description: promo.description, listAmountInCents: amount };
+      // Free months: the paid-through date is pushed out by the free period.
+      if (promo.freeMonths) { const end = Date.now() + (promo.freeMonths + 1) * 30 * 24 * 60 * 60 * 1000; await geDb.setBillingPeriod(accountId, Date.now(), end); r.currentPeriodEnd = end; }
+    }
+    return r;
   }
 
   /**
@@ -130,8 +147,10 @@ class BillingManager {
 
     mockSubscriptions.set(subscriptionId, mockSub);
 
-    // Upgrade tier in database
+    // Upgrade tier in database; period end is what "cancel at period end" keys off
     const ent = await geDb.upgradeTier(accountId, tier);
+    if (geDb.setBillingPeriod) await geDb.setBillingPeriod(accountId, billingPeriodStart, billingPeriodEnd);
+    if (geDb.setCancelAt) await geDb.setCancelAt(accountId, null);
 
     console.log(`[Billing] Mock subscription created: ${subscriptionId} for ${tier} (${billingCycle})`);
 
@@ -153,7 +172,7 @@ class BillingManager {
    * Real Stripe integration (production)
    * TODO: Implement when Stripe keys are configured
    */
-  async _createStripeSubscription(accountId, tier, customerId, amountInCents, billingCycle) {
+  async _createStripeSubscription(accountId, tier, customerId, amountInCents, billingCycle, promo = null) {
     throw new Error("[Stripe] Real Stripe integration not yet implemented. Use mock mode for development.");
   }
 
@@ -171,36 +190,45 @@ class BillingManager {
   }
 
   /**
-   * Cancel subscription (downgrade to free tier)
+   * Cancel at period end. The tier stays until the paid-through date, then
+   * reads as free (geDb.getEffectiveEntitlement applies it lazily). Nothing
+   * is refunded and nothing is deleted; reports stay.
    */
-  async cancelSubscription(subscriptionId) {
-    const sub = mockSubscriptions.get(subscriptionId);
-    if (!sub) {
-      throw new Error(`Subscription not found: ${subscriptionId}`);
+  async cancelSubscription(accountId) {
+    const ent = await geDb.getOrCreateEntitlement(accountId);
+    if (!ent || ent.currentTier === "social_snapshot") return { status: "none", currentTier: "social_snapshot" };
+    if (ent.cancelAt) return { status: "cancel_pending", currentTier: ent.currentTier, endsAt: ent.cancelAt };
+    if (this.isProduction && this.stripe && ent.stripeSubscriptionId) {
+      await this.stripe.subscriptions.update(ent.stripeSubscriptionId, { cancel_at_period_end: true });
     }
+    const sub = await this.getSubscription(accountId);
+    if (sub) { sub.cancelAtPeriodEnd = true; mockSubscriptions.set(sub.subscriptionId, sub); }
+    // Paid-through date: the subscription's period end, else the entitlement's, else 30 days.
+    const endsAt = sub?.currentPeriodEnd || ent.billingPeriodEnd || Date.now() + 30 * 24 * 60 * 60 * 1000;
+    await geDb.setCancelAt(accountId, endsAt);
+    console.log(`[Billing] Cancel at period end for ${accountId}: ${new Date(endsAt).toISOString()}`);
+    return { status: "cancel_pending", currentTier: ent.currentTier, endsAt };
+  }
 
-    // Downgrade user to free tier
-    const ent = await geDb.upgradeTier(sub.accountId, "social_snapshot");
-
-    // Mark subscription as canceled
-    sub.status = "canceled";
-    sub.canceledAt = Date.now();
-    mockSubscriptions.set(subscriptionId, sub);
-
-    console.log(`[Billing] Subscription canceled: ${subscriptionId}`);
-
-    return {
-      subscriptionId,
-      status: "canceled",
-      downgradedTo: ent.currentTier,
-    };
+  /** Undo a pending cancellation before the period ends. */
+  async resumeSubscription(accountId) {
+    const ent = await geDb.getOrCreateEntitlement(accountId);
+    if (!ent.cancelAt) return { status: ent.currentTier === "social_snapshot" ? "none" : "active", currentTier: ent.currentTier };
+    if (ent.cancelAt <= Date.now()) return { status: "ended", currentTier: "social_snapshot" };
+    if (this.isProduction && this.stripe && ent.stripeSubscriptionId) {
+      await this.stripe.subscriptions.update(ent.stripeSubscriptionId, { cancel_at_period_end: false });
+    }
+    const sub = await this.getSubscription(accountId);
+    if (sub) { sub.cancelAtPeriodEnd = false; mockSubscriptions.set(sub.subscriptionId, sub); }
+    await geDb.setCancelAt(accountId, null);
+    return { status: "active", currentTier: ent.currentTier, renewsAt: ent.billingPeriodEnd };
   }
 
   /**
    * Check if user has access to tier
    */
   async checkEntitlement(accountId, requiredTier) {
-    const ent = await geDb.getOrCreateEntitlement(accountId);
+    const ent = await (geDb.getEffectiveEntitlement || geDb.getOrCreateEntitlement)(accountId);
 
     // Tier hierarchy: social_snapshot < growth_plan < business_evaluator < agency
     const tierHierarchy = ["social_snapshot", "growth_plan", "growth_plan_pro", "business_growth", "business_evaluator", "agency"];
@@ -289,11 +317,13 @@ class BillingManager {
           annualPrice: yr(TIER_PRICING.growth_plan),
           popular: true,
           features: [
-            "Every move, 01 through 13, with the reason for each",
+            "All 90 days: every move, 01 through 13, with the how and a paste-ready example",
             "Your 12-week posting calendar with a brief per post",
+            "Written around your next 90 days — time, goal, what you can shoot",
             "Re-scored every week — see what each move changed",
+            "Day-30 and day-60 check-ins that reshape the plan if life changes",
             "Up to 5 competitors, scored the same way",
-            "Score and follower history",
+            "Score and follower history, and a fresh plan every 90 days",
           ],
           cta: "Start Growth Plan",
         },
@@ -314,6 +344,7 @@ class BillingManager {
       ],
       // Business tiers are phase 2. Until the business pipeline exists they are
       // listed for the page but not purchasable (see /billing/subscribe).
+      support_email: process.env.SUPPORT_EMAIL || null,
       business_checkout_enabled: process.env.ENABLE_BUSINESS_CHECKOUT === "true",
       business: [
         {
@@ -338,11 +369,13 @@ class BillingManager {
       one_time: [
         {
           product: "plan_unlock",
-          name: "Unlock this report",
-          description: "The full plan for one report. No subscription, no refresh.",
+          name: "60-day plan",
+          days: 60,
+          description: "Phases 1 and 2 of this report's plan, written once. No subscription, no refresh.",
           price: ONE_TIME_PRICING.plan_unlock / 100,
-          features: ["Every move, 01 through 13", "Your 12-week calendar", "Keep it forever"],
-          cta: "Unlock once",
+          features: ["Days 1–60: moves 01 through 09, with the how and examples", "Your 8-week calendar", "Keep it forever"],
+          not_included: ["Days 61–90 (phase 3)", "Weekly re-score and what changed", "Day-30 and day-60 check-ins", "Competitors", "Score and follower history", "A fresh plan every 90 days"],
+          cta: "Get the 60-day plan",
         },
       ],
       discount: {

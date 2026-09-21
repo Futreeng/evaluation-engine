@@ -82,9 +82,32 @@ async function login(email, password) {
   };
 }
 
+// Password reset: a random token is emailed; only its sha256 is stored.
+// Always resolves (no account enumeration); the caller sends the email.
+const crypto = require("crypto");
+const RESET_TTL_MS = 60 * 60 * 1000;
+async function requestPasswordReset(email) {
+  const user = await geDb.getUserByEmail(String(email || "").trim().toLowerCase());
+  if (!user) return null;
+  const token = crypto.randomBytes(32).toString("hex");
+  await geDb.createPasswordReset(user.userId, crypto.createHash("sha256").update(token).digest("hex"), Date.now() + RESET_TTL_MS);
+  return { token, email: user.email, userId: user.userId };
+}
+async function resetPassword(token, newPassword) {
+  if (!token || typeof token !== "string" || !/^[a-f0-9]{64}$/.test(token)) throw new Error("This reset link isn't valid.");
+  const userId = await geDb.consumePasswordReset(crypto.createHash("sha256").update(token).digest("hex"));
+  if (!userId) throw new Error("This reset link has expired or was already used. Request a new one.");
+  const salt = await bcrypt.genSalt(10);
+  await geDb.updateUserPassword(userId, await bcrypt.hash(newPassword, salt));
+  const user = await geDb.getUserById(userId);
+  return { token: await generateJWT(user.userId, user.email), user: { user_id: user.userId, email: user.email } };
+}
+
 module.exports = {
   generateJWT,
   verifyJWT,
+  requestPasswordReset,
+  resetPassword,
   signup,
   login,
 };

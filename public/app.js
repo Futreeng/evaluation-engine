@@ -4,6 +4,13 @@
 (function () {
   'use strict';
   const CFG = window.SCALECRAFT_CONFIG || {};
+  // Promo code from a link: scalecraft.app/?promo=CODE or #/pricing?promo=CODE.
+  (() => { try {
+    const fromSearch = new URLSearchParams(location.search).get('promo');
+    const fromHash = new URLSearchParams((location.hash.split('?')[1] || '')).get('promo');
+    const c = (fromSearch || fromHash || '').trim().toUpperCase();
+    if (c) { sessionStorage.setItem('sc_promo', JSON.stringify({ code: c, pending: true })); if (fromSearch) history.replaceState(null, '', location.pathname + location.hash); }
+  } catch { } })();
   const API = CFG.apiBase || '/api/growth-engine/v1';
   const POLL = CFG.pollIntervalMs || 2000;
   const $view = document.getElementById('view');
@@ -59,8 +66,24 @@
   const lget = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
   const lset = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { } };
   const token = () => { try { return localStorage.getItem('sc_token'); } catch { return null; } };
-  const setToken = t => { try { t ? localStorage.setItem('sc_token', t) : localStorage.removeItem('sc_token'); } catch { } };
+  const setTokenRaw = t => { try { t ? localStorage.setItem('sc_token', t) : localStorage.removeItem('sc_token'); } catch { } };
+  const setToken = t => { setTokenRaw(t); if (t) refreshAdminFlag(); else { try { localStorage.removeItem('sc_admin'); } catch { } } };
   const go = hash => { location.hash = hash; };
+  // Promo: { code, description, amount_cents, base_cents, product, free_months } once checked; { code, pending } before.
+  const promo = () => sget('sc_promo', null);
+  async function checkPromo(code, product, billingCycle) {
+    const r = await api('/billing/promo/check', { method: 'POST', body: JSON.stringify({ code, product, billingCycle }) }, { allow401: true });
+    if (r.valid) sset('sc_promo', { ...r, checked_for: product + ':' + (billingCycle || 'monthly') });
+    return r;
+  }
+  const clearPromo = () => { try { sessionStorage.removeItem('sc_promo'); } catch { } };
+  // Admin link in the nav: ask /auth/me once per token and remember the answer.
+  async function refreshAdminFlag() {
+    if (!token()) { try { localStorage.removeItem('sc_admin'); } catch { } return; }
+    const before = lget('sc_admin', false);
+    try { const me = await api('/auth/me', {}, { allow401: true }); lset('sc_admin', !!me.is_admin); } catch { lset('sc_admin', false); }
+    if (lget('sc_admin', false) !== before) { const cur = $header.querySelector('.nav a.strong'); renderHeader(cur ? (cur.getAttribute('href') || '').replace('#/', '') : ''); }
+  }
   const grade = s => s < 50 ? ['Weak', 'weak'] : s < 70 ? ['Fair', 'fair'] : ['Strong', 'strong'];
 
   let toastTimer;
@@ -100,14 +123,16 @@
           <a href="#/pricing" class="${kind === 'pricing' ? 'strong' : ''}">Pricing</a>
           <a href="#/business">For businesses</a>
           ${token()
-            ? raw(h`<a href="#/reports" class="${kind === 'reports' ? 'strong' : ''}">Reports</a><a href="#" data-action="signout">Sign out</a>`)
+            ? raw(h`<a href="#/reports" class="${kind === 'reports' ? 'strong' : ''}">Reports</a>${lget('sc_admin', false) ? raw(h`<a href="#/admin" class="${kind === 'admin' ? 'strong' : ''}">Admin</a>`) : ''}<a href="#" data-action="signout">Sign out</a>`)
             : raw(h`<a href="#/signin" class="strong">Sign in</a>`)}
         </nav>
       </div></div>`;
   }
+  // Support address comes from the server (SUPPORT_EMAIL); hidden until set.
+  const supportEmail = () => (CFG.supportEmail || sget('sc_support', '') || '');
   const footer = () => h`<div class="wrap"><div class="footer">
     <a href="#/how">How the score works</a><a href="#/business">For businesses</a><a href="#/pricing">Pricing</a>
-    <a href="#/legal/terms">Terms</a><a href="#/legal/privacy">Privacy</a><a href="#/legal/cookies">Cookies</a>
+    <a href="#/legal/terms">Terms</a><a href="#/legal/privacy">Privacy</a><a href="#/legal/cookies">Cookies</a>${supportEmail() ? raw(h`<a href="mailto:${supportEmail()}">Contact</a>`) : ''}
     <span style="margin-left:auto">© ${new Date().getFullYear()} Scalecraft</span>
   </div></div>`;
 
@@ -119,8 +144,15 @@
       <div class="bar"><div class="fill bg${hue}" style="width:${sc}%"></div>${avg != null ? raw(h`<div class="mark" style="left:${clamp(avg, 0, 100)}%"></div>`) : ''}</div>
     </div>`;
   }
-  const SAMPLE = {
-    handle: 'humansofny', platform: 'instagram', date: '2026-09-18T00:00:00Z', followers: 12640167, overall: 53,
+  // The shipped sample report (public/sample-report.js) — a real Growth Plan
+  // run on an account we have permission to show. Powers the landing card
+  // and #/report/sample so prospects can read a full paid report.
+  const SHIPPED = window.SCALECRAFT_SAMPLE || null;
+  const SAMPLE = SHIPPED ? {
+    handle: SHIPPED.business.handle, platform: SHIPPED.business.platform, date: SHIPPED.created_at, followers: SHIPPED.business.followers || 0, overall: SHIPPED.scores.overall,
+    dims: (SHIPPED.scores.dimensions || []).map(d => ({ label: d.label, score: d.score, category_avg: d.category_avg })), summary: SHIPPED.scores.summary || '', link: '#/report/sample'
+  } : {
+    handle: 'yourhandle', platform: 'instagram', date: '2026-09-18T00:00:00Z', followers: 4820, overall: 53,
     dims: [{ label: 'Posting Consistency', score: 30, category_avg: 48 }, { label: 'Content Mix', score: 72, category_avg: 60 }, { label: 'Engagement Quality', score: 39, category_avg: 55 }, { label: 'Profile Clarity', score: 70, category_avg: 64 }],
     summary: 'Posting Consistency and Engagement Quality are driving most of the gap.'
   };
@@ -139,13 +171,16 @@
   // ------------------------------------------------------------ landing
   function viewLanding() {
     renderHeader('landing');
+    if (!sget('sc_support', null)) api('/billing/pricing', {}, { allow401: true }).then(p => { if (p.support_email) { sset('sc_support', p.support_email); const f = $view.querySelector('.footer'); if (f && !f.querySelector('a[href^=mailto]')) (f.querySelector('span') || f).insertAdjacentHTML(f.querySelector('span') ? 'beforebegin' : 'beforeend', h`<a href="mailto:${p.support_email}">Contact</a>`); } }).catch(() => { });
     const last = sget('sc_form', {});
     const platform = supported(last.platform) ? last.platform : 'instagram';
     const niche = last.category || 'fitness_creator';
     const sample = sget('sc_sample', null);
     const hero = sample ? { ...sample, link: '#/report/' + sample.report_id } : SAMPLE;
+    const pr = promo();
     $view.innerHTML = h`
       <div class="wrap">
+        ${pr ? raw(h`<div class="promobar">Code <b>${pr.code}</b> ${pr.description ? '— ' + pr.description + '. ' : 'is ready. '}It's applied when you start the plan. <a href="#/pricing">See pricing →</a></div>`) : ''}
         <section class="hero">
           <div class="l">
             <h1>Score your account. See exactly why. Get the plan.</h1>
@@ -161,6 +196,9 @@
                 ${raw(SOON.map(([k, n]) => h`<button type="button" class="chip soon" data-soon="${k}">${n} · soon</button>`).join(''))}
               </div>
               <div id="waitSlot"></div>
+              <div class="optq"><div class="ql">Your next 90 days <span>optional</span></div>
+                <div class="chips" role="radiogroup" aria-label="Your next 90 days">${raw([['usual', 'Business as usual'], ['fewer_shoots', 'Fewer new shoots'], ['launch', 'Something launching']].map(([k, n]) => h`<button type="button" class="chip ${last.horizon === k ? 'on' : ''}" data-horizon="${k}" role="radio" aria-checked="${last.horizon === k}">${n}</button>`).join(''))}</div>
+                <div class="hint">Shapes your first three moves. The Growth Plan asks four more so the whole plan fits.</div></div>
               <div class="field"><input type="email" name="email" placeholder="you@email.com — where to send it" autocomplete="email" value="${last.email || ''}" aria-label="Email"></div>
               <div class="form-error" id="formError" hidden></div>
               <div class="cta">
@@ -179,7 +217,6 @@
         <section class="founders" id="founders">
           <div class="t"><h3>Founding creators</h3><p>The first 50 accounts get the Growth Plan free for a month. Tell us what worked.</p></div>
           <form id="foundersForm"><input type="email" name="email" placeholder="you@email.com" aria-label="Email"><button class="btn light" type="submit">Count me in</button></form>
-          <div class="mark">[REVIEW — replace before launch]</div>
         </section>
 
         <section class="card sharepromo">
@@ -193,6 +230,11 @@
 
     const form = $view.querySelector('#evalForm');
     let chosenPlatform = platform;
+    let chosenHorizon = last.horizon || null;
+    form.querySelectorAll('[data-horizon]').forEach(b => b.addEventListener('click', () => {
+      chosenHorizon = chosenHorizon === b.dataset.horizon ? null : b.dataset.horizon; // tap again to clear
+      form.querySelectorAll('[data-horizon]').forEach(x => { const on = x.dataset.horizon === chosenHorizon; x.classList.toggle('on', on); x.setAttribute('aria-checked', on); });
+    }));
     form.querySelectorAll('[data-platform]').forEach(b => b.addEventListener('click', () => {
       chosenPlatform = b.dataset.platform;
       form.querySelectorAll('[data-platform]').forEach(x => { x.classList.toggle('on', x === b); x.setAttribute('aria-checked', x === b); });
@@ -225,8 +267,10 @@
         platform: chosenPlatform,
         category: form.category.value === 'other' ? (otherText ? otherText.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40) || 'other' : 'other') : form.category.value,
         email: form.email.value.trim(),
-        other: otherText
+        other: otherText,
+        horizon: chosenHorizon || undefined,
       };
+      if (chosenHorizon) { payload.plan_context = { ...(sget('sc_plan_context', null) || {}), horizon: chosenHorizon }; sset('sc_plan_context', payload.plan_context); }
       const problems = [];
       if (!/^[A-Za-z0-9._-]{1,60}$/.test(payload.handle)) problems.push('a handle (letters, numbers, dots or underscores)');
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.email)) problems.push('an email we can send the report to');
@@ -238,8 +282,9 @@
     $view.querySelector('#foundersForm').addEventListener('submit', async e => {
       e.preventDefault(); const f = e.currentTarget; const email = f.email.value.trim();
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast('Add an email first.'); return; }
-      try { await api('/waitlist', { method: 'POST', body: JSON.stringify({ email, platform: 'founders' }) }); } catch { }
-      f.innerHTML = h`<div class="waitdone" style="flex:1">You're in. We'll email you when your month starts.</div>`;
+      let r = null; try { r = await api('/waitlist', { method: 'POST', body: JSON.stringify({ email, platform: 'founders' }) }); } catch { }
+      if (r && r.promo) { sset('sc_promo', { code: r.promo.code, pending: true }); f.innerHTML = h`<div class="waitdone" style="flex:1">You're in. Your code is <b class="code">${r.promo.code}</b> — ${r.promo.description}. It's applied when you <a href="#/pricing">start the plan</a>.</div>`; }
+      else f.innerHTML = h`<div class="waitdone" style="flex:1">You're in. We'll email you when your month starts.</div>`;
     });
     const scrollTo = sget('sc_scroll', null);
     if (scrollTo) { sessionStorage.removeItem('sc_scroll'); document.getElementById(scrollTo)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
@@ -250,6 +295,9 @@
     try {
       const body = { handle: payload.handle, platform: payload.platform, category: payload.category, email: payload.email };
       if (payload.competitors && payload.competitors.length) body.competitors = payload.competitors;
+      const ctx = payload.plan_context || sget('sc_plan_context', null);
+      if (ctx) body.plan_context = ctx;
+      if (payload.rerun_of) body.rerun_of = payload.rerun_of;
       const res = await api('/evaluate/social-snapshot', { method: 'POST', body: JSON.stringify(body) });
       sset('sc_job_' + res.job_id, { ...payload, submitted_at: Date.now() });
       go('#/evaluating/' + encodeURIComponent(res.job_id));
@@ -352,12 +400,12 @@
     const wk = [i * 4 + 1, i * 4 + 4];
     const moves = Array.isArray(p.moves) ? p.moves.filter(m => m && (m.action || m.title)) : [];
     const weeks = Array.isArray(p.calendar_weeks) ? p.calendar_weeks : [];
-    const firstLocked = i * (1 + count) + 2;
+    const firstLocked = i * 4 + 2; // openers are 01; moves run 02–13 across the three phases
     const teasers = Array.isArray(locked.items) && locked.items.length ? locked.items.map(it => it.meta || it.title || '') : [];
     return {
       key: 'p' + (i + 1), days, label: p.label || `Phase ${i + 1}`,
       action: p.visible_action || p.action || '', detail: p.detail || '',
-      moves, weeks, count, firstLocked, teasers,
+      moves, weeks, count, firstLocked, teasers, opener: p.opener || null, not_included: !!p.not_included,
       lockedHeader: /\d/.test(locked.teaser || '') ? locked.teaser : `${count} more moves + your weeks ${wk[0]}–${wk[1]} calendar`
     };
   }
@@ -465,9 +513,92 @@
   }
 
   // ------------------------------------------------------------ report
+  // ------------------------------------------------------------ plan setup (intake)
+  // Four taps and an optional line, asked once, between "start the plan" and
+  // payment. Saved on the account per handle; edited from the report.
+  const INTAKE = [
+    { key: 'horizon', q: 'Your next 90 days', opts: [['usual', 'Business as usual'], ['fewer_shoots', 'Fewer new shoots', 'no trips, off-season, injury, busy'], ['launch', 'Something launching', 'an event, a drop, a move']] },
+    { key: 'hours', q: 'Time you can give this each week', opts: [['lt2', 'Under 2 hours'], ['2_5', '2–5 hours'], ['5_10', '5–10 hours'], ['10plus', '10+ hours']] },
+    { key: 'goal', q: 'What you want from the next 90 days', opts: [['followers', 'More followers'], ['deals', 'Brand deals'], ['sell', 'Sell something', 'a guide, coaching, a product'], ['bookings', 'Bookings or clients'], ['consistency', 'Just get consistent']] },
+    { key: 'style', q: 'How you like to make content', opts: [['on_camera', 'On camera, talking'], ['behind', 'Behind the camera', 'voiceover, b-roll'], ['photos', 'Photos and carousels'], ['help', 'I have help', 'an editor or team']] },
+  ];
+  const ctxLabel = (k, v) => { const q = INTAKE.find(x => x.key === k); const o = q && q.opts.find(x => x[0] === v); return o ? o[1] : ''; };
+  function contextChips(ctx) {
+    if (!ctx) return '';
+    const parts = INTAKE.map(q => ctxLabel(q.key, ctx[q.key])).filter(Boolean);
+    return parts.map(t => h`<span class="chip">${t}</span>`).join('');
+  }
+  async function viewPlanSetup() {
+    renderHeader('report');
+    const q = new URLSearchParams((location.hash.split('?')[1] || ''));
+    const reportId = q.get('report') || '';
+    const path = q.get('path') || 'subscribe';       // subscribe | once | edit | checkin
+    const phase = Number(q.get('phase')) || 0;
+    const report = reportId ? sget('sc_report_' + reportId, null) : null;
+    const biz = report?.business || sget('sc_form', {});
+    const saved = sget('sc_plan_context', null) || report?.plan_context || {};
+    const state = { ...saved };
+    const days = path === 'once' ? 60 : 90;
+    const heading = path === 'edit' ? 'Update your next 90 days' : path === 'checkin' ? `Phase ${phase} starts. What changed?` : `60 seconds so the plan fits your life.`;
+    let oncePromo = null;
+    if (path === 'once' && promo() && promo().code) { try { const r = await checkPromo(promo().code, 'plan_unlock'); if (r.valid) oncePromo = r; } catch { } }
+    const sub = path === 'once' ? 'Four taps. The 60-day plan is written around your answers.' : path === 'checkin' ? 'Change what changed. The plan is rewritten tonight.' : path === 'edit' ? 'The plan is rewritten against your new answers.' : 'Four taps. Every move and calendar slot is written around your answers, and we check back at day 30 and 60.';
+    const render = () => {
+      const needLink = state.goal === 'sell' || state.goal === 'bookings';
+      const needContact = state.goal === 'deals';
+      const complete = INTAKE.every(x => state[x.key]);
+      $view.innerHTML = h`
+        <div class="wrap narrow">
+          <div class="setup">
+            <div class="eyebrow">${biz.handle ? '@' + biz.handle + ' · ' : ''}${days}-day plan</div>
+            <h1>${heading}</h1>
+            <p class="sub">${sub}</p>
+            ${raw(INTAKE.map(x => h`<div class="qblock"><div class="q">${x.q.replace('90', String(days))}</div><div class="opts">${raw(x.opts.map(o => h`<button type="button" class="opt ${state[x.key] === o[0] ? 'on' : ''}" data-q="${x.key}" data-v="${o[0]}"><span>${o[1]}</span>${o[2] ? raw(h`<small>${o[2]}</small>`) : ''}</button>`).join(''))}</div></div>`).join(''))}
+            ${needLink ? raw(h`<div class="qblock"><div class="q">Where should the link go?</div><input type="url" id="ctxLink" class="txt" placeholder="yoursite.com/guide" value="${state.link || ''}"><div class="fine">The bio and CTA moves use this exact link instead of a placeholder.</div></div>`) : ''}
+            ${needContact ? raw(h`<div class="qblock"><div class="q">Email brands should use <span class="opt-note">optional</span></div><input type="email" id="ctxContact" class="txt" placeholder="collabs@you.com" value="${state.contact || ''}"><div class="fine">Goes into the bio and contact moves exactly as written.</div></div>`) : ''}
+            <div class="qblock"><div class="q">Anything else? <span class="opt-note">optional</span></div><input type="text" id="ctxNotes" class="txt" maxlength="140" placeholder="moving in November · just got a drone · off for three weeks" value="${state.notes || ''}"></div>
+            ${oncePromo ? raw(h`<div class="promobox inline">Code <b>${oncePromo.code}</b> applied — ${oncePromo.description}.</div>`) : ''}
+            <button class="btn block" id="ctxGo" ${complete ? '' : 'disabled'}>${path === 'once' ? (oncePromo ? (oncePromo.amount_cents === 0 ? 'Get the 60-day plan — free' : `Continue to the $${(oncePromo.amount_cents / 100).toFixed(oncePromo.amount_cents % 100 ? 2 : 0)} plan`) : 'Continue to the $' + (sget('sc_once_price', 15)) + ' plan') : path === 'edit' || path === 'checkin' ? 'Rewrite my plan' : 'Continue to the plan'}</button>
+            ${path === 'checkin' ? raw(h`<a class="btn ghost block" href="#/report/${reportId}?checkin=${phase}&changed=0">Nothing changed — carry on</a>`) : path === 'edit' ? raw(h`<a class="btn ghost block" href="#/report/${reportId}">Cancel</a>`) : raw(h`<div class="fine center">You can change these any time from your report.</div>`)}
+          </div>
+        </div>${raw(footer())}`;
+      $view.querySelectorAll('.opt').forEach(b => b.addEventListener('click', () => { state[b.dataset.q] = b.dataset.v; const l = $view.querySelector('#ctxLink'); const n = $view.querySelector('#ctxNotes'); const c = $view.querySelector('#ctxContact'); if (l) state.link = l.value; if (n) state.notes = n.value; if (c) state.contact = c.value; render(); }));
+      $view.querySelector('#ctxGo').addEventListener('click', async e => {
+        const l = $view.querySelector('#ctxLink'); const n = $view.querySelector('#ctxNotes'); const c = $view.querySelector('#ctxContact');
+        const ctx = { horizon: state.horizon, hours: state.hours, goal: state.goal, style: state.style };
+        if (l && l.value.trim()) ctx.link = l.value.trim(); if (n && n.value.trim()) ctx.notes = n.value.trim().slice(0, 140); if (c && c.value.trim()) ctx.contact = c.value.trim();
+        sset('sc_plan_context', ctx);
+        const b = e.currentTarget; b.disabled = true; b.textContent = 'Saving…';
+        if (token() && biz.handle && biz.platform) { try { await api('/account/plan-context', { method: 'PUT', body: JSON.stringify({ handle: biz.handle, platform: biz.platform, plan_context: ctx }) }); } catch { } }
+        if (path === 'once') {
+          if (!token()) { sset('sc_next', '#/report/' + reportId); sset('sc_unlock_once', reportId); go('#/signup'); return; }
+          try {
+            const res = await api('/reports/' + encodeURIComponent(reportId) + '/unlock', { method: 'POST', body: JSON.stringify({ plan_context: ctx, ...(oncePromo ? { promo_code: oncePromo.code } : {}) }) });
+            if (res.already_unlocked) { go('#/report/' + encodeURIComponent(res.report_id)); return; }
+            sset('sc_job_' + res.job_id, { handle: biz.handle, platform: biz.platform, category: biz.category, submitted_at: Date.now(), one_time: true });
+            if (oncePromo) clearPromo();
+            toast(res.payment?.amount === '$0.00' ? 'Free with your code. Writing your 60-day plan…' : `Charged ${res.payment?.amount || ''} once. Writing your 60-day plan…`); go('#/evaluating/' + encodeURIComponent(res.job_id));
+          } catch (e2) { if (e2.status === 401) return; toast(e2.message || 'Unlock failed.'); b.disabled = false; b.textContent = 'Try again'; }
+          return;
+        }
+        if (path === 'edit' || path === 'checkin') {
+          try {
+            const res = await api('/reports/' + encodeURIComponent(reportId) + '/checkin', { method: 'POST', body: JSON.stringify({ phase: phase || undefined, changed: true, plan_context: ctx }) });
+            if (res.job_id) { sset('sc_job_' + res.job_id, { handle: biz.handle, platform: biz.platform, category: biz.category, submitted_at: Date.now(), rerun: true }); sessionStorage.removeItem('sc_report_' + reportId); toast('Rewriting your plan…'); go('#/evaluating/' + encodeURIComponent(res.job_id)); return; }
+            toast('Saved — the plan picks this up at the next refresh.'); go('#/report/' + reportId);
+          } catch (e2) { if (e2.status === 401) return; if (e2.status === 402) { sset('sc_intent_tier', 'growth_plan'); go('#/pricing'); return; } toast(e2.message || 'Could not save.'); b.disabled = false; b.textContent = 'Rewrite my plan'; }
+          return;
+        }
+        sset('sc_intent_tier', 'growth_plan'); go('#/pricing');
+      });
+    };
+    render();
+  }
+
   async function viewReport(reportId) {
-    if (reportId === 'sample') { renderHeader('report'); $view.innerHTML = h`<div class="center-msg"><h2>Score your own account to see a real one.</h2><a href="#/">Score my account</a></div>`; return; }
-    let report = sget('sc_report_' + reportId, null);
+    const isSample = reportId === 'sample';
+    if (isSample && !SHIPPED) { renderHeader('report'); $view.innerHTML = h`<div class="center-msg"><h2>Score your own account to see a real one.</h2><a href="#/">Score my account</a></div>`; return; }
+    let report = isSample ? SHIPPED : sget('sc_report_' + reportId, null);
     if (!report) {
       renderHeader('report');
       $view.innerHTML = h`<div class="center-msg">Loading your report…</div>`;
@@ -492,21 +623,38 @@
     const calWeeks = Array.isArray(report.calendar?.weeks) ? report.calendar.weeks : [];
     const pending = s.category_baseline_pending;
     const doneKey = 'sc_done_' + report.report_id;
-    const done = { ...(lget(doneKey, {})), ...(report.moves_done || {}) };
+    const done = isSample ? {} : { ...(lget(doneKey, {})), ...(report.moves_done || {}) };
     const isDone = k => !!done[k];
     const price = report.upsell?.monthly_price || 12;
     const oneTime = report.upsell?.one_time_price || 15;
     const thisWeek = phases[0];
     const nextPhase = phases[1];
     const followers = biz.followers || report.followers || (report.post_insights && report.post_insights.followers) || null;
+    const qs = new URLSearchParams(location.hash.split('?')[1] || '');
+    const once = !!report.one_time_unlock;
+    const subscriber = paid && !once && !isSample;
+    const planDays = report.plan_days || (once ? 60 : 90);
+    const ctx = report.plan_context || null;
+    const ageDays = report.plan_started_at ? (Date.now() - report.plan_started_at) / 86400000 : 0;
+    const checkins = report.checkins || {};
+    // Phase check-in window: day 25–45 for phase 2, 55–75 for phase 3
+    const duePhase = subscriber ? ([[2, 25, 45], [3, 55, 75]].find(([ph, a, b]) => ageDays >= a && ageDays < b && !checkins['p' + ph]) || [])[0] : 0;
+    const nudge = subscriber && report.nudge ? report.nudge : null;
+    if (subscriber && qs.get('checkin') && qs.get('changed') === '1') { go(`#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=checkin&phase=${qs.get('checkin')}`); return; }
+    if (isSample) sset('sc_once_price', oneTime);
 
     renderHeader('report');
     $view.innerHTML = h`
       <div class="wrap">
+        ${isSample ? raw(h`<div class="samplebar"><b>Sample report.</b> A real Growth Plan for a real account, scored ${fmtDate(report.created_at)}. Yours is written from your own posts. <a href="#/" data-scroll="evalForm">Score my account →</a></div>`) : ''}
         <div class="rhead">
-          <div class="l"><span class="h">@${biz.handle || ''}</span><span class="ctx">${platName(biz.platform)} · ${niche} · ${fmtDate(report.created_at)}</span>${paid ? raw(h`<span class="tag dark">${report.one_time_unlock ? 'UNLOCKED ONCE' : 'GROWTH PLAN'}</span>`) : ''}</div>
-          <div class="r"><button class="btn ghost sm" data-action="email-report">Email me this report</button><button class="btn dark sm" data-action="share">Share my score</button></div>
+          <div class="l"><span class="h">@${biz.handle || ''}</span><span class="ctx">${platName(biz.platform)} · ${niche} · ${fmtDate(report.created_at)}</span>${paid ? raw(h`<span class="tag dark">${once ? '60-DAY PLAN' : 'GROWTH PLAN'}</span>`) : ''}</div>
+          <div class="r">${isSample ? '' : raw(h`<button class="btn ghost sm" data-action="email-report">Email me this report</button>`)}<button class="btn dark sm" data-action="share">${isSample ? 'Share this sample' : 'Share my score'}</button></div>
         </div>
+        ${paid ? raw(h`<div class="ctxrow">${ctx ? raw(contextChips(ctx) + (ctx.notes ? h`<span class="chip note">“${ctx.notes}”</span>` : '')) : raw(h`<span class="chip empty">Written without your answers</span>`)}${isSample ? '' : once ? '' : raw(h`<a class="edit" href="#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=edit">${ctx ? 'Plans changed? Update' : 'Tell us about your next 90 days'} →</a>`)}</div>`)
+        : raw(h`<div class="ctxrow free">${ctx && ctx.horizon ? raw(h`<span class="chip">${ctxLabel('horizon', ctx.horizon)}</span><span class="ex">Your three first moves were written around this. The Growth Plan asks four more — time, goal, how you make content — so every move and calendar slot fits.</span>`) : raw(h`<span class="chip empty">Written as business as usual</span><span class="ex">The Growth Plan asks four short questions — your next 90 days, time, goal, how you make content — so every move and calendar slot fits your life.</span>`)}</div>`)}
+        ${duePhase ? raw(h`<div class="checkin"><div class="t"><div class="eb">DAY ${Math.round(ageDays)} · CHECK-IN</div><h3>Phase ${duePhase} starts. Anything change?</h3><p>The next 30 days were written when you started. If your time, goal or next few weeks changed, the plan is rewritten tonight.</p></div><div class="acts"><button class="btn green" data-checkin="${duePhase}" data-changed="0">Nothing changed</button><a class="btn ghost" href="#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=checkin&phase=${duePhase}">Something changed</a></div></div>`) : ''}
+        ${nudge ? raw(h`<div class="checkin nudge" id="nudge"><div class="t"><div class="eb">FROM THIS WEEK'S RE-SCORE</div><h3>${nudge.title}</h3><p>${nudge.text}</p></div><div class="acts"><button class="btn" data-nudge="${nudge.key}" data-changed="1">${nudge.cta}</button><button class="btn ghost" data-nudge="${nudge.key}" data-changed="0">Keep the plan as is</button></div></div>`) : ''}
         <div class="report">
           <div class="toprow">
             <div class="card scorebox">
@@ -522,6 +670,7 @@
               <div class="mv">MOVE 01</div>
               <p class="a">${thisWeek.action}</p>
               ${thisWeek.detail ? raw(h`<p class="w">${thisWeek.detail}</p>`) : ''}
+              ${paid && thisWeek.opener ? raw(moveDetailHTML(thisWeek.opener, true)) : ''}
               <button class="done ${isDone('p1m1') ? 'on' : ''}" data-move="p1m1"><span class="box">${isDone('p1m1') ? '✓' : ''}</span>Mark this move done</button>
               ${nextPhase ? raw(h`<div class="next">Next: Day 31 — ${nextPhase.label}</div>`) : ''}
             </div>`) : ''}
@@ -555,28 +704,29 @@
               const tone = ['var(--gold)', 'var(--green)', 'var(--purple)'][i % 3]; const toneT = ['var(--gold-t)', 'var(--green-t)', 'var(--c4t)'][i % 3];
               const total = 1 + p.moves.length; const doneN = (isDone(p.key + 'm1') ? 1 : 0) + p.moves.filter(m => isDone(p.key + 'm' + m.n)).length;
               return h`<div class="phase">
-                <div class="ph" style="background:${raw(tone)}"><span>${p.days} · ${p.label}</span>${paid && p.moves.length ? raw(h`<span class="prog" style="color:${raw(toneT)}">${doneN} of ${total} done</span>`) : ''}</div>
+                <div class="ph" style="background:${raw(tone)}"><span>${p.days} · ${p.label}</span>${paid && p.not_included ? raw(h`<span class="prog" style="color:${raw(toneT)}">Growth Plan only</span>`) : paid && p.moves.length ? raw(h`<span class="prog" style="color:${raw(toneT)}">${doneN} of ${total} done</span>`) : ''}</div>
                 <div class="pb">
-                  <div class="move"><span class="n">01</span><p>${p.action}</p></div>
-                  ${paid ? raw(p.moves.map(m => h`<button class="mvrow ${isDone(p.key + 'm' + m.n) ? 'on' : ''}" data-move="${p.key}m${m.n}"><span class="box">${isDone(p.key + 'm' + m.n) ? '✓' : ''}</span><div class="b"><div class="t">${String(m.n).padStart(2, '0')} · ${m.title || ''}</div><p>${m.action}</p>${m.why ? raw(h`<p class="w">Why: ${m.why}</p>`) : ''}</div></button>`).join(''))
-                  : raw(h`<div class="locked"><div class="rows">${raw((p.teasers.length ? p.teasers : Array.from({ length: p.count }, (_, k) => `MOVE ${String(p.firstLocked + k).padStart(2, '0')}`)).slice(0, 4).map((t, k) => h`<div>${String(p.firstLocked + k).padStart(2, '0')} · ${t.replace(/^MOVE \d+\s*·?\s*/i, '')}${/…$/.test(t) ? '' : '…'}</div>`).join(''))}
+                  ${paid && p.opener ? raw(h`<div class="mvrow opener ${isSample || i === 0 ? 'open' : ''} ${isDone(p.key + 'm1') ? 'on' : ''}" data-row="${p.key}m1"><button class="box" data-move="${p.key}m1" aria-label="Mark move 01 done">${isDone(p.key + 'm1') ? '✓' : ''}</button><div class="b"><div class="t">01 · ${p.label}</div><p>${p.action}</p>${p.detail ? raw(h`<p class="w">${p.detail}</p>`) : ''}${raw(moveDetailHTML(p.opener))}<span class="more" aria-hidden="true"></span></div></div>`)
+                  : raw(h`<div class="move"><span class="n">01</span><p>${p.action}</p></div>`)}
+                  ${paid && !p.not_included ? raw(p.moves.map(m => h`<div class="mvrow ${isSample || i === 0 ? 'open' : ''} ${isDone(p.key + 'm' + m.n) ? 'on' : ''}" data-row="${p.key}m${m.n}"><button class="box" data-move="${p.key}m${m.n}" aria-label="Mark move ${m.n} done">${isDone(p.key + 'm' + m.n) ? '✓' : ''}</button><div class="b"><div class="t">${String(m.n).padStart(2, '0')} · ${m.title || ''}</div><p>${m.action}</p>${m.why ? raw(h`<p class="w">Why: ${m.why}</p>`) : ''}${raw(moveDetailHTML(m))}<span class="more" aria-hidden="true"></span></div></div>`).join(''))
+                  : raw(h`<div class="locked"><div class="rows">${raw((p.teasers.length ? p.teasers : Array.from({ length: p.count }, () => 'Written from your posts when you unlock')).slice(0, 4).map((t, k) => h`<div>${String(p.firstLocked + k).padStart(2, '0')} · ${t.replace(/^MOVE \d+\s*·?\s*/i, '')}${/…$/.test(t) ? '' : '…'}</div>`).join(''))}
                       <div class="grid">${raw(Array.from({ length: 28 }, (_, k) => `<span style="${[0, 2, 4, 6].includes(k % 7) ? `background:var(--c${(Math.floor(k / 7) % 4) + 1})` : ''}"></span>`).join(''))}</div></div>
                     <div class="lk"><i>🔒</i>${p.lockedHeader}</div></div>`)}
                 </div></div>`; }).join(''))}</div>
           </details>`) : ''}
 
           ${paid && calWeeks.length ? raw(h`<details class="card acc" open>
-            <summary>Your 12-week calendar</summary>
+            <summary>Your ${calWeeks.length}-week calendar</summary>
             <div class="body" style="gap:8px">${raw(calWeeks.map((w, i) => h`<details class="week" ${i === 0 ? 'open' : ''}>
               <summary><span class="wk">WEEK ${w.week} · DAYS ${(w.week - 1) * 7 + 1}–${w.week * 7}</span><span class="sl">${(w.slots || []).map(sl => `${String(sl.day).slice(0, 3)} ${sl.format}`).join(' · ')}</span></summary>
-              <div class="slots">${raw((w.slots || []).map((sl, k) => h`<div class="slot bd${(k % 4) + 1}"><div class="d">${String(sl.day).slice(0, 3).toUpperCase()} · ${String(sl.format).toUpperCase()}</div><div class="a">${sl.angle}</div>${sl.prompt ? raw(h`<div class="p">${sl.prompt}</div>`) : ''}</div>`).join(''))}</div>
+              <div class="slots">${raw((w.slots || []).map((sl, k) => h`<div class="slot bd${(k % 4) + 1}"><div class="d">${String(sl.day).slice(0, 3).toUpperCase()} · ${String(sl.format).toUpperCase()}${sl.source ? raw(h`<span class="src ${sl.source}">${sl.source === 'new' ? 'NEW SHOOT' : sl.source === 'archive' ? 'FROM ARCHIVE' : 'NO CAMERA'}</span>`) : ''}</div><div class="a">${sl.angle}</div>${sl.prompt ? raw(h`<div class="p">${sl.prompt}</div>`) : ''}</div>`).join(''))}</div>
             </details>`).join(''))}</div>
           </details>`) : ''}
 
           <details class="card acc" ${paid && comp ? 'open' : ''}>
             <summary>Against your competitors</summary>
             <div class="body">
-              ${paid ? raw(h`<form class="compform" id="compForm"><input type="text" name="handles" placeholder="@handle — add up to 5" value="${comp ? comp.competitors.map(c => c.handle).join(', ') : (report.competitor_handles || []).join(', ')}" aria-label="Competitor handles"><button class="btn dark" type="submit">${comp ? 'Re-run' : 'Compare'}</button></form><div id="compResult">${comp ? raw(competitorRows(comp)) : ''}</div>`)
+              ${isSample ? raw(comp ? competitorRows(comp) : h`<p class="fine">Growth Plan reports compare you to up to five accounts you pick.</p>`) : paid ? raw(h`<form class="compform" id="compForm"><input type="text" name="handles" placeholder="@handle — add up to 5" value="${comp ? comp.competitors.map(c => c.handle).join(', ') : (report.competitor_handles || []).join(', ')}" aria-label="Competitor handles"><button class="btn dark" type="submit">${comp ? 'Re-run' : 'Compare'}</button></form><div id="compResult">${comp ? raw(competitorRows(comp)) : ''}</div>`)
               : raw(h`<div class="comprows"><div class="crow you"><span>@${biz.handle} (you)</span><span>${overall}</span></div>
                   ${raw(((report.competitor_handles && report.competitor_handles.length) ? report.competitor_handles : ['', '', '']).slice(0, 3).map((hn, i) => h`<div class="crow"><span>${hn ? '@' + hn : raw(`<span style="display:inline-block;width:${[120, 96, 140][i]}px;height:12px;border-radius:6px;background:var(--track2)"></span>`)}</span><span class="ghost">${[63, 48, 57][i]}</span></div>`).join(''))}
                   <p class="fine" style="margin-top:6px">Their scores and what they do differently unlock with the plan.</p></div>`)}
@@ -586,12 +736,15 @@
           <div class="datawindow">${report.data_window || `Based on your last ${pi?.sample || 12} posts. We can't see saves, reach or story views.`}</div>
 
           ${!paid && sget('sc_limit_msg', null) ? raw(h`<div class="notice">${sget('sc_limit_msg', '')} <a href="#/pricing">See the plan →</a></div>`) : ''}
-          ${paid && report.one_time_unlock ? raw(h`<div class="refresh once"><div class="t"><h3>Yours to keep</h3><p>You unlocked this report once. It won't refresh — start the Growth Plan to be re-scored every week and see what each move changed.</p></div><button class="btn green" data-action="unlock">Start the plan · $${price}/mo</button></div>`)
+          ${isSample ? raw(h`<div class="refresh"><div class="t"><h3>This is what $${price} a month gets you</h3><p>Every move with the reason behind it, a 12-week calendar written from the account's own posts, competitors scored the same way, and a fresh score every week. Yours starts with a free Snapshot.</p></div><a class="btn green" href="#/" data-scroll="evalForm">Score my account free</a></div>`)
+          : paid && once ? raw(h`<div class="notin"><div class="hd"><h3>Not in your 60-day plan</h3><p>Yours to keep, as bought. This is what the Growth Plan adds, for $${price} a month — less than the $${oneTime} you paid once.</p></div>
+              <div class="rows">${raw(['Days 61–90 — phase 3, moves 10 through 13', 'Re-scored every week, with what each move changed', 'Day-30 and day-60 check-ins that reshape the plan', 'Up to 5 competitors, scored the same way', 'Score and follower history', 'A fresh plan every 90 days'].map(t => h`<div><i>🔒</i>${t}</div>`).join(''))}</div>
+              <button class="btn green" data-action="unlock">Start the plan · $${price}/mo</button></div>`)
           : paid ? raw(h`<div class="refresh"><div class="t"><h3>This plan refreshes weekly</h3><p>${Object.keys(done).length ? `You did ${Object.keys(done).length} move${Object.keys(done).length === 1 ? '' : 's'} — we'll re-score you and tell you what changed.` : 'Run it again any time — the moves and calendar are rewritten against your latest posts.'}</p></div><a class="btn green" href="#/" data-scroll="evalForm">Run a fresh evaluation</a></div>`)
-          : raw(h`<div class="upsell"><h3>Unlock your full Growth Plan</h3><p>${report.upsell?.unlock_count || 12} locked items: the remaining moves and your week-by-week calendar, written from your own posts.</p>
+          : raw(h`<div class="upsell"><h3>Unlock your full Growth Plan</h3><p>${report.upsell?.unlock_count || 12} locked items: the remaining moves and your week-by-week calendar, written from your own posts — and around four quick answers about your next 90 days, so it's a plan you can actually do.</p>
               <div class="paths">
-                <div class="path main"><div class="pn">Growth Plan · <b>$${price}/mo</b></div><div class="pd">Re-scored every week. See what each move changed.</div><button class="btn" data-action="unlock">Start the plan →</button></div>
-                <div class="path"><div class="pn">Just this report · <b>$${oneTime}</b></div><div class="pd">Every move and the calendar, once. No subscription.</div><button class="btn light" data-action="unlock-once">Unlock once</button></div>
+                <div class="path main"><div class="pn">Growth Plan · <b>$${price}/mo</b></div><div class="pd">All 90 days, written around your life. Re-scored every week with check-ins at day 30 and 60.</div><button class="btn" data-action="unlock">Start the plan →</button></div>
+                <div class="path"><div class="pn">60-day plan · <b>$${oneTime} once</b></div><div class="pd">Phases 1 and 2 — moves 01–09 and 8 weeks of calendar, written once. No subscription.</div><button class="btn light" data-action="unlock-once">Get the 60-day plan</button></div>
               </div>
               <div class="fine">Cancel anytime. Keep the report either way.</div></div>`)}
 
@@ -600,28 +753,35 @@
       </div>${raw(footer())}`;
 
     // move done toggles
-    $view.querySelectorAll('[data-move]').forEach(b => b.addEventListener('click', async () => {
+    $view.querySelectorAll('.mvrow .b').forEach(b => b.addEventListener('click', e => { if (e.target.closest('a')) return; b.closest('.mvrow').classList.toggle('open'); }));
+    $view.querySelectorAll('[data-move]').forEach(b => b.addEventListener('click', async e => {
+      e.stopPropagation();
       const k = b.dataset.move; const now = !isDone(k);
       if (now) done[k] = Date.now(); else delete done[k];
-      lset(doneKey, done);
-      b.classList.toggle('on', now); b.querySelector('.box').textContent = now ? '✓' : '';
-      if (token() && paid) { try { await api('/reports/' + encodeURIComponent(report.report_id) + '/moves', { method: 'POST', body: JSON.stringify({ key: k, done: now }) }); } catch { } }
-      report.moves_done = done; sset('sc_report_' + report.report_id, report);
+      if (!isSample) lset(doneKey, done);
+      const row = b.closest('.mvrow, .done') || b; row.classList.toggle('on', now); (b.classList.contains('box') ? b : b.querySelector('.box')).textContent = now ? '✓' : '';
+      $view.querySelectorAll(`[data-move="${k}"]`).forEach(o => { if (o === b) return; const r = o.closest('.mvrow, .done') || o; r.classList.toggle('on', now); (o.classList.contains('box') ? o : o.querySelector('.box')).textContent = now ? '✓' : ''; });
+      if (token() && paid && !isSample) { try { await api('/reports/' + encodeURIComponent(report.report_id) + '/moves', { method: 'POST', body: JSON.stringify({ key: k, done: now }) }); } catch { } }
+      if (!isSample) { report.moves_done = done; sset('sc_report_' + report.report_id, report); }
       $view.querySelectorAll('.phase').forEach((ph, i) => { const p = phases[i]; if (!p || !paid) return; const total = 1 + p.moves.length; const dn = (isDone(p.key + 'm1') ? 1 : 0) + p.moves.filter(m => isDone(p.key + 'm' + m.n)).length; const el = ph.querySelector('.prog'); if (el) el.textContent = `${dn} of ${total} done`; });
     }));
     $view.querySelector('[data-action=share]').addEventListener('click', () => openShareSheet(report));
-    $view.querySelector('[data-action=unlock]')?.addEventListener('click', () => { sset('sc_intent_tier', 'growth_plan'); go('#/pricing'); });
-    $view.querySelector('[data-action=unlock-once]')?.addEventListener('click', async e => {
-      if (!token()) { sset('sc_next', location.hash); sset('sc_unlock_once', report.report_id); go('#/signup'); return; }
-      const b = e.currentTarget; b.disabled = true; b.textContent = 'Unlocking…';
+    // Both paid paths go through the 60-second intake first.
+    $view.querySelector('[data-action=unlock]')?.addEventListener('click', () => { sset('sc_intent_tier', 'growth_plan'); sset('sc_form', { handle: biz.handle, platform: biz.platform, category: biz.category, email: sget('sc_form', {}).email || report.email || '' }); go(`#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=subscribe`); });
+    $view.querySelector('[data-action=unlock-once]')?.addEventListener('click', () => { sset('sc_once_price', oneTime); go(`#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=once`); });
+    // Check-in "nothing changed" and nudge answers
+    const answer = async (b, body, doneMsg) => {
+      b.disabled = true;
       try {
-        const res = await api('/reports/' + encodeURIComponent(report.report_id) + '/unlock', { method: 'POST', body: JSON.stringify({}) });
-        if (res.already_unlocked) { go('#/report/' + encodeURIComponent(res.report_id)); return; }
-        sset('sc_job_' + res.job_id, { handle: biz.handle, platform: biz.platform, category: biz.category, submitted_at: Date.now(), one_time: true });
-        toast(`Charged ${res.payment?.amount || '$9'} once. Writing your full plan…`);
-        go('#/evaluating/' + encodeURIComponent(res.job_id));
-      } catch (e2) { if (e2.status === 401) return; toast(e2.message || 'Unlock failed.'); b.disabled = false; b.textContent = 'Unlock once'; }
-    });
+        const res = await api('/reports/' + encodeURIComponent(report.report_id) + '/checkin', { method: 'POST', body: JSON.stringify(body) });
+        if (res.job_id) { sset('sc_job_' + res.job_id, { handle: biz.handle, platform: biz.platform, category: biz.category, submitted_at: Date.now(), rerun: true }); sessionStorage.removeItem('sc_report_' + report.report_id); toast('Rewriting your plan…'); go('#/evaluating/' + encodeURIComponent(res.job_id)); return; }
+        report.checkins = res.checkins || report.checkins; if (body.nudge) report.nudge = null; sset('sc_report_' + report.report_id, report); toast(doneMsg); route();
+      } catch (e2) { if (e2.status === 401) return; toast(e2.message || 'Could not save.'); b.disabled = false; }
+    };
+    $view.querySelectorAll('[data-checkin]').forEach(b => b.addEventListener('click', () => answer(b, { phase: Number(b.dataset.checkin), changed: false }, 'Carrying on. We\'ll check in again next phase.')));
+    $view.querySelectorAll('[data-nudge]').forEach(b => b.addEventListener('click', () => answer(b, { nudge: b.dataset.nudge, changed: b.dataset.changed === '1' }, 'Kept as is.')));
+    if (subscriber && qs.get('checkin') && qs.get('changed') === '0' && !checkins['p' + qs.get('checkin')]) { const b = $view.querySelector('[data-checkin]'); if (b) b.click(); else answer({ disabled: false }, { phase: Number(qs.get('checkin')), changed: false }, 'Carrying on.'); }
+    if (qs.get('nudge')) document.getElementById('nudge')?.scrollIntoView({ behavior: 'smooth' });
     $view.querySelector('#compForm')?.addEventListener('submit', async e => {
       e.preventDefault(); const f = e.currentTarget; const btn = f.querySelector('button'); const out = $view.querySelector('#compResult');
       const handles = f.handles.value.split(/[,\s]+/).map(x => x.replace(/^@/, '').trim()).filter(Boolean).slice(0, 5);
@@ -631,7 +791,16 @@
       catch (e2) { if (e2.status === 401) return; if (e2.status === 402) { sset('sc_intent_tier', 'growth_plan'); go('#/pricing'); return; } out.innerHTML = h`<div class="form-error">${e2.message}</div>`; }
       btn.disabled = false; btn.textContent = 'Re-run';
     });
-    if (!paid) api('/billing/pricing', {}, { allow401: true }).then(p => { const t = (p.tiers || []).find(x => x.tier === 'growth_plan'); if (t && t.monthlyPrice != null) { const el = $view.querySelector('.upsell p'); if (el) el.textContent = el.textContent.replace(/\$\d+\/mo or \$\d+\/yr/, `$${t.monthlyPrice}/mo or $${t.annualPrice ?? Math.round(t.monthlyPrice * 9)}/yr`); } }).catch(() => { });
+    if (!paid) api('/billing/pricing', {}, { allow401: true }).then(p => { if (p.support_email) sset('sc_support', p.support_email); const t = (p.tiers || []).find(x => x.tier === 'growth_plan'); if (t && t.monthlyPrice != null) { const el = $view.querySelector('.upsell p'); if (el) el.textContent = el.textContent.replace(/\$\d+\/mo or \$\d+\/yr/, `$${t.monthlyPrice}/mo or $${t.annualPrice ?? Math.round(t.monthlyPrice * 9)}/yr`); } }).catch(() => { });
+  }
+  // The "how" under a move: numbered steps, paste-ready example, done-when, time.
+  function moveDetailHTML(d, dark) {
+    if (!d || (!(d.how || []).length && !d.example && !d.done_when)) return '';
+    return h`<div class="mvdetail ${dark ? 'dark' : ''}">
+      ${(d.how || []).length ? raw(h`<ol class="how">${raw(d.how.map(x => h`<li>${x}</li>`).join(''))}</ol>`) : ''}
+      ${d.example ? raw(h`<div class="ex"><div class="exl">Starting point — make it yours</div><div class="ext">${d.example}</div></div>`) : ''}
+      <div class="dw">${d.done_when ? raw(h`<span><b>Done when:</b> ${d.done_when}</span>`) : ''}${d.time ? raw(h`<span class="tm">${d.time}</span>`) : ''}</div>
+    </div>`;
   }
   function competitorRows(c) {
     const rows = [...c.competitors.filter(x => x.ok !== false).map(x => ({ ...x, you: false })), { handle: c.you.handle, overall: c.you.overall, you: true }].sort((a, b) => b.overall - a.overall);
@@ -643,7 +812,7 @@
     renderHeader('pricing');
     $view.innerHTML = h`<div class="center-msg">Loading pricing…</div>`;
     let pricing, ent = null;
-    try { pricing = await api('/billing/pricing', {}, { allow401: true }); }
+    try { pricing = await api('/billing/pricing', {}, { allow401: true }); if (pricing.support_email) sset('sc_support', pricing.support_email); }
     catch (e) { $view.innerHTML = h`<div class="center-msg"><h2>Pricing is unavailable right now.</h2>${e.message}</div>`; return; }
     if (token()) { try { ent = await api('/account/subscription-status', {}, { allow401: true }); } catch { } }
     const discM = /(\d+)\s*%/.exec(pricing.discount?.annual || ''); const disc = discM ? Number(discM[1]) / 100 : 0.25;
@@ -656,8 +825,12 @@
     const pro = tiers.find(t => t.tier === 'growth_plan_pro');
     const yr = t => t.annualPrice ?? Math.round((t.monthlyPrice || 0) * 12 * (1 - disc));
     const cur = t => ent && ent.current_tier === t;
+    let promoState = promo();
     const render = () => {
       const annual = billing === 'annual';
+      const pcode = promoState && promoState.code;
+      const pOk = promoState && !promoState.pending && promoState.checked_for === 'growth_plan:' + billing;
+      const growthLine = pOk && promoState.product === 'growth_plan' ? (promoState.free_months ? `$0 for your first ${promoState.free_months === 1 ? 'month' : promoState.free_months + ' months'}, then $${annual ? yr(growth) : growth.monthlyPrice}${annual ? '/yr' : '/mo'}` : `$${(promoState.amount_cents / 100).toFixed(promoState.amount_cents % 100 ? 2 : 0)} ${annual ? 'your first year' : 'your first month'}, then $${annual ? yr(growth) : growth.monthlyPrice}`) : null;
       const proOpen = sget('sc_pro_open', false);
       $view.innerHTML = h`<div class="wrap"><div class="pricing">
         ${limitMsg ? raw(h`<div class="notice" style="margin-bottom:18px">${limitMsg}</div>`) : ''}
@@ -675,25 +848,27 @@
           <div class="tier dark ${cur('growth_plan') ? 'cur' : ''}">
             <div class="th"><span class="n">${growth.name || 'Growth Plan'}</span><span class="tag act">${cur('growth_plan') ? 'YOUR PLAN' : 'MOST POPULAR'}</span></div>
             <div class="price"><span class="p">$${annual ? yr(growth) : growth.monthlyPrice}</span><span class="per">${annual ? '/ year' : '/ month'}</span></div>
-            <div class="note">${annual ? 'Two and a bit months free' : `Or $${yr(growth)} a year — ${Math.round(disc * 100)}% off`}</div>
+            <div class="note">${growthLine ? raw(h`<span class="promoline">${promoState.code}: ${growthLine}</span>`) : annual ? 'Two and a bit months free' : `Or $${yr(growth)} a year — ${Math.round(disc * 100)}% off`}</div>
             <div class="feats">${raw((growth.features || []).map(f => h`<div>${f}</div>`).join(''))}</div>
             <button type="button" class="btn" data-subscribe="growth_plan" ${cur('growth_plan') ? 'disabled' : ''}>${cur('growth_plan') ? 'Current plan' : 'Unlock the plan'}</button>
-            <div class="fine center">Cancel anytime. Keep the report either way.</div>
+            <div class="fine center">Cancel anytime. Keep the report either way.${SHIPPED ? raw(' · <a href="#/report/sample">See a full report</a>') : ''}</div>
           </div>
           <div class="side">
             ${pro ? raw(h`<div class="card procard ${proOpen ? 'open' : ''}">
               <button type="button" class="prohead" data-expand><div><div class="n">${pro.name}</div><div class="note">$${annual ? yr(pro) + '/yr' : pro.monthlyPrice + '/mo'} · all platforms together</div></div><span class="caret">${proOpen ? '–' : '+'}</span></button>
               ${proOpen ? raw(h`<div class="probody"><div class="feats">${raw((pro.features || []).map(f => h`<div>${f}</div>`).join(''))}</div><button type="button" class="btn ghost block" data-subscribe="growth_plan_pro" ${cur('growth_plan_pro') ? 'disabled' : ''}>${cur('growth_plan_pro') ? 'Current plan' : 'Choose Pro'}</button></div>`) : ''}
             </div>`) : ''}
-            ${raw((pricing.one_time || []).map(o => h`<div class="card tier once"><div class="th"><span class="n">${o.name}</span><span class="tag fair">ONE-TIME</span></div><div class="price"><span class="p">$${o.price}</span><span class="per">once</span></div><div class="note">${o.description}</div><div class="feats">${raw((o.features || []).map(f => h`<div>${f}</div>`).join(''))}</div><a class="btn ghost" href="${token() ? '#/reports' : '#/'}" ${token() ? '' : raw('data-scroll="evalForm"')}>${token() ? 'Pick a report to unlock' : 'Score first, then unlock'}</a></div>`).join(''))}
-            <div class="quote">
-              <div class="m">[REVIEW — replace before launch]</div>
-              <p class="q">“One-line quote placeholder about what changed after six weeks.”</p>
-              <div class="who"><span class="av"></span><div><div class="nm">Name placeholder</div><div class="hd">@handle · Fitness · 41 → 58</div></div></div>
-            </div>
+            ${raw((pricing.one_time || []).map(o => h`<div class="card tier once"><div class="th"><span class="n">${o.name}</span><span class="tag fair">ONE-TIME</span></div><div class="price"><span class="p">$${o.price}</span><span class="per">once</span></div><div class="note">${o.description}</div><div class="feats">${raw((o.features || []).map(f => h`<div>${f}</div>`).join(''))}</div>${(o.not_included || []).length ? raw(h`<div class="notfeats"><div class="l">Not included</div>${raw(o.not_included.map(f => h`<div>${f}</div>`).join(''))}</div>`) : ''}<a class="btn ghost" href="${token() ? '#/reports' : '#/'}" ${token() ? '' : raw('data-scroll="evalForm"')}>${token() ? 'Pick a report to unlock' : 'Score first, then unlock'}</a></div>`).join(''))}
+            ${(CFG.testimonials || []).length ? raw((CFG.testimonials || []).slice(0, 1).map(t => h`<div class="quote">
+              <p class="q">“${t.quote}”</p>
+              <div class="who"><span class="av"></span><div><div class="nm">${t.name}</div><div class="hd">${t.meta || ''}</div></div></div>
+            </div>`).join('')) : ''}
           </div>
         </div>
-        <div class="pfoot"><div>All tiers keep your report history. Cancel in two clicks.</div><div>${pricing.refund || 'Not useful in the first 7 days? Reply to any email and we refund it.'}</div><div class="fine">Business accounts are priced separately — $39 and $99. <a href="#/business">For businesses →</a></div></div>
+        <div class="promobox" id="promoBox">${pcode && !promoState.pending && promoState.checked_for === 'growth_plan:' + billing
+          ? raw(h`<span>Code <b>${pcode}</b> applied — ${promoState.description}.</span> <a href="#" data-promo="clear">Remove</a>`)
+          : raw(h`<a href="#" data-promo="open">${pcode ? `Apply code ${pcode}` : 'Have a code?'}</a><form id="promoForm" ${pcode ? '' : 'hidden'}><input type="text" name="code" placeholder="CODE" autocomplete="off" autocapitalize="characters" value="${pcode || ''}"><button class="btn dark sm" type="submit">Apply</button><span class="fine" id="promoMsg"></span></form>`)}</div>
+        <div class="pfoot"><div>All tiers keep your report history. Cancel in two clicks.</div><div>${pricing.refund || 'Not useful in the first 7 days? Reply to any email and we refund it.'}${supportEmail() ? raw(h` Or write to <a href="mailto:${supportEmail()}">${supportEmail()}</a>.`) : ''}</div><div class="fine">Business accounts are priced separately — $39 and $99. <a href="#/business">For businesses →</a></div></div>
       </div></div>${raw(footer())}`;
       $view.querySelectorAll('[data-billing]').forEach(b => b.addEventListener('click', () => { billing = b.dataset.billing; sset('sc_billing', billing); render(); }));
       $view.querySelector('[data-expand]')?.addEventListener('click', () => { sset('sc_pro_open', !proOpen); render(); });
@@ -701,13 +876,26 @@
         if (!token()) { sset('sc_next', location.hash); sset('sc_intent_tier', b.dataset.subscribe); go('#/signup'); return; }
         b.disabled = true; const label = b.textContent; b.textContent = 'Starting…';
         try {
-          await api('/billing/subscribe', { method: 'POST', body: JSON.stringify({ tier: b.dataset.subscribe, billingCycle: billing }) });
-          sessionStorage.removeItem('sc_intent_tier'); sessionStorage.removeItem('sc_limit_msg');
+          const body = { tier: b.dataset.subscribe, billingCycle: billing };
+          if (b.dataset.subscribe === 'growth_plan' && promoState && promoState.code) body.promo_code = promoState.code;
+          const sub = await api('/billing/subscribe', { method: 'POST', body: JSON.stringify(body) });
+          sessionStorage.removeItem('sc_intent_tier'); sessionStorage.removeItem('sc_limit_msg'); clearPromo();
+          if (sub.promo) toast(`${sub.promo.code} applied — ${sub.promo.description}.`);
           const last = sget('sc_form', {});
-          if (last.handle && last.platform && last.category && last.email) { toast(`You're on. Writing the full plan for @${last.handle}…`); await submitEvaluation(last, null); return; }
+          if (last.handle && last.platform && last.category) { toast(`You're on. Writing the full plan for @${last.handle}…`); await submitEvaluation(last, null); return; }
           toast("You're on. Score an account to get the full plan."); go('#/');
         } catch (e) { if (e.status === 401) return; toast(e.message || 'Subscription failed.'); b.disabled = false; b.textContent = label; }
       }));
+      // promo box
+      $view.querySelector('[data-promo=open]')?.addEventListener('click', e => { e.preventDefault(); const f = $view.querySelector('#promoForm'); f.hidden = false; f.code.focus(); if (f.code.value) f.requestSubmit(); });
+      $view.querySelector('[data-promo=clear]')?.addEventListener('click', e => { e.preventDefault(); clearPromo(); promoState = null; render(); });
+      $view.querySelector('#promoForm')?.addEventListener('submit', async e => {
+        e.preventDefault(); const f = e.currentTarget; const msg = f.querySelector('#promoMsg'); const code = f.code.value.trim().toUpperCase(); if (!code) return;
+        msg.textContent = 'Checking…';
+        try { const r = await checkPromo(code, 'growth_plan', billing); if (r.valid) { promoState = promo(); render(); } else { msg.textContent = r.reason; if (r.reason && /60-day/.test(r.reason)) { sset('sc_promo', { code, pending: true }); } } }
+        catch (e2) { msg.textContent = e2.message; }
+      });
+      if (promoState && promoState.pending && !$view.querySelector('#promoMsg')?.textContent) { const f = $view.querySelector('#promoForm'); if (f) { f.hidden = false; f.requestSubmit(); } }
       if (intent === 'growth_plan_pro' && !proOpen) { sset('sc_pro_open', true); render(); }
     };
     render();
@@ -758,7 +946,7 @@
         <div class="alt">No account yet? <a href="#/signup">Create one</a> · <a href="#/" data-scroll="evalForm">Score an account free</a></div>
       </form></div></div>${raw(footer())}`;
     const form = $view.querySelector('#signinForm');
-    form.querySelector('[data-action=forgot]').addEventListener('click', e => { e.preventDefault(); toast('Password reset isn’t wired up yet.'); });
+    form.querySelector('[data-action=forgot]').addEventListener('click', e => { e.preventDefault(); sset('sc_forgot_email', form.querySelector('#siEmail')?.value || ''); go('#/forgot'); });
     form.addEventListener('submit', async e => {
       e.preventDefault(); const err = form.querySelector('#signinError');
       const email = form.email.value.trim(), password = form.password.value;
@@ -799,7 +987,7 @@
         const t = res.token || res.access_token; if (!t) throw new Error('No token in response');
         setToken(t); sessionStorage.removeItem('sc_next');
         const pendingUnlock = sget('sc_unlock_once', null);
-        if (pendingUnlock) { sessionStorage.removeItem('sc_unlock_once'); go('#/report/' + encodeURIComponent(pendingUnlock)); toast('Signed up — tap "Unlock once" again to finish.'); return; }
+        if (pendingUnlock) { sessionStorage.removeItem('sc_unlock_once'); go(`#/plan-setup?report=${encodeURIComponent(pendingUnlock)}&path=once`); toast('Signed up — one more step to your 60-day plan.'); return; }
         go(next && !/signin|signup/.test(next) ? next : '#/');
       } catch (e2) { err.textContent = e2.body?.code === 'EMAIL_EXISTS' ? 'That email already has an account — sign in instead.' : (e2.message || 'Sign-up failed.'); err.hidden = false; btn.disabled = false; btn.textContent = 'Create account'; }
     });
@@ -815,13 +1003,23 @@
     renderHeader('reports');
     if (!token()) { sset('sc_next', '#/reports'); go('#/signin'); return; }
     $view.innerHTML = h`<div class="center-msg">Loading your reports…</div>`;
-    let list;
-    try { list = await api('/account/reports'); } catch (e) { if (e.status === 401) return; $view.innerHTML = h`<div class="center-msg"><h2>Couldn’t load reports.</h2>${e.message}</div>`; return; }
+    let list, subn = null;
+    try { [list, subn] = await Promise.all([api('/account/reports'), api('/account/subscription-status').catch(() => null)]); } catch (e) { if (e.status === 401) return; $view.innerHTML = h`<div class="center-msg"><h2>Couldn’t load reports.</h2>${e.message}</div>`; return; }
+    const planCard = () => {
+      if (!subn) return '';
+      const free = subn.status === 'free';
+      const pending = subn.status === 'cancel_pending';
+      return h`<div class="card plancard ${pending ? 'pending' : ''}"><div class="t"><div class="n">Your plan</div><h2>${subn.tier_name || 'Free Snapshot'}${free ? '' : raw(h` <span class="pr">· $${subn.monthly_price}/mo</span>`)}</h2>
+        <p>${free ? 'One free score per account. The Growth Plan writes the whole 90 days and re-scores you weekly.' : pending ? `Cancelled. You keep everything until ${fmtDate(subn.cancel_at)}, then the weekly refresh stops. Your reports stay.` : subn.billing_period_end ? `Renews ${fmtDate(subn.billing_period_end)}. Cancel any time — you keep the plan to the end of the period and every report after.` : 'Cancel any time — you keep the plan to the end of the period and every report after.'}</p></div>
+        <div class="acts">${free ? raw(h`<a class="btn" href="#/pricing">See the plan</a>`) : pending ? raw(h`<button type="button" class="btn green" data-action="resume-plan">Resume the plan</button>`) : raw(h`<button type="button" class="btn ghost" data-action="cancel-plan">Cancel plan</button>`)}</div>
+        ${free ? '' : raw(h`<label class="pausetog"><input type="checkbox" data-action="email-pause" ${subn.email_paused ? 'checked' : ''}> Pause check-in and score emails${subn.email_paused ? ' — paused' : ''}<span class="fine">Report-ready and password emails still send.</span></label>`)}</div>`;
+    };
     const reports = (list.reports || []).map(r => ({ id: r.reportId || r.report_id, tier: r.tier, at: r.generatedAt || r.generated_at, handle: r.business?.handle, platform: r.business?.platform, category: r.business?.category, overall: r.reportBody?.scores?.overall ?? null, known: r.reportBody?.scores?.niche_known !== false })).sort((a, b) => b.at - a.at);
     const byHandle = {}; for (const r of reports) (byHandle[`${r.platform}:${r.handle}`] ||= []).push(r);
     const unknownNiches = [...new Set(reports.filter(r => !r.known).map(r => nicheName(r.category)))];
     $view.innerHTML = h`<div class="wrap"><div class="history">
       <div class="ph"><h1>Your reports</h1><a class="btn pillbtn" href="#/" data-scroll="evalForm">Run a new evaluation</a></div>
+      ${raw(planCard())}
       ${reports.length ? raw(Object.values(byHandle).map((rs, gi) => { const asc = [...rs].reverse(); const series = asc.map(r => r.overall).filter(v => v != null); const latest = rs[0], first = asc[0]; const delta = series.length > 1 ? latest.overall - first.overall : null;
         return h`<details class="card hgroup" ${gi === 0 ? 'open' : ''}><summary>
             <div class="who"><div class="handle">@${latest.handle}</div><div class="ctx">${platName(latest.platform)} · ${nicheName(latest.category)} · ${rs.length} run${rs.length === 1 ? '' : 's'}</div></div>
@@ -836,6 +1034,37 @@
       <div class="card settings"><div class="n">Settings · your data</div><p>Delete my account and reports — removes your account, every report we've written for you and your score history. Payment records we're required to keep are retained by Stripe.</p><button type="button" class="btn danger" data-action="delete-account">Delete my account</button></div>
     </div></div>${raw(footer())}`;
     $view.querySelector('[data-action=delete-account]').addEventListener('click', () => openDeleteDialog(reports.length));
+    $view.querySelector('[data-action=cancel-plan]')?.addEventListener('click', () => openCancelDialog(subn));
+    $view.querySelector('[data-action=email-pause]')?.addEventListener('change', async e => {
+      const on = e.currentTarget.checked;
+      try { await api('/account/email/pause', { method: 'POST', body: JSON.stringify({ paused: on }) }); toast(on ? 'Paused. Your plan keeps running.' : 'Emails back on.'); }
+      catch (e2) { if (e2.status === 401) return; toast(e2.message); e.currentTarget.checked = !on; }
+    });
+    $view.querySelector('[data-action=resume-plan]')?.addEventListener('click', async e => {
+      e.currentTarget.disabled = true;
+      try { await api('/billing/resume', { method: 'POST', body: '{}' }); toast('Welcome back. The plan carries on.'); viewReports(); }
+      catch (e2) { if (e2.status === 401) return; toast(e2.message); e.currentTarget.disabled = false; }
+    });
+  }
+  // Cancel is one confirm, no retention screens. Reason is optional and only logged.
+  function openCancelDialog(subn) {
+    const el = document.createElement('div'); el.className = 'sheet center';
+    const until = subn?.billing_period_end ? fmtDate(subn.billing_period_end) : 'the end of this billing period';
+    el.innerHTML = h`<div class="panel dialog" role="dialog" aria-label="Cancel plan">
+      <h3>Cancel the ${subn?.tier_name || 'Growth Plan'}?</h3>
+      <p>You keep everything until ${until} — moves, calendar, competitors, the weekly re-score. After that the plan stops refreshing and you're on the free tier. Every report stays yours.</p>
+      <input type="text" id="cancelWhy" placeholder="Why? (optional — one line)" autocomplete="off" maxlength="200">
+      <div class="row2"><button type="button" class="btn ghost" data-close>Keep my plan</button><button type="button" class="btn danger" data-cancel>Cancel the plan</button></div>
+      <div class="fine center">Changed your mind later? You can resume until ${until}.</div></div>`;
+    document.body.appendChild(el);
+    const close = () => el.remove();
+    el.addEventListener('click', e => { if (e.target === el) close(); });
+    el.querySelector('[data-close]').addEventListener('click', close);
+    el.querySelector('[data-cancel]').addEventListener('click', async e => {
+      e.currentTarget.disabled = true;
+      try { const r = await api('/billing/cancel', { method: 'POST', body: JSON.stringify({ reason: el.querySelector('#cancelWhy').value }) }); close(); toast(r.endsAt ? `Cancelled. Yours until ${fmtDate(r.endsAt)}.` : 'Cancelled.'); viewReports(); }
+      catch (e2) { if (e2.status === 401) return; toast(e2.message); e.currentTarget.disabled = false; }
+    });
   }
   function openDeleteDialog(n) {
     const el = document.createElement('div'); el.className = 'sheet center';
@@ -853,6 +1082,174 @@
     el.querySelector('[data-del]').addEventListener('click', async () => {
       try { await api('/account', { method: 'DELETE' }); setToken(null); close(); toast('Your account and reports are gone.'); go('#/'); }
       catch (e) { if (e.status === 404) toast('Account deletion isn’t wired up on the server yet.'); else toast(e.message); }
+    });
+  }
+
+  // ------------------------------------------------------------ password reset
+  function viewForgot() {
+    renderHeader('signin');
+    const last = sget('sc_forgot_email', '');
+    $view.innerHTML = h`<div class="wrap"><div class="authwrap"><div class="brandname">Scalecraft</div><form class="card lightform" id="forgotForm" novalidate>
+        <h2>Reset your password</h2>
+        <p class="sub">Type the email you signed up with. If it has an account, we'll send a link that works once, for an hour.</p>
+        <div class="field"><label for="fgEmail">Email</label><input id="fgEmail" type="email" name="email" autocomplete="email" value="${last}" placeholder="you@example.com"></div>
+        <button class="btn block" type="submit">Send the link</button>
+        <div class="fine center"><a href="#/signin">Back to sign in</a></div>
+      </form></div></div>${raw(footer())}`;
+    const form = $view.querySelector('#forgotForm');
+    form.addEventListener('submit', async e => {
+      e.preventDefault(); const email = form.email.value.trim(); if (!email) { toast('Type your email first.'); return; }
+      const b = form.querySelector('button'); b.disabled = true; b.textContent = 'Sending…';
+      try { await api('/auth/forgot', { method: 'POST', body: JSON.stringify({ email }) }, { allow401: true }); } catch { }
+      form.innerHTML = h`<h2>Check your inbox</h2><p class="sub">If <b>${email}</b> has an account, a reset link is on its way. It works once and expires in an hour. Nothing arrived in a few minutes? Check spam, or <a href="#/forgot">try again</a>.</p><div class="fine center"><a href="#/signin">Back to sign in</a></div>`;
+    });
+  }
+  function viewReset() {
+    renderHeader('signin');
+    const tokenParam = new URLSearchParams(location.hash.split('?')[1] || '').get('token') || '';
+    if (!tokenParam) { $view.innerHTML = h`<div class="center-msg"><h2>This reset link is missing its code.</h2><a href="#/forgot">Request a new one</a></div>`; return; }
+    $view.innerHTML = h`<div class="wrap"><div class="authwrap"><div class="brandname">Scalecraft</div><form class="card lightform" id="resetForm" novalidate>
+        <h2>Choose a new password</h2>
+        <div class="field"><label for="rsPass">New password</label><input id="rsPass" type="password" name="password" autocomplete="new-password" placeholder="At least 6 characters"></div>
+        <div class="field"><label for="rsPass2">Again</label><input id="rsPass2" type="password" name="password2" autocomplete="new-password"></div>
+        <button class="btn block" type="submit">Save and sign in</button>
+        <div class="form-error" id="rsErr" hidden></div>
+      </form></div></div>${raw(footer())}`;
+    const form = $view.querySelector('#resetForm'); const err = form.querySelector('#rsErr');
+    form.addEventListener('submit', async e => {
+      e.preventDefault(); err.hidden = true;
+      const p1 = form.password.value, p2 = form.password2.value;
+      if (p1.length < 6) { err.textContent = 'At least 6 characters.'; err.hidden = false; return; }
+      if (p1 !== p2) { err.textContent = "Those don't match."; err.hidden = false; return; }
+      const b = form.querySelector('button'); b.disabled = true; b.textContent = 'Saving…';
+      try { const r = await api('/auth/reset', { method: 'POST', body: JSON.stringify({ token: tokenParam, password: p1 }) }, { allow401: true }); if (r.token) setToken(r.token); toast('Password saved. You’re signed in.'); go('#/reports'); }
+      catch (e2) { err.textContent = e2.message || 'That link has expired.'; err.hidden = false; b.disabled = false; b.textContent = 'Save and sign in'; }
+    });
+  }
+
+  // ------------------------------------------------------------ admin
+  const money = n => '$' + (Math.round(n * 100) / 100).toFixed(2);
+  async function viewAdmin() {
+    renderHeader('admin');
+    if (!token()) { sset('sc_next', '#/admin'); go('#/signin'); return; }
+    $view.innerHTML = h`<div class="center-msg">Loading…</div>`;
+    let ov, reports, failed;
+    try { [ov, reports, failed] = await Promise.all([api('/admin/overview'), api('/admin/reports?limit=50'), api('/admin/failed-jobs?limit=30')]); }
+    catch (e) {
+      if (e.status === 401) return;
+      if (e.status === 403 || e.status === 404) { lset('sc_admin', false); $view.innerHTML = h`<div class="center-msg"><h2>This account isn't an admin.</h2>Add your email to <code>ADMIN_EMAILS</code> on the server, then sign in again.</div>`; return; }
+      $view.innerHTML = h`<div class="center-msg"><h2>Couldn't load admin.</h2>${e.message}</div>`; return;
+    }
+    lset('sc_admin', true);
+    const t = ov.today, p = ov.people, caps = ov.caps;
+    const spend = (t.free_scores + t.paid_runs + t.competitor_pulls) * ov.cost.instagram;
+    const tierName = k => ({ social_snapshot: 'Free', growth_plan: 'Growth Plan', growth_plan_pro: 'Pro', business_growth: 'Business Growth', business_evaluator: 'Business Evaluator', agency: 'Agency' }[k] || k);
+    const stat = (n, l, sub) => h`<div class="stat"><div class="n">${n}</div><div class="l">${l}</div>${sub ? raw(h`<div class="s">${sub}</div>`) : ''}</div>`;
+    const bar = (used, cap) => h`<div class="capbar"><div class="fill ${used / cap > 0.8 ? 'hot' : ''}" style="width:${Math.min(100, Math.round(used / cap * 100))}%"></div></div>`;
+    const reportRow = r => h`<a class="arow" href="#/report/${r.report_id}"><span>${fmtDate(r.generated_at)}</span><span class="h">@${r.handle || '—'}</span><span class="t">${platName(r.platform)} · ${r.one_time ? '60-day' : tierName(r.tier)}${r.partial ? ' · partial' : ''}</span><span class="e">${r.email || ''}</span><span class="n">${r.overall ?? '—'}</span></a>`;
+    $view.innerHTML = h`<div class="wrap"><div class="admin">
+      <div class="ph"><h1>Admin</h1><span class="fine">${ov.mail.configured ? 'Email: sending' : 'Email: logging only (no RESEND_API_KEY)'} · queue: ${ov.queue?.processingCount ?? 0} running of ${ov.queue?.numWorkers ?? '?'}</span></div>
+
+      <section class="card"><h2>Today</h2>
+        <div class="stats">
+          ${raw(stat(t.free_scores, 'free scores', `cap ${caps.free_runs_per_day_global}`))}
+          ${raw(stat(t.paid_runs, 'paid runs', `${caps.paid_runs_per_day}/account cap`))}
+          ${raw(stat(t.competitor_pulls, 'competitor pulls', `${caps.competitor_pulls_per_day}/account cap`))}
+          ${raw(stat(money(spend), 'est. Apify spend', 'at Instagram rates; TikTok is 20×'))}
+          ${raw(stat(t.jobs.failed || 0, 'jobs failed', `${(t.jobs.complete || 0)} completed`))}
+        </div>
+        <div class="fine">Global free cap</div>${raw(bar(t.free_scores, caps.free_runs_per_day_global))}
+      </section>
+
+      <section class="card"><h2>People</h2>
+        <div class="stats">
+          ${raw(stat(p.users, 'accounts', `+${p.signups_7d} this week · +${p.signups_30d} this month`))}
+          ${raw(p.tiers.filter(x => x.tier !== 'social_snapshot').map(x => stat(x.n, tierName(x.tier), x.cancel_pending ? `${x.cancel_pending} cancelling` : 'subscribers')).join(''))}
+          ${raw(stat(p.one_time_buyers, '60-day plans sold', 'one-time'))}
+          ${raw(stat(p.waitlist.reduce((n, w) => n + w.n, 0), 'on waitlists', p.waitlist.map(w => `${w.platform} ${w.n}`).join(' · ') || '—'))}
+        </div>
+        ${ov.outcomes && ov.outcomes.n ? raw(h`<div class="fine">Evidence: ${ov.outcomes.n} refreshes recorded · creators who did 3+ moves moved ${ov.outcomes.avg_delta_active ?? '—'} points on average.</div>`) : raw('<div class="fine">Evidence: no refresh outcomes yet.</div>')}
+        ${ov.baselines ? raw(h`<div class="fine">Baselines: ${ov.baselines.total} accounts across ${Object.keys(ov.baselines.by_category || {}).length} niches.</div>`) : ''}
+      </section>
+
+      <section class="card"><h2>Look up an account</h2>
+        <form class="compform" id="adminFind"><input type="text" name="q" placeholder="email or @handle" autocomplete="off"><button class="btn dark" type="submit">Find</button></form>
+        <div id="adminAccount"></div>
+      </section>
+
+      <section class="card"><h2>Promo codes</h2>
+        <div id="promoList" class="alist"></div>
+        <form class="promocreate" id="promoCreate">
+          <input name="code" placeholder="CODE" required autocapitalize="characters">
+          <select name="kind"><option value="free_months">Free month(s)</option><option value="percent">% off</option><option value="amount">$ off</option><option value="free_unlock">Free 60-day plan</option></select>
+          <input name="value" type="number" min="0" placeholder="value (months · % · dollars)">
+          <select name="applies_to"><option value="any">Any</option><option value="growth_plan">Growth Plan</option><option value="plan_unlock">60-day plan</option></select>
+          <input name="max_redemptions" type="number" min="1" placeholder="max uses">
+          <input name="expires_at" type="date">
+          <input name="note" placeholder="where it's posted (note)">
+          <button class="btn dark sm" type="submit">Create code</button>
+          <span class="fine" id="promoCreateMsg"></span>
+        </form>
+        <div class="fine">Share as a link: <code>${location.origin}/?promo=CODE</code> — it applies itself.</div>
+      </section>
+
+      <section class="card"><h2>Recent reports <span class="fine">last ${reports.reports.length}</span></h2>
+        <div class="alist">${raw(reports.reports.map(reportRow).join('') || '<div class="fine">None yet.</div>')}</div>
+      </section>
+
+      <section class="card"><h2>Failed jobs <span class="fine">last 24h and older</span></h2>
+        <div class="alist">${raw(failed.jobs.map(j => h`<div class="arow fail"><span>${fmtDate(j.created_at)}</span><span class="h">@${j.handle || '—'}</span><span class="t">${platName(j.platform)} · ${tierName(j.tier)} · ${j.stage || ''}</span><span class="e">${j.email || ''}</span><span class="err">${j.error || ''}</span></div>`).join('') || '<div class="fine">No failures.</div>')}</div>
+      </section>
+    </div></div>${raw(footer())}`;
+
+    // promo list + create
+    const kindLabel = p => p.kind === 'free_months' ? `${p.value} month${p.value === 1 ? '' : 's'} free` : p.kind === 'percent' ? `${p.value}% off` : p.kind === 'amount' ? `$${(p.value / 100).toFixed(p.value % 100 ? 2 : 0)} off` : 'free 60-day plan';
+    const applyLabel = a => ({ any: 'any', growth_plan: 'Growth Plan', plan_unlock: '60-day' }[a] || a);
+    const renderPromos = async () => {
+      const el = $view.querySelector('#promoList');
+      try {
+        const { promos } = await api('/admin/promos');
+        el.innerHTML = promos.length ? promos.map(p => h`<div class="arow promo ${p.active ? '' : 'off'}"><span class="h">${p.code}</span><span class="t">${kindLabel(p)} · ${applyLabel(p.applies_to)}${p.expires_at ? ' · until ' + fmtDate(p.expires_at) : ''}${p.note ? ' · ' + p.note : ''}</span><span class="e">${p.redemptions}${p.max_redemptions != null ? ' / ' + p.max_redemptions : ''} used</span><span class="n"><button class="btn ghost sm" data-promo-toggle="${p.code}" data-active="${p.active ? '1' : '0'}">${p.active ? 'Pause' : 'Resume'}</button></span></div>`).join('') : '<div class="fine">No codes yet.</div>';
+        el.querySelectorAll('[data-promo-toggle]').forEach(b => b.addEventListener('click', async () => { b.disabled = true; try { await api('/admin/promos/' + b.dataset.promoToggle, { method: 'PATCH', body: JSON.stringify({ active: b.dataset.active !== '1' }) }); renderPromos(); } catch (e) { toast(e.message); b.disabled = false; } }));
+      } catch (e) { el.innerHTML = h`<div class="form-error">${e.message}</div>`; }
+    };
+    renderPromos();
+    $view.querySelector('#promoCreate').addEventListener('submit', async e => {
+      e.preventDefault(); const f = e.currentTarget; const msg = f.querySelector('#promoCreateMsg');
+      const kind = f.kind.value; let value = Number(f.value.value) || 0; if (kind === 'amount') value = Math.round(value * 100);
+      const body = { code: f.code.value, kind, value, applies_to: f.applies_to.value, max_redemptions: f.max_redemptions.value || null, expires_at: f.expires_at.value ? new Date(f.expires_at.value + 'T23:59:59').getTime() : null, note: f.note.value };
+      msg.textContent = 'Creating…';
+      try { await api('/admin/promos', { method: 'POST', body: JSON.stringify(body) }); msg.textContent = ''; f.reset(); renderPromos(); toast(`${body.code.toUpperCase()} created.`); }
+      catch (e2) { msg.textContent = e2.message; }
+    });
+
+    const box = $view.querySelector('#adminAccount');
+    const showAccount = a => {
+      const u = a.user, en = a.entitlement;
+      box.innerHTML = h`<div class="acct">
+        <div class="top"><div><b>${u.email}</b><div class="fine">${u.user_id} · joined ${fmtDate(u.created_at)}${u.email_paused ? ' · emails paused' : ''}</div></div>
+          <div class="tagline"><span class="tag ${en.tier === 'social_snapshot' ? 'fair' : 'dark'}">${tierName(en.tier)}</span>${en.cancel_at ? raw(h`<span class="fine">ends ${fmtDate(en.cancel_at)}</span>`) : en.period_end ? raw(h`<span class="fine">renews ${fmtDate(en.period_end)}</span>`) : ''}</div></div>
+        <div class="fine">Today: ${Object.entries(a.usage_today).map(([k, v]) => `${k} ${v}`).join(' · ') || 'no runs'}</div>
+        ${a.plan_contexts.length ? raw(h`<div class="ctxrow">${raw(a.plan_contexts.map(c => contextChips(c) + (c.notes ? h`<span class="chip note">“${c.notes}”</span>` : '') + h`<span class="fine">(@${c.handle})</span>`).join(''))}</div>`) : ''}
+        <div class="alist">${raw(a.reports.map(r => h`<a class="arow" href="#/report/${r.report_id}"><span>${fmtDate(r.generated_at)}</span><span class="h">@${r.handle}</span><span class="t">${r.one_time ? '60-day' : tierName(r.tier)} · ${r.moves_done} moves done${r.checkins ? ' · check-ins ' + Object.keys(r.checkins).join(',') : ''}${r.emails_sent.length ? ' · emailed ' + r.emails_sent.join(',') : ''}</span><span class="n">${r.overall ?? '—'}</span></a>`).join('') || '<div class="fine">No reports.</div>')}</div>
+        <div class="acts"><button class="btn ghost sm" data-adm="resend">Resend latest report email</button><button class="btn ghost sm" data-adm="comp">Comp 30 days</button><button class="btn danger sm" data-adm="delete">Delete account</button></div></div>`;
+      box.querySelectorAll('[data-adm]').forEach(b => b.addEventListener('click', async () => {
+        const act = b.dataset.adm;
+        if (act === 'delete' && !confirm(`Delete ${u.email} and every report? This can't be undone.`)) return;
+        b.disabled = true;
+        try {
+          if (act === 'resend') { await api(`/admin/account/${u.user_id}/resend`, { method: 'POST', body: '{}' }); toast('Sent (or logged, if email isn’t configured).'); }
+          if (act === 'comp') { const r = await api(`/admin/account/${u.user_id}/comp`, { method: 'POST', body: JSON.stringify({ days: 30 }) }); toast(`Growth Plan until ${fmtDate(r.until)}.`); showAccount(await api('/admin/account?q=' + encodeURIComponent(u.email))); return; }
+          if (act === 'delete') { await api(`/admin/account/${u.user_id}`, { method: 'DELETE' }); toast('Deleted.'); box.innerHTML = ''; return; }
+        } catch (e) { toast(e.message); }
+        b.disabled = false;
+      }));
+    };
+    $view.querySelector('#adminFind').addEventListener('submit', async e => {
+      e.preventDefault(); const q = e.currentTarget.q.value.trim(); if (!q) return;
+      box.innerHTML = '<div class="fine">Looking…</div>';
+      try { showAccount(await api('/admin/account?q=' + encodeURIComponent(q))); }
+      catch (e2) { box.innerHTML = h`<div class="form-error">${e2.status === 404 ? 'No account matches that.' : e2.message}</div>`; }
     });
   }
 
@@ -881,7 +1278,7 @@
       ['Eligibility', 'You must be 18 or over to use Scalecraft. You may score an account you hold, or one you have the account holder’s consent to score.'],
       ['Your account', 'Keep your password to yourself. You are responsible for what happens under your account. Tell us at once if you think someone else has access to it.'],
       ['Free tier limits', 'One free Snapshot per email address. A second evaluation requires an account and a paid plan.'],
-      ['Subscriptions, billing and refunds', 'Paid plans renew monthly or annually until cancelled. Billing is handled by Stripe; we never see your full card details. You can cancel in two clicks from your settings and keep access until the end of the period you paid for. If the plan is not useful in the first seven days, reply to any email from us and we refund it.'],
+      ['Subscriptions, billing and refunds', 'Paid plans renew monthly or annually until cancelled. Billing is handled by Stripe; we never see your full card details. You can cancel in two clicks from your settings and keep access until the end of the period you paid for. If the plan is not useful in the first seven days, reply to any email from us and we refund it.' + (supportEmail() ? ` Questions about billing: ${supportEmail()}.` : '')],
       ['Acceptable use', 'Do not score an account you intend to harass. Do not scrape, resell or redistribute our scores, plans or calendars. Do not attempt to reverse the engine or use the service to build a competing dataset.'],
       ['Intellectual property', 'Your content and your data stay yours. The scores, plans and calendars we produce are licensed to you for your own use for as long as your account exists.'],
       ['Disclaimers', 'Recommendations are suggestions, not instructions, and results vary. We are not affiliated with, endorsed by or operated by Instagram, TikTok or any other platform.'],
@@ -941,10 +1338,14 @@
     if (parts[0] === 'evaluating' && parts[1]) return viewEvaluating(decodeURIComponent(parts[1]));
     if (parts[0] === 'report' && parts[1]) return viewReport(decodeURIComponent(parts[1]));
     if (parts[0] === 'pricing') return viewPricing();
+    if (parts[0] === 'plan-setup') return viewPlanSetup();
     if (parts[0] === 'business') return viewBusiness();
     if (parts[0] === 'signin') return viewSignin();
     if (parts[0] === 'signup') return viewSignup();
+    if (parts[0] === 'forgot') return viewForgot();
+    if (parts[0] === 'reset') return viewReset();
     if (parts[0] === 'reports') return viewReports();
+    if (parts[0] === 'admin') return viewAdmin();
     if (parts[0] === 'how') return viewHow();
     if (parts[0] === 'legal') return viewLegal(parts[1] || 'terms');
     renderHeader('landing');
