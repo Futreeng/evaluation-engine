@@ -249,6 +249,47 @@ function initSchema() {
   db.run(`CREATE INDEX IF NOT EXISTS idx_costs_time ON growth_engine_costs (created_at)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_costs_account ON growth_engine_costs (account_id)`);
 
+
+  // Outcomes data (spec 1.15): every move toggle, and the score change
+  // measured at the next rescore for each move done in between.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS growth_engine_move_log (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      report_id TEXT NOT NULL,
+      handle TEXT,
+      platform TEXT,
+      category TEXT,
+      move_key TEXT NOT NULL,
+      done INTEGER NOT NULL,
+      overall_at INTEGER,
+      dims_at TEXT,
+      plan_day INTEGER,
+      created_at INTEGER NOT NULL
+    )
+  `);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_move_log_report ON growth_engine_move_log (report_id)`);
+  db.run(`
+    CREATE TABLE IF NOT EXISTS growth_engine_move_outcomes (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      handle TEXT,
+      platform TEXT,
+      category TEXT,
+      move_key TEXT NOT NULL,
+      moves_done_together INTEGER NOT NULL,
+      score_before INTEGER,
+      score_after INTEGER,
+      dims_before TEXT,
+      dims_after TEXT,
+      days INTEGER,
+      from_report TEXT,
+      to_report TEXT,
+      created_at INTEGER NOT NULL
+    )
+  `);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_move_outcomes_key ON growth_engine_move_outcomes (category, platform, move_key)`);
+
   // Tier history table: audit log of tier changes
   db.run(`
     CREATE TABLE IF NOT EXISTS tier_history (
@@ -923,6 +964,32 @@ async function adminCosts(sinceTs, limit = 50) {
     users: users.map((u) => ({ account_id: u.account_id, email: u.email, cost_cents: Number(u.cents), reports: Number(u.reports), revenue_cents: rev[u.account_id] || 0 })) };
 }
 
+
+// ===================== OUTCOMES (spec 1.15) =====================
+async function logMove({ accountId, reportId, handle, platform, category, moveKey, done, overall, dims, planDay }) {
+  if (!db) throw new Error("Database not initialized");
+  db.run(`INSERT INTO growth_engine_move_log (id, account_id, report_id, handle, platform, category, move_key, done, overall_at, dims_at, plan_day, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ["ml_" + uid(), accountId, reportId, handle || null, platform || null, category || null, moveKey, done ? 1 : 0, overall ?? null, dims ? JSON.stringify(dims) : null, planDay ?? null, Date.now()]);
+  saveDb();
+}
+async function recordMoveOutcomes({ accountId, handle, platform, category, moveKeys, before, after, days, fromReport, toReport }) {
+  if (!db) throw new Error("Database not initialized");
+  for (const k of moveKeys) {
+    db.run(`INSERT INTO growth_engine_move_outcomes (id, account_id, handle, platform, category, move_key, moves_done_together, score_before, score_after, dims_before, dims_after, days, from_report, to_report, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ["mo_" + uid(), accountId, handle || null, platform || null, category || null, k, moveKeys.length, before.overall ?? null, after.overall ?? null, JSON.stringify(before.dims || {}), JSON.stringify(after.dims || {}), days ?? null, fromReport || null, toReport || null, Date.now()]);
+  }
+  saveDb();
+}
+// Which moves raise scores where: avg delta per move key, by niche+platform.
+async function moveOutcomeSummary({ category = null, platform = null } = {}) {
+  if (!db) throw new Error("Database not initialized");
+  const where = []; const params = [];
+  if (category) { where.push("category = ?"); params.push(category); }
+  if (platform) { where.push("platform = ?"); params.push(platform); }
+  return rowsOf(`SELECT category, platform, move_key, COUNT(*) AS n, AVG(score_after - score_before) AS avg_delta, AVG(moves_done_together) AS avg_together FROM growth_engine_move_outcomes ${where.length ? "WHERE " + where.join(" AND ") : ""} GROUP BY category, platform, move_key ORDER BY n DESC, avg_delta DESC`, params)
+    .map((r) => ({ ...r, n: Number(r.n), avg_delta: Number(r.avg_delta), avg_together: Number(r.avg_together) }));
+}
+
 // ===================== ENTITLEMENT OPERATIONS =====================
 
 async function getOrCreateEntitlement(accountId) {
@@ -1223,6 +1290,7 @@ module.exports = {
   adminFindAccount,
   insertEvent, eventFunnel, paidRetention,
   insertCost, adminCosts, attachReportToCosts,
+  logMove, recordMoveOutcomes, moveOutcomeSummary,
   createPromo, getPromo, listPromos, setPromoActive, hasRedeemed, redeemPromo, listRedemptions,
   setCancelAt,
   setBillingPeriod,

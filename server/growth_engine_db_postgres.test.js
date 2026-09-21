@@ -123,6 +123,12 @@ const assert = require("assert");
   assert.ok(Math.abs(cs.total_cents - 0.331) < 1e-6, "total " + cs.total_cents);
   assert.equal(cs.users[0].account_id, "acct_z"); assert.equal(cs.by_kind.length, 2);
 
+  // outcomes (1.15)
+  await db.logMove({ accountId: "acct_z", reportId: "r1", handle: "h", platform: "instagram", category: "travel", moveKey: "p1m2", done: true, overall: 60, dims: { "Profile Clarity": 25 }, planDay: 3 });
+  await db.recordMoveOutcomes({ accountId: "acct_z", handle: "h", platform: "instagram", category: "travel", moveKeys: ["p1m2", "p1m3"], before: { overall: 60, dims: {} }, after: { overall: 68, dims: {} }, days: 7, fromReport: "r1", toReport: "r2" });
+  const mo = await db.moveOutcomeSummary({ category: "travel" });
+  assert.equal(mo.length, 2); assert.equal(mo[0].avg_delta, 8); assert.equal(mo[0].avg_together, 2);
+
   console.log("postgres module: all assertions passed");
   process.exit(0);
 })().catch((e) => { console.error("FAILED:", e.message); process.exit(1); });

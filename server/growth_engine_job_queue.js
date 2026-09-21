@@ -204,6 +204,12 @@ class JobQueue {
             // Evidence row: what they did → what changed. Aggregated later for
             // "creators who did ≥3 moves gained N points" and the review cards.
             try { await geDb.recordOutcome({ accountId, handle: inputParams.handle, platform: inputParams.platform, category: inputParams.category, movesDone: movesDone.length, scoreDelta: reportBody.history.delta_overall, followerDelta, days: Math.round((Date.now() - prev.generated_at) / 86400000) }); } catch { /* best-effort */ }
+            // Per-move outcome rows (spec 1.15): each move done since the last
+            // report, with the score before and after, for later analysis.
+            if (movesDone.length) {
+              const dimsAfter = {}; for (const d of reportBody.scores.dimensions || []) dimsAfter[d.label] = d.score;
+              try { await geDb.recordMoveOutcomes({ accountId, handle: inputParams.handle, platform: inputParams.platform, category: inputParams.category, moveKeys: movesDone, before: { overall: prev.overall, dims }, after: { overall: reportBody.scores.overall, dims: dimsAfter }, days: Math.round((Date.now() - prev.generated_at) / 86400000), fromReport: prev.report_id, toReport: null }); } catch (e) { console.warn("[Outcomes] move outcomes failed:", e.message); }
+            }
           }
         }
       } catch (err) {

@@ -656,6 +656,8 @@ router.post("/reports/:reportId/moves", authMiddleware, async (req, res) => {
     const done = { ...(report.reportBody?.moves_done || {}) };
     if (req.body.done) done[key] = Date.now(); else delete done[key];
     await geDb.patchReportBody(report.reportId, { moves_done: done });
+    { const b = report.reportBody || {}; const dims = {}; for (const d of b.scores?.dimensions || []) dims[d.label] = d.score;
+      geDb.logMove({ accountId: req.user.id, reportId: report.reportId, handle: b.business?.handle, platform: b.business?.platform, category: b.business?.category, moveKey: key, done: !!req.body.done, overall: b.scores?.overall ?? null, dims, planDay: b.plan_started_at ? Math.floor((Date.now() - b.plan_started_at) / 86400000) : null }).catch((e) => console.warn("[Outcomes] move log failed:", e.message)); }
     if (req.body.done) events.track("move_done", { ...events.attribution(req), reportId: report.reportId, props: { key } });
     res.json({ moves_done: done });
   } catch (err) {
@@ -870,6 +872,10 @@ router.get("/admin/business-accounts", requireAdmin, async (req, res) => {
     }
     res.json(data);
   } catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
+});
+// Outcomes: which moves raise scores in which niche (spec 1.15; no UI yet).
+router.get("/admin/move-outcomes", requireAdmin, async (req, res) => {
+  try { res.json({ rows: await geDb.moveOutcomeSummary({ category: req.query.category || null, platform: req.query.platform || null }) }); } catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
 });
 router.get("/admin/promos", requireAdmin, async (req, res) => {
   try { res.json({ promos: await geDb.listPromos() }); } catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }

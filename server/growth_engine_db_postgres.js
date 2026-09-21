@@ -202,6 +202,19 @@ async function initSchema() {
     await client.query(`CREATE INDEX IF NOT EXISTS idx_costs_time ON growth_engine_costs (created_at)`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_costs_account ON growth_engine_costs (account_id)`);
     await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_move_log (
+        id TEXT PRIMARY KEY, account_id TEXT NOT NULL, report_id TEXT NOT NULL, handle TEXT, platform TEXT, category TEXT,
+        move_key TEXT NOT NULL, done BOOLEAN NOT NULL, overall_at INTEGER, dims_at TEXT, plan_day INTEGER, created_at BIGINT NOT NULL
+      )`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_move_log_report ON growth_engine_move_log (report_id)`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_move_outcomes (
+        id TEXT PRIMARY KEY, account_id TEXT NOT NULL, handle TEXT, platform TEXT, category TEXT, move_key TEXT NOT NULL,
+        moves_done_together INTEGER NOT NULL, score_before INTEGER, score_after INTEGER, dims_before TEXT, dims_after TEXT,
+        days INTEGER, from_report TEXT, to_report TEXT, created_at BIGINT NOT NULL
+      )`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_move_outcomes_key ON growth_engine_move_outcomes (category, platform, move_key)`);
+    await client.query(`
       CREATE TABLE IF NOT EXISTS growth_engine_plan_context (
         id TEXT PRIMARY KEY,
         account_id TEXT NOT NULL,
@@ -681,6 +694,26 @@ async function adminCosts(sinceTs, limit = 50) {
     users: users.map((u) => ({ account_id: u.account_id, email: u.email, cost_cents: Number(u.cents), reports: Number(u.reports), revenue_cents: rev[u.account_id] || 0 })) };
 }
 
+
+// ===================== OUTCOMES (spec 1.15) =====================
+async function logMove({ accountId, reportId, handle, platform, category, moveKey, done, overall, dims, planDay }) {
+  await q(`INSERT INTO growth_engine_move_log (id, account_id, report_id, handle, platform, category, move_key, done, overall_at, dims_at, plan_day, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+    ["ml_" + uid(), accountId, reportId, handle || null, platform || null, category || null, moveKey, !!done, overall ?? null, dims ? JSON.stringify(dims) : null, planDay ?? null, Date.now()]);
+}
+async function recordMoveOutcomes({ accountId, handle, platform, category, moveKeys, before, after, days, fromReport, toReport }) {
+  for (const k of moveKeys) {
+    await q(`INSERT INTO growth_engine_move_outcomes (id, account_id, handle, platform, category, move_key, moves_done_together, score_before, score_after, dims_before, dims_after, days, from_report, to_report, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+      ["mo_" + uid(), accountId, handle || null, platform || null, category || null, k, moveKeys.length, before.overall ?? null, after.overall ?? null, JSON.stringify(before.dims || {}), JSON.stringify(after.dims || {}), days ?? null, fromReport || null, toReport || null, Date.now()]);
+  }
+}
+async function moveOutcomeSummary({ category = null, platform = null } = {}) {
+  const where = []; const params = [];
+  if (category) { params.push(category); where.push(`category = $${params.length}`); }
+  if (platform) { params.push(platform); where.push(`platform = $${params.length}`); }
+  const r = await q(`SELECT category, platform, move_key, COUNT(*) AS n, AVG(score_after - score_before) AS avg_delta, AVG(moves_done_together) AS avg_together FROM growth_engine_move_outcomes ${where.length ? "WHERE " + where.join(" AND ") : ""} GROUP BY category, platform, move_key ORDER BY n DESC, avg_delta DESC`, params);
+  return r.rows.map((x) => ({ ...x, n: Number(x.n), avg_delta: Number(x.avg_delta), avg_together: Number(x.avg_together) }));
+}
+
 // ===================== CATEGORY BASELINES =====================
 
 async function listBaselines() {
@@ -783,6 +816,7 @@ module.exports = {
   adminFindAccount,
   insertEvent, eventFunnel, paidRetention,
   insertCost, adminCosts, attachReportToCosts,
+  logMove, recordMoveOutcomes, moveOutcomeSummary,
   createPromo, getPromo, listPromos, setPromoActive, hasRedeemed, redeemPromo, listRedemptions,
   setCancelAt,
   setBillingPeriod,
