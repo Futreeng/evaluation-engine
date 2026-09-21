@@ -589,6 +589,10 @@ async function listRedemptions(code, limit = 100) {
 
 // ===================== CATEGORY BASELINES =====================
 
+async function listBaselines() {
+  const r = await q(`SELECT category, platform, handle, overall, dimensions, created_at FROM growth_engine_baselines ORDER BY category, platform, handle`);
+  return r.rows.map((x) => { const dims = parseJson(x.dimensions) || {}; return { category: x.category, platform: x.platform, handle: x.handle, overall: Number(x.overall), dimensions: Object.entries(dims).map(([label, score]) => ({ label, score })), created_at: Number(x.created_at) }; });
+}
 async function recordBaseline({ category, platform, handle, overall, dimensions }) {
   if (!category || !platform || !handle || !Number.isFinite(overall)) return;
   const key = `${category}|${platform}|${String(handle).toLowerCase()}`;
@@ -692,6 +696,7 @@ module.exports = {
   recordBaseline,
   getCategoryBaseline,
   getBaselineSummary,
+  listBaselines,
   createBaseline,
   getBaselineStats,
 };

@@ -317,6 +317,13 @@ async function getCategoryBaseline(category, { minN = 20, platform = null } = {}
 }
 
 // Totals for the landing page: profiles scored overall and per category.
+// Every baseline row — for moving a seeded set between databases.
+async function listBaselines() {
+  if (!db) throw new Error("Database not initialized");
+  const r = db.exec(`SELECT category, platform, handle, overall, dimensions, created_at FROM growth_engine_baselines ORDER BY category, platform, handle`);
+  if (!r.length) return [];
+  return r[0].values.map(([category, platform, handle, overall, dimensions, created_at]) => { let dims = {}; try { dims = JSON.parse(dimensions); } catch { /* skip */ } return { category, platform, handle, overall: Number(overall), dimensions: Object.entries(dims).map(([label, score]) => ({ label, score })), created_at: Number(created_at) }; });
+}
 async function getBaselineSummary() {
   if (!db) throw new Error("Database not initialized");
   const result = db.exec(`SELECT category, platform, COUNT(*) FROM growth_engine_baselines GROUP BY category, platform`);
@@ -1061,6 +1068,7 @@ module.exports = {
   patchReportBody,
   listScoreHistory,
   getBaselineSummary,
+  listBaselines,
   initDb,
   // Jobs
   createJob,

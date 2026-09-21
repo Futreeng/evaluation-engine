@@ -36,8 +36,13 @@ const mockSubscriptions = new Map();
 
 class BillingManager {
   constructor(stripeApiKey) {
-    this.stripeApiKey = stripeApiKey;
-    this.isProduction = !!stripeApiKey;
+    // A placeholder like "sk_test_YOUR_KEY" must not switch billing to live
+    // mode — every charge would 500. Real keys are sk_live_/sk_test_ plus a
+    // long random body with no underscores or "KEY".
+    const looksReal = /^sk_(live|test)_[A-Za-z0-9]{24,}$/.test(String(stripeApiKey || "")) && !/YOUR|KEY|XXX|PLACEHOLDER/i.test(String(stripeApiKey));
+    if (stripeApiKey && !looksReal) console.warn(`[Billing] STRIPE_API_KEY doesn't look like a real key (${String(stripeApiKey).slice(0, 8)}…) — running in mock mode`);
+    this.stripeApiKey = looksReal ? stripeApiKey : null;
+    this.isProduction = looksReal;
 
     if (this.isProduction) {
       // Initialize Stripe SDK in production
