@@ -522,6 +522,12 @@ async function setPlanContext(accountId, handle, platform, context) {
   return { ...ctx, updated_at: Date.now() };
 }
 
+// Free reports older than a cutoff whose thumbnails haven't been removed yet (spec 1.4 cleanup).
+async function listReportsForThumbCleanup(beforeTs, limit = 50) {
+  if (!db) throw new Error("Database not initialized");
+  return rowsOf(`SELECT report_id, report_body FROM growth_engine_reports WHERE tier = 'social_snapshot' AND generated_at < ? AND report_body LIKE '%"thumb_prefix":%' AND report_body NOT LIKE '%"thumbs_removed":true%' LIMIT ?`, [beforeTs, limit])
+    .map((r) => { let b = {}; try { b = JSON.parse(r.report_body); } catch { /* skip */ } return { reportId: r.report_id, thumbPrefix: b.thumb_prefix || null }; });
+}
 // Paid reports generated inside a window — the scheduled-email sweeper uses
 // this to find plans at day 28 / 58 / 60.
 async function listPaidReportsBetween(fromTs, toTs) {
@@ -1274,6 +1280,7 @@ module.exports = {
   getPlanContext,
   setPlanContext,
   listPaidReportsBetween,
+  listReportsForThumbCleanup,
   deleteAccount,
   recordBaseline,
   getCategoryBaseline,

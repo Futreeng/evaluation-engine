@@ -5,6 +5,7 @@ const { analyzeInstagramAccountViaApify } = require("./instagram_apify_fetcher")
 const { TIER_PRICING, ONE_TIME_PRICING } = require("./growth_engine_billing");
 const costs = require("./growth_engine_costs");
 const { bestTimes } = require("./growth_engine_besttime");
+const evidence = require("./growth_engine_evidence");
 // Label of the LLM call in flight, for cost rows (set by callWithQuadFallback).
 let currentLlmLabel = "";
 const { analyzeTikTokAccountViaApify } = require("./tiktok_apify_fetcher");
@@ -725,12 +726,29 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
       return hit ? hit.explanation : "";
     };
     const overallLine = auditorExpl["overallscore"] || null;
+    // Every number in an explanation must have been in the model's input
+    // (spec 1.4). Anything else is replaced by the scorer's own sentence.
+    // The allowed set is exactly what the model was shown: the compact data
+    // summary, the benchmarks and the computed sub-scores — plus the
+    // per-post numbers and the dates.
+    const allowed = computed ? evidence.allowedNumbers({ shown: postSummary, benchmarks, dims: computed.dimensions, posts: postRecords.map((p) => ({ likes: p.likes, comments: p.comments, views: p.views, d: p.posted_at ? new Date(p.posted_at).getDate() : null })), followers, sampled: postRecords.length, window: Number(process.env.CADENCE_WINDOW_DAYS || 90), targets: require("./growth_engine_scoring").targetFor?.(category, platform) || null }) : null;
+    const rejected = [];
+    const checkedExpl = (d) => {
+      const text = findExpl(d.label) || "";
+      if (!text) return { text: d.evidence, source: "scorer" };
+      const v = allowed ? evidence.validateExplanation(text, allowed) : { ok: true };
+      if (v.ok) return { text, source: "model" };
+      rejected.push({ dimension: d.label, cited: v.bad, text });
+      console.warn(`[Growth Engine] explanation for ${d.label} cited ${v.bad.join(", ")} — not in the data; replaced`);
+      return { text: d.evidence.charAt(0).toUpperCase() + d.evidence.slice(1) + ".", source: "validator" };
+    };
     reportBody.scores = computed
       ? {
           overall: computed.overall,
           category_avg: null, // filled from measured baselines by the job queue
           summary: typeof structured?.summary === "string" ? structured.summary : overallLine,
-          dimensions: computed.dimensions.map((d) => ({ label: d.label, score: d.score, explanation: findExpl(d.label) || d.evidence, evidence: d.evidence, parts: d.parts })),
+          dimensions: computed.dimensions.map((d) => { const ex = checkedExpl(d); return { label: d.label, score: d.score, explanation: ex.text, explanation_source: ex.source, evidence: d.evidence, parts: d.parts, evidence_posts: evidence.pickEvidence(d.label, postRecords) }; }),
+          explanation_rejections: rejected,
           method: computed.method,
           niche_known: computed.niche_known,
           creator: computed.creator,

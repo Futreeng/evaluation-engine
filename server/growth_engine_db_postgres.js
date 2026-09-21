@@ -580,6 +580,10 @@ async function setPlanContext(accountId, handle, platform, context) {
     [`${accountId}|${platform}|${String(handle).toLowerCase()}`, accountId, String(handle).toLowerCase(), platform, JSON.stringify(ctx), now]);
   return { ...ctx, updated_at: now };
 }
+async function listReportsForThumbCleanup(beforeTs, limit = 50) {
+  const r = await q(`SELECT report_id, report_body FROM growth_engine_reports WHERE tier = 'social_snapshot' AND generated_at < $1 AND report_body LIKE '%"thumb_prefix":%' AND report_body NOT LIKE '%"thumbs_removed":true%' LIMIT $2`, [beforeTs, limit]);
+  return r.rows.map((x) => { const b = parseJson(x.report_body) || {}; return { reportId: x.report_id, thumbPrefix: b.thumb_prefix || null }; });
+}
 async function listPaidReportsBetween(fromTs, toTs) {
   const r = await q(`SELECT * FROM growth_engine_reports WHERE tier <> 'social_snapshot' AND generated_at >= $1 AND generated_at <= $2 ORDER BY generated_at ASC`, [fromTs, toTs]);
   return r.rows.map(reportRow);
@@ -805,6 +809,7 @@ module.exports = {
   getPlanContext,
   setPlanContext,
   listPaidReportsBetween,
+  listReportsForThumbCleanup,
   deleteAccount,
   // Reports
   createReport,

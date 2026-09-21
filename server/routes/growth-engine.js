@@ -629,6 +629,7 @@ router.post("/reports/:reportId/checkin", authMiddleware, async (req, res) => {
 // Delete account + everything written for it (settings → "Delete my account")
 router.delete("/account", authMiddleware, async (req, res) => {
   try {
+    require("../growth_engine_thumbs").remove(req.user.id).catch(() => { }); // their stored thumbnails go too (spec 1.4)
     res.json(await geDb.deleteAccount(req.user.id));
   } catch (err) {
     sendError(res, 500, "DELETE_ERROR", err.message);

@@ -17,6 +17,24 @@
 const geDb = require("./growth_engine_db_select");
 const mailer = require("./mailer");
 const billing = require("./growth_engine_billing");
+const thumbs = require("./growth_engine_thumbs");
+
+// Thumbnails for free reports older than THUMB_FREE_TTL_DAYS (90) are removed
+// and the report's image links cleared; the neutral tile takes over.
+async function cleanupThumbnails() {
+  const days = Number(process.env.THUMB_FREE_TTL_DAYS || 90);
+  const due = await geDb.listReportsForThumbCleanup(Date.now() - days * DAY, 50);
+  let n = 0;
+  for (const r of due) {
+    if (r.thumbPrefix) await thumbs.remove(r.thumbPrefix);
+    const rep = await geDb.getReport(r.reportId); const b = rep?.reportBody || {};
+    for (const p of b.posts || []) p.thumbnail_url = null;
+    for (const d of b.scores?.dimensions || []) for (const e of d.evidence_posts || []) e.thumbnail_url = null;
+    await geDb.patchReportBody(r.reportId, { posts: b.posts || [], scores: b.scores, thumbs_removed: true });
+    n++;
+  }
+  return n;
+}
 
 const DAY = 86400000;
 
@@ -95,8 +113,9 @@ async function sweep(jobQueue) {
   } finally {
     running = false;
   }
-  let emailed = 0;
+  let emailed = 0, cleaned = 0;
   try { emailed = await sendScheduledEmails(); } catch (err) { console.error("[Refresh] scheduled emails failed:", err.message); }
+  try { cleaned = await cleanupThumbnails(); if (cleaned) console.log(`[Refresh] removed thumbnails for ${cleaned} old free reports`); } catch (err) { console.error("[Refresh] thumbnail cleanup failed:", err.message); }
   if (queued || skipped || emailed) console.log(`[Refresh] queued ${queued}, skipped ${skipped}, emailed ${emailed} in ${Date.now() - started}ms`);
   return { queued, skipped };
 }
@@ -112,4 +131,4 @@ function start(jobQueue) {
 
 function stop() { if (timer) clearInterval(timer); timer = null; }
 
-module.exports = { start, stop, sweep, sendScheduledEmails };
+module.exports = { start, stop, sweep, sendScheduledEmails, cleanupThumbnails };

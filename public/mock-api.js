@@ -29,20 +29,20 @@
         method: 'deterministic-v1', niche_known: true, creator: true,
         dimensions: [
           {
-            label: 'Posting Consistency', score: 35, category_avg: 58,
+            label: 'Posting Consistency', score: 35, category_avg: 58, evidence_posts: [{ post_id: 'm1', permalink: 'https://www.instagram.com/', type: 'image', posted_at: '2026-08-02T14:00:00Z', caption: 'Class schedule for August', metric: '19-day gap after this' }, { post_id: 'm2', permalink: 'https://www.instagram.com/', type: 'reel', posted_at: '2026-09-15T12:00:00Z', caption: 'Coach on camera', metric: 'last post, 6 days ago' }],
             explanation: "You posted 14 times in the last 90 days with a 19-day silence through August. Studios that hold three posts a week stay in the feed of people who already follow them; gaps reset that and the algorithm treats you like a new account. This isn't about posting more — it's about posting on the same days."
           },
           {
-            label: 'Content Mix', score: 52, category_avg: 63,
+            label: 'Content Mix', score: 52, category_avg: 63, evidence_posts: [{ post_id: 'm3', permalink: 'https://www.instagram.com/', type: 'image', posted_at: '2026-09-01T12:00:00Z', caption: 'Week 36 timetable', metric: '9 of 14 are images · 41 likes · 2 comments' }, { post_id: 'm4', permalink: 'https://www.instagram.com/', type: 'reel', posted_at: '2026-09-10T12:00:00Z', caption: 'Deadlift cue that fixes your back', metric: 'only 2 reels · 2.1k views' }],
             explanation: "Nine of your 14 posts are class schedules. Members already know the schedule. There's almost no coach point-of-view, no member results, and nothing from behind the front desk — the three things that make a stranger trust a studio before they ever walk in."
           },
           {
-            label: 'Engagement Quality', score: 58, category_avg: 60,
+            label: 'Engagement Quality', score: 58, category_avg: 60, evidence_posts: [{ post_id: 'm4', permalink: 'https://www.instagram.com/', type: 'reel', posted_at: '2026-09-10T12:00:00Z', caption: 'Deadlift cue that fixes your back', metric: '2.1k views · 3.4× your median' }, { post_id: 'm5', permalink: 'https://www.instagram.com/', type: 'carousel', posted_at: '2026-08-21T12:00:00Z', caption: 'Member results, 12 weeks', metric: '96 likes · 11 comments · 2.0× your median' }],
             explanation: "Comments average 2.1 per post and roughly 70% come from the same six accounts — loyal, but not new. Saves and shares, the two signals that put you in front of people within a few miles of the studio, are low for your follower count.",
             evidence: "1.9% engagement rate vs 2.4% target; comments are 3.1% of interactions; video views per post ≈ 11% of followers"
           },
           {
-            label: 'Profile Clarity', score: 44, category_avg: 64,
+            label: 'Profile Clarity', score: 44, category_avg: 64, evidence_posts: [],
             explanation: "Your bio reads “Move well. Live well.” It doesn't say the neighborhood, what a first class costs, or how to book one. The link goes to your homepage instead of a trial offer. A visitor decides in about four seconds whether you're near them and affordable."
           }
         ]

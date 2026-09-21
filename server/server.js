@@ -120,6 +120,8 @@ app.use("/api/proxy", apiLimiter, proxyRoutes);
 app.use("/api/growth-engine/v1", apiLimiter, growthEngineRoutes);
 
 app.use(express.static(path.join(__dirname, "..", "public")));
+// Locally stored post thumbnails (THUMB_STORAGE=local)
+app.use("/thumbs", express.static(require("./growth_engine_thumbs").localDir, { maxAge: "365d", immutable: true, fallthrough: true }));
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "..", "public", "index.html"));
 });

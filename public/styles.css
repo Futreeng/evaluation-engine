@@ -688,3 +688,13 @@ p { margin: 0; }
 .window .d { font-family: var(--display); font-size: 18px; font-weight: 700; }
 .window .x { font-size: 13px; font-weight: 600; color: var(--c2); margin-top: 2px; } .window .x.muted { color: var(--muted); font-weight: 500; }
 .window p { margin-top: 6px; font-size: 13px; line-height: 1.5; color: var(--body); }
+
+/* ---- evidence thumbnails ---- */
+.evidence { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.ev { position: relative; width: 84px; height: 84px; border-radius: 12px; overflow: hidden; background: var(--track2); flex: none; text-decoration: none; color: var(--on-dark); display: block; }
+.ev img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ev .tile { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; color: var(--muted2); background: var(--ground); border: 1px solid var(--line2); border-radius: 12px; }
+.ev .tile .ic { font-size: 20px; } .ev .tile .dt { font-size: 10px; letter-spacing: .04em; }
+.ev .vid { position: absolute; top: 6px; right: 6px; width: 18px; height: 18px; border-radius: 999px; background: rgba(42,33,24,.75); color: #fff; font-size: 9px; display: flex; align-items: center; justify-content: center; }
+.ev .m { position: absolute; left: 0; right: 0; bottom: 0; padding: 3px 6px; font-size: 10px; line-height: 1.2; font-weight: 600; background: linear-gradient(transparent, rgba(42,33,24,.85)); color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 720px) { .ev { width: 72px; height: 72px; } }

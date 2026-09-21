@@ -16,6 +16,7 @@ const { saveReportAsMarkdown } = require("./report_saver");
 const mailer = require("./mailer");
 const events = require("./growth_engine_events");
 const costs = require("./growth_engine_costs");
+const thumbs = require("./growth_engine_thumbs");
 
 // Weekly refresh: does what the creator told us still match what they're
 // doing? At most one nudge per phase; the report and the score-changed
@@ -238,6 +239,11 @@ class JobQueue {
           }
         }
       }
+
+      // Thumbnails (spec 1.4): our own resized copies, keyed by owner/job so
+      // they can be removed with the account or by the 90-day cleanup.
+      await geDb.updateJobStatus(jobId, "running", { stage: "writing", step: 4 }).catch(() => { });
+      await thumbs.processReport(reportBody, `${accountId && accountId !== "demo-account" ? accountId : "anon"}/${jobId}`);
 
       const { reportId } = await geDb.createReport(accountId, tier, inputParams, reportBody);
       reportBody.report_id = reportId;

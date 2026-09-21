@@ -708,7 +708,7 @@
               ${raw((s.dimensions || []).map(d => { const sc = clamp(d.score, 0, 100); const [g, gcc] = grade(sc); const hue = hueOf(d.label); const dd = hist?.delta_dimensions?.find(x => x.label === d.label);
                 return h`<div class="dimcard bd${hue}"><div class="top"><span class="n">${d.label}</span><span class="s hue${hue}">${sc} · ${g}${dd && dd.delta ? raw(h`<span class="dd g-${dd.delta > 0 ? 'strong' : 'weak'}">${dd.delta > 0 ? '+' : ''}${dd.delta}</span>`) : ''}</span></div>
                   <div class="bar in"><div class="fill bg${hue}" style="width:${sc}%"></div>${d.category_avg != null ? raw(h`<div class="mark" style="left:${clamp(d.category_avg, 0, 100)}%"></div>`) : ''}</div>
-                  <p>${d.explanation || ''}</p></div>`; }).join(''))}
+                  <p>${d.explanation || ''}</p>${raw(evidenceHTML(d.evidence_posts))}</div>`; }).join(''))}
               <div class="fine">${s.category_avg != null ? `The marker is your ${niche} average (${fmtN(s.category_sample_size)} accounts).` : pending ? `The marker is your niche average. Your ${niche} average appears once ${pending.min_n} accounts are scored — ${pending.n} so far.` : nicheKnown ? 'The marker is your niche average.' : `Scored against all creators — we don't have enough ${niche} accounts yet.`}</div>
             </div>
           </details>
@@ -827,6 +827,20 @@
       btn.disabled = false; btn.textContent = 'Re-run';
     });
     if (!paid) api('/billing/pricing', {}, { allow401: true }).then(p => { if (p.support_email) sset('sc_support', p.support_email); rememberPricing(p); const t = (p.tiers || []).find(x => x.tier === 'growth_plan'); if (t && t.monthlyPrice != null) { const el = $view.querySelector('.upsell p'); if (el) el.textContent = el.textContent.replace(/\$\d+\/mo or \$\d+\/yr/, `$${t.monthlyPrice}/mo or $${t.annualPrice ?? Math.round(t.monthlyPrice * 9)}/yr`); } }).catch(() => { });
+  }
+  // Evidence tiles under a dimension explanation (spec 1.4): 1–3 posts, our
+  // own thumbnail or a neutral tile, each linking to the post. Never shown on
+  // share pages or cards.
+  const typeIcon = t => ({ reel: '▶', video: '▶', carousel: '▤', slideshow: '▤', image: '▢' }[t] || '▢');
+  function evidenceHTML(items) {
+    if (!items || !items.length) return '';
+    return h`<div class="evidence">${raw(items.slice(0, 3).map(e => {
+      const alt = (e.caption || '').split(/\s+/).slice(0, 8).join(' ') || `${e.type} from ${fmtShort(e.posted_at)}`;
+      const inner = e.thumbnail_url
+        ? h`<img src="${e.thumbnail_url}" width="320" height="320" loading="lazy" decoding="async" alt="${alt}">`
+        : h`<div class="tile"><span class="ic">${typeIcon(e.type)}</span><span class="dt">${fmtShort(e.posted_at)}</span></div>`;
+      return h`<a class="ev" href="${e.permalink || '#'}" target="_blank" rel="noopener" title="${alt}">${raw(inner)}${/reel|video/.test(e.type) ? raw('<span class="vid">▶</span>') : ''}<span class="m">${e.metric}</span></a>`;
+    }).join(''))}</div>`;
   }
   // The "how" under a move: numbered steps, paste-ready example, done-when, time.
   function moveDetailHTML(d, dark) {
