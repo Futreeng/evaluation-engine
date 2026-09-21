@@ -41,7 +41,7 @@ New DB tables/columns (both backends create them on boot): `growth_engine_plan_c
 2. **Stripe for real** — `growth_engine_billing.js` is mock unless `STRIPE_API_KEY` is set. `_createStripeSubscription` throws "not implemented"; `purchaseOneTime` already uses a PaymentIntent. The webhook (`POST /billing/webhook`) is a stub — payment failed → `setCancelAt(accountId, now)` is all it needs to downgrade. Stripe Tax is worth turning on. Annual is shown on the pricing page but `subscribe` only takes monthly — wire it or hide the toggle.
 3. **Resend** — key + a verified sending domain (`MAIL_FROM`), `APP_URL` for links. Until then no email leaves the box, including password reset.
 4. **Meta OAuth "connect your account"** — your Graph API fetcher only reads owner-connected accounts; the scorer doesn't consume that data yet, parked until the connect flow exists.
-5. `SUPPORT_EMAIL`, `ADMIN_EMAILS` (you + Haron), `ADMIN_TOKEN`, `FOUNDERS_PROMO_CODE` values; create the founders code with `node scripts/promo.js create FOUNDER50 --kind free_months --value 1 --max 50`.
+5. Render env: `SUPPORT_EMAIL=hello@futreeng.com`, `MAIL_FROM="Scalecraft <hello@futreeng.com>"` (verify futreeng.com in Resend), `ADMIN_EMAILS` (you + Haron), `ADMIN_TOKEN`, `FOUNDERS_PROMO_CODE=FOUNDER50`; create the founders code with `node scripts/promo.js create FOUNDER50 --kind free_months --value 1 --max 50`.
 
 ## Cheap wins, anyone
 
