@@ -4,6 +4,9 @@
 // including auth (/auth/login, /auth/signup).
 window.SCALECRAFT_CONFIG = {
   useMock: false,
+  // Real customer quotes only. Empty → the pricing page shows no quote card.
+  // Each: { quote, name, meta } e.g. { quote: '…', name: 'Ava', meta: '@ava · Fitness · 41 → 58' }
+  testimonials: [],
   // Same origin when Express serves this folder (local dev, Railway). The
   // Vercel-hosted copy has no backend of its own, so it talks to Railway.
   apiBase: /\.vercel\.app$/.test(location.hostname)
