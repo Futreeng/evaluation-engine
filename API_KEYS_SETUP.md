@@ -46,7 +46,17 @@ This guide walks you through acquiring and configuring all necessary API keys fo
 3. A long token string appears — **copy this immediately** (it expires after a short time)
 4. **Save as:** `INSTAGRAM_ACCESS_TOKEN`
 
-### Step 5: Add to Railway Environment
+### Step 5: Add to Render Environment
+
+1. Go to your Render project: https://dashboard.render.com/
+2. Click on the **convergence-api** service
+3. Go to **Environment** (left sidebar)
+4. Add new environment variable:
+   - **Key:** `INSTAGRAM_ACCESS_TOKEN`
+   - **Value:** paste the token from Step 4
+5. Click **Save changes** (will trigger redeploy)
+
+Or, use Railway if you prefer:
 
 1. Go to your Railway project: https://railway.app/
 2. Go to **Variables** (in your project)
@@ -89,7 +99,17 @@ Scalecraft currently uses **Apify** to scrape TikTok (direct TikTok API doesn't 
 
 *Why?* Free tier has limited actor runs. $5 gets you ~500 TikTok profile fetches.
 
-### Step 4: Add to Railway Environment
+### Step 4: Add to Render Environment
+
+1. Go to your Render project: https://dashboard.render.com/
+2. Click on the **convergence-api** service
+3. Go to **Environment** (left sidebar)
+4. Add new environment variable:
+   - **Key:** `APIFY_TOKEN`
+   - **Value:** paste your Apify token
+5. Click **Save changes** (will trigger redeploy)
+
+Or, use Railway if you prefer:
 
 1. Go to Railway project → **Variables**
 2. Add new variable:
@@ -101,20 +121,24 @@ Scalecraft currently uses **Apify** to scrape TikTok (direct TikTok API doesn't 
 
 ## Environment Variables Summary
 
-Your Railway project should have these variables set:
+Your backend project (Render or Railway) should have these variables set:
 
 ```
 INSTAGRAM_ACCESS_TOKEN = <long token from Instagram>
 APIFY_TOKEN = <token from Apify>
 ```
 
-*(Other required vars like JWT_SECRET, DATABASE_URL, etc. should already be set)*
+**For Render deployments**, also ensure:
+- Database connection is via Railway PostgreSQL (set `DATABASE_URL` to Railway Postgres connection string)
+- All other required vars (JWT_SECRET, ENCRYPTION_KEY, etc.) are set in Render Environment
+
+*(Other required vars like JWT_SECRET, ENCRYPTION_KEY, DATABASE_URL, etc. should already be set)*
 
 ---
 
 ## Testing Your Setup
 
-Once keys are added to Railway:
+Once keys are added to your backend (Render or Railway):
 
 1. Go to https://scalecraft-demo.vercel.app/
 2. Enter a real Instagram handle (e.g., `@yourinstagramname`)
@@ -129,7 +153,8 @@ Once keys are added to Railway:
 - Dimension scores are based on real engagement
 
 **If you still see fake data:**
-- Check Railway logs: go to **Deployments** → latest deployment → **Logs**
+- **For Render**: Check logs in Dashboard → **Logs**
+- **For Railway**: Go to **Deployments** → latest deployment → **Logs**
 - Look for errors mentioning Instagram API or Apify
 - If there's an error, the token may be invalid or expired
 

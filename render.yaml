@@ -1,0 +1,43 @@
+services:
+  - type: web
+    name: convergence-api
+    runtime: node
+    plan: standard
+    buildCommand: cd server && npm ci --omit=dev
+    startCommand: cd server && npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3005
+      - key: DATABASE_URL
+        fromDatabase:
+          name: convergence-postgres
+          property: connectionString
+      - key: JWT_SECRET
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: APIFY_TOKEN
+        sync: false
+      - key: INSTAGRAM_ACCESS_TOKEN
+        sync: false
+      - key: INSTAGRAM_BUSINESS_ACCOUNT_ID
+        sync: false
+      - key: CLAUDE_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: STRIPE_API_KEY
+        sync: false
+      - key: FREE_SNAPSHOTS_PER_EMAIL
+        value: '1'
+
+databases:
+  - name: convergence-postgres
+    engine: postgres
+    ipAllowList: [] # Only accessible to services in this project
