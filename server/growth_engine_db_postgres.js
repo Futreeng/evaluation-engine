@@ -169,6 +169,19 @@ async function initSchema() {
         UNIQUE (code, account_id)
       )`);
     await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_events (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        account_id TEXT,
+        anon TEXT,
+        ref TEXT,
+        report_id TEXT,
+        props TEXT,
+        ip TEXT,
+        created_at BIGINT NOT NULL
+      )`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_events_name_time ON growth_engine_events (name, created_at)`);
+    await client.query(`
       CREATE TABLE IF NOT EXISTS growth_engine_plan_context (
         id TEXT PRIMARY KEY,
         account_id TEXT NOT NULL,
@@ -587,6 +600,31 @@ async function listRedemptions(code, limit = 100) {
   return r.rows.map((x) => ({ ...x, amount_off: Number(x.amount_off), created_at: Number(x.created_at) }));
 }
 
+
+// ===================== EVENTS =====================
+async function insertEvent(e) {
+  await q(`INSERT INTO growth_engine_events (id, name, account_id, anon, ref, report_id, props, ip, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+    ["ev_" + uid(), e.name, e.accountId, e.anon, e.ref, e.reportId, e.props, e.ip, Date.now()]);
+}
+async function eventFunnel(sinceTs, names) {
+  const out = {};
+  for (const n of names) {
+    const r = (await q(`SELECT COUNT(DISTINCT COALESCE(account_id, anon, ip)) AS actors, COUNT(*) AS total FROM growth_engine_events WHERE name = $1 AND created_at >= $2`, [n, sinceTs])).rows[0];
+    out[n] = { actors: Number(r.actors || 0), total: Number(r.total || 0) };
+  }
+  const byRef = (await q(`SELECT ref, name, COUNT(DISTINCT COALESCE(account_id, anon, ip)) AS actors FROM growth_engine_events WHERE ref IS NOT NULL AND created_at >= $1 AND name IN ('evaluate_started','signup','subscribe') GROUP BY ref, name`, [sinceTs])).rows;
+  const refs = {};
+  for (const r of byRef) (refs[r.ref] ||= {})[r.name] = Number(r.actors);
+  return { steps: out, by_ref: refs };
+}
+async function paidRetention() {
+  const now = Date.now(), d = 86400000;
+  const cohort = (await q(`SELECT DISTINCT account_id FROM growth_engine_events WHERE name = 'subscribe' AND created_at BETWEEN $1 AND $2 AND account_id IS NOT NULL`, [now - 60 * d, now - 30 * d])).rows.map((r) => r.account_id);
+  let retained = 0;
+  for (const id of cohort) { const e = (await q(`SELECT current_tier, cancel_at FROM entitlements WHERE user_id = $1`, [id])).rows[0] || {}; if (e.current_tier && e.current_tier !== "social_snapshot" && (!e.cancel_at || Number(e.cancel_at) > now)) retained++; }
+  return { cohort: cohort.length, retained, rate: cohort.length ? retained / cohort.length : null };
+}
+
 // ===================== CATEGORY BASELINES =====================
 
 async function listBaselines() {
@@ -684,6 +722,7 @@ module.exports = {
   adminRecentReports,
   adminFailedJobs,
   adminFindAccount,
+  insertEvent, eventFunnel, paidRetention,
   createPromo, getPromo, listPromos, setPromoActive, hasRedeemed, redeemPromo, listRedemptions,
   setCancelAt,
   setBillingPeriod,

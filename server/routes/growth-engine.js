@@ -8,6 +8,7 @@ const { compareCompetitors, MAX_COMPETITORS } = require("../growth_engine_compet
 const { signup, login, verifyJWT, requestPasswordReset, resetPassword } = require("../auth");
 const mailer = require("../mailer");
 const promos = require("../growth_engine_promos");
+const events = require("../growth_engine_events");
 const { TIER_PRICING, ONE_TIME_PRICING } = require("../growth_engine_billing");
 
 // Resolve a promo code for a product into a quote, or an error string.
@@ -107,6 +108,7 @@ router.post("/auth/signup", authLimiter, validateAuthRequest, async (req, res) =
   try {
     const { email, password, company_name } = req.body;
     const result = await signup(email, password, company_name);
+    events.track("signup", { ...events.attribution(req), accountId: result?.user?.user_id || null, props: { has_company: !!company_name } });
     res.json(result);
   } catch (err) {
     if (err.message.includes("already registered")) {
@@ -239,11 +241,12 @@ router.post("/billing/cancel", authMiddleware, async (req, res) => {
   try {
     const r = await billingManager.cancelSubscription(req.user.id);
     if (req.body && typeof req.body.reason === "string" && req.body.reason.trim()) console.log(`[Billing] cancel reason from ${req.user.id}: ${req.body.reason.trim().slice(0, 200)}`);
+    events.track("cancel", { ...events.attribution(req), props: { reason: (req.body?.reason || "").slice(0, 200) || null, status: r.status } });
     res.json(r);
   } catch (err) { sendError(res, 500, "CANCEL_ERROR", err.message); }
 });
 router.post("/billing/resume", authMiddleware, async (req, res) => {
-  try { res.json(await billingManager.resumeSubscription(req.user.id)); }
+  try { const r = await billingManager.resumeSubscription(req.user.id); events.track("resume", events.attribution(req)); res.json(r); }
   catch (err) { sendError(res, 500, "RESUME_ERROR", err.message); }
 });
 
@@ -325,6 +328,15 @@ router.put("/account/plan-context", authMiddleware, async (req, res) => {
   } catch (err) { sendError(res, 500, "CONTEXT_ERROR", err.message); }
 });
 
+// Browser-side funnel events (report viewed, share clicked, …). Server-side
+// events are emitted where they happen. Allowlisted names only.
+router.post("/events", optionalAuth, (req, res) => {
+  const name = String(req.body?.name || "");
+  if (!events.EVENTS.includes(name)) return sendError(res, 400, "UNKNOWN_EVENT", "Unknown event");
+  events.track(name, { ...events.attribution(req), reportId: req.body?.report_id ? String(req.body.report_id).slice(0, 60) : null, props: req.body?.props });
+  res.json({ ok: true });
+});
+
 router.post("/evaluate/social-snapshot", optionalAuth, validateEvaluationRequest, async (req, res) => {
   try {
     const { handle, platform, category } = req.body;
@@ -387,8 +399,11 @@ router.post("/evaluate/social-snapshot", optionalAuth, validateEvaluationRequest
     if (req.body.rerun_of && typeof req.body.rerun_of === "string") input.rerun_of = req.body.rerun_of.slice(0, 60);
 
     // Create job in database
+    const attr = events.attribution(req);
+    input.attribution = { anon: attr.anon, ref: attr.ref };
     const jobResult = await geDb.createJob(accountId, tier, input);
     const jobId = jobResult.jobId;
+    events.track("evaluate_started", { ...attr, props: { tier, platform, category, horizon: plan_context?.horizon || null } });
 
     // Process asynchronously (fire-and-forget)
     jobQueue.processJob(jobId, accountId, tier, input)
@@ -528,6 +543,8 @@ router.post("/reports/:reportId/unlock", authMiddleware, async (req, res) => {
     const input = { handle: b.handle, platform: b.platform, category: b.category, email: req.user.email || null, one_time_unlock: true, unlock_of: report.reportId, payment_id: payment.paymentId, plan_context };
     const { jobId } = await geDb.createJob(req.user.id, "growth_plan", input);
     jobQueue.processJob(jobId, req.user.id, "growth_plan", input).catch((err) => console.error(`[Unlock] job ${jobId} failed:`, err.message));
+    events.track("unlock", { ...events.attribution(req), reportId: report.reportId, props: { amount_cents: payment.amountInCents, promo: promo?.code || null } });
+    if (promo) events.track("promo_applied", { ...events.attribution(req), props: { code: promo.code, product: "plan_unlock" } });
     res.json({ job_id: jobId, status: "queued", tier: "growth_plan", one_time: true, payment: { id: payment.paymentId, amount: payment.amountFormatted } });
   } catch (err) {
     sendError(res, 500, "UNLOCK_ERROR", err.message);
@@ -555,6 +572,7 @@ router.post("/reports/:reportId/checkin", authMiddleware, async (req, res) => {
       if (ctx) await geDb.setPlanContext(req.user.id, body.business?.handle, body.business?.platform, ctx);
     }
     await geDb.patchReportBody(report.reportId, patch);
+    events.track("checkin_answered", { ...events.attribution(req), reportId: report.reportId, props: { key, changed: !!req.body.changed } });
     if (!req.body.changed || !ctx) return res.json({ ok: true, checkins });
     // Rewrite the plan against the new answers. Counts as a paid run.
     const limit = Number(process.env.PAID_RUNS_PER_DAY || 5);
@@ -611,6 +629,7 @@ router.post("/reports/:reportId/moves", authMiddleware, async (req, res) => {
     const done = { ...(report.reportBody?.moves_done || {}) };
     if (req.body.done) done[key] = Date.now(); else delete done[key];
     await geDb.patchReportBody(report.reportId, { moves_done: done });
+    if (req.body.done) events.track("move_done", { ...events.attribution(req), reportId: report.reportId, props: { key } });
     res.json({ moves_done: done });
   } catch (err) {
     sendError(res, 500, "MOVE_ERROR", err.message);
@@ -671,6 +690,8 @@ router.post("/billing/subscribe", authMiddleware, validateSubscriptionRequest, a
     }
 
     const result = await billingManager.createSubscription(accountId, tier, null, billingCycle || "monthly", promo);
+    events.track("subscribe", { ...events.attribution(req), props: { tier, billingCycle: billingCycle || "monthly", promo: promo?.code || null, amount_cents: result.amountInCents ?? null } });
+    if (promo) events.track("promo_applied", { ...events.attribution(req), props: { code: promo.code, product: "growth_plan" } });
     if (promo) { try { await geDb.redeemPromo(promo.code, accountId, "growth_plan", (TIER_PRICING[tier] || 0) - promo.amountCents); } catch (e) { console.warn("[Promo] redemption record failed:", e.message); } }
 
     res.json(result);
@@ -787,6 +808,17 @@ router.post("/admin/baselines/import", requireAdmin, async (req, res) => {
     for (const r of rows) { if (r && r.category && r.platform && r.handle && Number.isFinite(Number(r.overall))) { await geDb.recordBaseline({ category: String(r.category), platform: String(r.platform), handle: String(r.handle), overall: Number(r.overall), dimensions: Array.isArray(r.dimensions) ? r.dimensions : [] }); n++; } }
     console.log(`[Admin] ${req.admin.via} imported ${n} baseline rows`);
     res.json({ imported: n, summary: await geDb.getBaselineSummary() });
+  } catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
+});
+// Funnel: distinct actors per step and step-to-step conversion, by-ref
+// attribution, month-two paid retention.
+router.get("/admin/funnel", requireAdmin, async (req, res) => {
+  try {
+    const days = Math.min(365, Math.max(1, Number(req.query.days) || 30));
+    const since = Date.now() - days * 86400000;
+    const fn = await geDb.eventFunnel(since, events.EVENTS);
+    const steps = events.FUNNEL.map((name, i) => { const a = fn.steps[name]?.actors || 0; const prev = i ? (fn.steps[events.FUNNEL[i - 1]]?.actors || 0) : null; return { name, actors: a, total: fn.steps[name]?.total || 0, from_previous: prev ? a / prev : null }; });
+    res.json({ days, steps, other: Object.fromEntries(Object.entries(fn.steps).filter(([k]) => !events.FUNNEL.includes(k))), by_ref: fn.by_ref, retention_month_two: await geDb.paidRetention() });
   } catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
 });
 router.get("/admin/promos", requireAdmin, async (req, res) => {

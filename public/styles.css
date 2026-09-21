@@ -669,3 +669,10 @@ p { margin: 0; }
 .promocreate input, .promocreate select { padding: 9px 12px; border-radius: 10px; border: 1.5px solid var(--line2); background: var(--card); font: inherit; font-size: 13px; }
 .promocreate input[name=code] { width: 130px; text-transform: uppercase; } .promocreate input[name=value], .promocreate input[name=max_redemptions] { width: 110px; }
 .arow.promo { grid-template-columns: 130px 2fr 1fr 90px; } .arow.promo.off { opacity: .55; } .arow.promo .n { text-align: right; }
+
+/* ---- funnel ---- */
+.funnel { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-bottom: 10px; }
+.fstep { padding: 12px 12px; background: var(--ground); border-radius: 14px; }
+.fstep .n { font-family: var(--display); font-size: 24px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.fstep .l { font-size: 12px; color: var(--body); text-transform: capitalize; }
+.fstep .c { font-size: 11px; color: var(--muted); margin-top: 2px; }

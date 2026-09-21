@@ -14,6 +14,7 @@ const geDb = require("./growth_engine_db_select");
 const { compareCompetitors } = require("./growth_engine_competitors");
 const { saveReportAsMarkdown } = require("./report_saver");
 const mailer = require("./mailer");
+const events = require("./growth_engine_events");
 
 // Weekly refresh: does what the creator told us still match what they're
 // doing? At most one nudge per phase; the report and the score-changed
@@ -79,6 +80,7 @@ class JobQueue {
   }
 
   async processJob(jobId, accountId, tier, inputParams) {
+    (this._started ||= new Map()).set(jobId, Date.now());
     if (this.processingJobs.has(jobId)) {
       console.log(`[JobQueue] Job ${jobId} already processing`);
       return;
@@ -228,6 +230,7 @@ class JobQueue {
 
       const { reportId } = await geDb.createReport(accountId, tier, inputParams, reportBody);
       reportBody.report_id = reportId;
+      events.track("evaluate_completed", { accountId: accountId !== "demo-account" ? accountId : null, anon: inputParams.attribution?.anon || null, ref: inputParams.attribution?.ref || null, reportId, props: { tier, platform: inputParams.platform, category: inputParams.category, overall: reportBody.scores?.overall ?? null, scheduled: !!inputParams.scheduled, ms: Date.now() - (this._started?.get?.(jobId) || Date.now()) } });
 
       // Emails: report ready on a fresh run; score changed on a weekly refresh.
       try {
@@ -268,6 +271,7 @@ class JobQueue {
       console.log(`[JobQueue] ✅ Job ${jobId} completed`);
     } catch (err) {
       console.error(`[JobQueue] ❌ Job ${jobId} failed:`, err.message);
+      events.track("evaluate_failed", { accountId: accountId !== "demo-account" ? accountId : null, anon: inputParams.attribution?.anon || null, ref: inputParams.attribution?.ref || null, props: { tier, platform: inputParams.platform, error: String(err.message).slice(0, 200) } });
 
       await geDb.updateJobStatus(jobId, "failed", {
         error: err.message,

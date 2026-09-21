@@ -69,6 +69,13 @@
   const setTokenRaw = t => { try { t ? localStorage.setItem('sc_token', t) : localStorage.removeItem('sc_token'); } catch { } };
   const setToken = t => { setTokenRaw(t); if (t) refreshAdminFlag(); else { try { localStorage.removeItem('sc_admin'); } catch { } } };
   const go = hash => { location.hash = hash; };
+  // Funnel attribution (spec 1.13): an anonymous browser id, and the referral
+  // code from the first ?ref= link seen (spec 1.8 formalises referrals).
+  const anonId = () => { try { let a = localStorage.getItem('sc_anon'); if (!a) { a = 'anon_' + Math.random().toString(36).slice(2, 12) + Date.now().toString(36); localStorage.setItem('sc_anon', a); } return a; } catch { return null; } };
+  (() => { try { const r = new URLSearchParams(location.search).get('ref') || new URLSearchParams(location.hash.split('?')[1] || '').get('ref'); if (r && !localStorage.getItem('sc_ref')) localStorage.setItem('sc_ref', r.trim().slice(0, 32)); } catch { } })();
+  const refCode = () => { try { return localStorage.getItem('sc_ref') || ''; } catch { return ''; } };
+  // Fire-and-forget event; never blocks the UI.
+  function track(name, props, reportId) { try { api('/events', { method: 'POST', body: JSON.stringify({ name, props: props || undefined, report_id: reportId || undefined }) }, { allow401: true }).catch(() => { }); } catch { } }
   // Promo: { code, description, amount_cents, base_cents, product, free_months } once checked; { code, pending } before.
   const promo = () => sget('sc_promo', null);
   async function checkPromo(code, product, billingCycle) {
@@ -100,6 +107,8 @@
     const url = path.startsWith('/api/') || path.startsWith('http') ? path : API + path;
     const headers = { 'Content-Type': 'application/json', ...(init.headers || {}) };
     const t = token(); if (t) headers.Authorization = 'Bearer ' + t;
+    const a = anonId(); if (a) headers['x-anon-id'] = a;
+    const r = refCode(); if (r) headers['x-ref'] = r;
     const doFetch = CFG.useMock && window.scalecraftMockFetch ? window.scalecraftMockFetch : fetch;
     const res = await doFetch(url, { ...init, headers });
     let body = null; try { body = await res.json(); } catch { }
@@ -499,6 +508,7 @@
     el.addEventListener('click', e => { if (e.target === el) close(); });
     const toBlob = () => new Promise(r => canvas.toBlob(r, 'image/png'));
     el.querySelector('[data-share=save]').addEventListener('click', async () => {
+      if (report.report_id !== 'sample') track('card_downloaded', { size }, report.report_id);
       const blob = await toBlob(); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `scalecraft-${s.handle}-${size}.png`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
     });
     el.querySelector('[data-share=post]').addEventListener('click', async () => {
@@ -643,6 +653,7 @@
     if (subscriber && qs.get('checkin') && qs.get('changed') === '1') { go(`#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=checkin&phase=${qs.get('checkin')}`); return; }
     if (isSample) sset('sc_once_price', oneTime);
 
+    if (!isSample && !sget('sc_viewed_' + report.report_id, false)) { sset('sc_viewed_' + report.report_id, true); track('report_viewed', { tier: report.tier, paid }, report.report_id); }
     renderHeader('report');
     $view.innerHTML = h`
       <div class="wrap">
@@ -765,7 +776,7 @@
       if (!isSample) { report.moves_done = done; sset('sc_report_' + report.report_id, report); }
       $view.querySelectorAll('.phase').forEach((ph, i) => { const p = phases[i]; if (!p || !paid) return; const total = 1 + p.moves.length; const dn = (isDone(p.key + 'm1') ? 1 : 0) + p.moves.filter(m => isDone(p.key + 'm' + m.n)).length; const el = ph.querySelector('.prog'); if (el) el.textContent = `${dn} of ${total} done`; });
     }));
-    $view.querySelector('[data-action=share]').addEventListener('click', () => openShareSheet(report));
+    $view.querySelector('[data-action=share]').addEventListener('click', () => { if (!isSample) track('share_clicked', { overall }, report.report_id); openShareSheet(report); });
     // Both paid paths go through the 60-second intake first.
     $view.querySelector('[data-action=unlock]')?.addEventListener('click', () => { sset('sc_intent_tier', 'growth_plan'); sset('sc_form', { handle: biz.handle, platform: biz.platform, category: biz.category, email: sget('sc_form', {}).email || report.email || '' }); go(`#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=subscribe`); });
     $view.querySelector('[data-action=unlock-once]')?.addEventListener('click', () => { sset('sc_once_price', oneTime); go(`#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=once`); });
@@ -826,6 +837,7 @@
     const yr = t => t.annualPrice ?? Math.round((t.monthlyPrice || 0) * 12 * (1 - disc));
     const cur = t => ent && ent.current_tier === t;
     let promoState = promo();
+    track('pricing_viewed', { intent: intent || null, billing });
     const render = () => {
       const annual = billing === 'annual';
       const pcode = promoState && promoState.code;
@@ -1134,7 +1146,8 @@
     if (!token()) { sset('sc_next', '#/admin'); go('#/signin'); return; }
     $view.innerHTML = h`<div class="center-msg">Loading…</div>`;
     let ov, reports, failed;
-    try { [ov, reports, failed] = await Promise.all([api('/admin/overview'), api('/admin/reports?limit=50'), api('/admin/failed-jobs?limit=30')]); }
+    let funnel = null;
+    try { [ov, reports, failed, funnel] = await Promise.all([api('/admin/overview'), api('/admin/reports?limit=50'), api('/admin/failed-jobs?limit=30'), api('/admin/funnel?days=30').catch(() => null)]); }
     catch (e) {
       if (e.status === 401) return;
       if (e.status === 403 || e.status === 404) { lset('sc_admin', false); $view.innerHTML = h`<div class="center-msg"><h2>This account isn't an admin.</h2>Add your email to <code>ADMIN_EMAILS</code> on the server, then sign in again.</div>`; return; }
@@ -1171,6 +1184,12 @@
         ${ov.outcomes && ov.outcomes.n ? raw(h`<div class="fine">Evidence: ${ov.outcomes.n} refreshes recorded · creators who did 3+ moves moved ${ov.outcomes.avg_delta_active ?? '—'} points on average.</div>`) : raw('<div class="fine">Evidence: no refresh outcomes yet.</div>')}
         ${ov.baselines ? raw(h`<div class="fine">Baselines: ${ov.baselines.total} accounts across ${Object.keys(ov.baselines.by_category || {}).length} niches.</div>`) : ''}
       </section>
+
+      ${funnel ? raw(h`<section class="card"><h2>Funnel <span class="fine">last ${funnel.days} days · distinct people</span></h2>
+        <div class="funnel">${raw(funnel.steps.map(st => h`<div class="fstep"><div class="n">${st.actors}</div><div class="l">${st.name.replace(/_/g, ' ')}</div>${st.from_previous != null ? raw(h`<div class="c">${Math.round(st.from_previous * 100)}% of previous</div>`) : raw('<div class="c">&nbsp;</div>')}</div>`).join(''))}</div>
+        <div class="fine">${Object.entries(funnel.other || {}).filter(([, v]) => v.actors).map(([k, v]) => `${k.replace(/_/g, ' ')} ${v.actors}`).join(' · ') || 'No other events yet.'}${funnel.retention_month_two?.cohort ? ` · Month-two retention: ${funnel.retention_month_two.retained} of ${funnel.retention_month_two.cohort} still paying (${Math.round(funnel.retention_month_two.rate * 100)}%)` : ' · Month-two retention: no cohort yet (needs subscribers 30+ days old)'}</div>
+        ${Object.keys(funnel.by_ref || {}).length ? raw(h`<div class="alist" style="margin-top:10px">${raw(Object.entries(funnel.by_ref).map(([ref, v]) => h`<div class="arow promo"><span class="h">ref ${ref}</span><span class="t">${v.evaluate_started || 0} scored · ${v.signup || 0} signed up · ${v.subscribe || 0} paid</span><span class="e"></span><span class="n"></span></div>`).join(''))}</div>`) : ''}
+      </section>`) : ''}
 
       <section class="card"><h2>Look up an account</h2>
         <form class="compform" id="adminFind"><input type="text" name="q" placeholder="email or @handle" autocomplete="off"><button class="btn dark" type="submit">Find</button></form>

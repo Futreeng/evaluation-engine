@@ -108,6 +108,14 @@ const assert = require("assert");
   assert.equal((await db.setPromoActive("TEST10", false)).active, false);
   assert.equal((await db.listPromos()).length, 1);
 
+  // events + funnel
+  await db.insertEvent({ name: "evaluate_started", accountId: null, anon: "a1", ref: "REF1", reportId: null, props: null, ip: null });
+  await db.insertEvent({ name: "evaluate_started", accountId: null, anon: "a1", ref: "REF1", reportId: null, props: null, ip: null });
+  await db.insertEvent({ name: "signup", accountId: "acct_z", anon: "a1", ref: "REF1", reportId: null, props: null, ip: null });
+  const fn = await db.eventFunnel(0, ["evaluate_started", "signup"]);
+  assert.equal(fn.steps.evaluate_started.actors, 1); assert.equal(fn.steps.evaluate_started.total, 2); assert.equal(fn.by_ref.REF1.signup, 1);
+  assert.equal((await db.paidRetention()).cohort, 0);
+
   console.log("postgres module: all assertions passed");
   process.exit(0);
 })().catch((e) => { console.error("FAILED:", e.message); process.exit(1); });

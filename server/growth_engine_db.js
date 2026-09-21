@@ -207,6 +207,23 @@ function initSchema() {
     )
   `);
 
+
+  // Funnel events (spec 1.13)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS growth_engine_events (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      account_id TEXT,
+      anon TEXT,
+      ref TEXT,
+      report_id TEXT,
+      props TEXT,
+      ip TEXT,
+      created_at INTEGER NOT NULL
+    )
+  `);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_events_name_time ON growth_engine_events (name, created_at)`);
+
   // Tier history table: audit log of tier changes
   db.run(`
     CREATE TABLE IF NOT EXISTS tier_history (
@@ -810,6 +827,39 @@ async function listRedemptions(code, limit = 100) {
   return rowsOf(`SELECT r.*, u.email FROM growth_engine_promo_redemptions r LEFT JOIN users u ON u.user_id = r.account_id WHERE r.code = ? ORDER BY r.created_at DESC LIMIT ?`, [String(code).toUpperCase(), limit]).map((r) => ({ ...r, amount_off: Number(r.amount_off), created_at: Number(r.created_at) }));
 }
 
+
+// ===================== EVENTS =====================
+async function insertEvent(e) {
+  if (!db) throw new Error("Database not initialized");
+  db.run(`INSERT INTO growth_engine_events (id, name, account_id, anon, ref, report_id, props, ip, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ["ev_" + uid(), e.name, e.accountId, e.anon, e.ref, e.reportId, e.props, e.ip, Date.now()]);
+  saveDb();
+}
+// Distinct actors per event name in a window. An actor is the account when
+// known, else the anonymous browser id. Also conversion by ref code.
+async function eventFunnel(sinceTs, names) {
+  if (!db) throw new Error("Database not initialized");
+  const out = {};
+  for (const n of names) {
+    const r = one(`SELECT COUNT(DISTINCT COALESCE(account_id, anon, ip)) AS actors, COUNT(*) AS total FROM growth_engine_events WHERE name = ? AND created_at >= ?`, [n, sinceTs]);
+    out[n] = { actors: Number(r.actors || 0), total: Number(r.total || 0) };
+  }
+  const byRef = rowsOf(`SELECT ref, name, COUNT(DISTINCT COALESCE(account_id, anon, ip)) AS actors FROM growth_engine_events WHERE ref IS NOT NULL AND created_at >= ? AND name IN ('evaluate_started','signup','subscribe') GROUP BY ref, name`, [sinceTs]);
+  const refs = {};
+  for (const r of byRef) (refs[r.ref] ||= {})[r.name] = Number(r.actors);
+  return { steps: out, by_ref: refs };
+}
+// Month-two retention: accounts that subscribed 30–60 days ago and are still
+// on a paid tier now (cancel_at in the future counts as still paying).
+async function paidRetention() {
+  if (!db) throw new Error("Database not initialized");
+  const now = Date.now(), d = 86400000;
+  const cohort = rowsOf(`SELECT DISTINCT account_id FROM growth_engine_events WHERE name = 'subscribe' AND created_at BETWEEN ? AND ?`, [now - 60 * d, now - 30 * d]).map((r) => r.account_id).filter(Boolean);
+  let retained = 0;
+  for (const id of cohort) { const e = one(`SELECT current_tier, cancel_at FROM entitlements WHERE account_id = ?`, [id]); if (e.current_tier && e.current_tier !== "social_snapshot" && (!e.cancel_at || Number(e.cancel_at) > now)) retained++; }
+  return { cohort: cohort.length, retained, rate: cohort.length ? retained / cohort.length : null };
+}
+
 // ===================== ENTITLEMENT OPERATIONS =====================
 
 async function getOrCreateEntitlement(accountId) {
@@ -1088,6 +1138,7 @@ module.exports = {
   adminRecentReports,
   adminFailedJobs,
   adminFindAccount,
+  insertEvent, eventFunnel, paidRetention,
   createPromo, getPromo, listPromos, setPromoActive, hasRedeemed, redeemPromo, listRedemptions,
   setCancelAt,
   setBillingPeriod,
