@@ -619,6 +619,26 @@ router.post("/reports/:reportId/unlock", authMiddleware, async (req, res) => {
   }
 });
 
+// Share card (spec 1.7): snapshot the score card for a report. Anonymous free
+// reports can be shared by whoever holds the report id; paid ones by the owner.
+router.post("/reports/:reportId/share", optionalAuth, async (req, res) => {
+  try {
+    const report = await geDb.getReport(req.params.reportId);
+    if (!report) return sendError(res, 404, "REPORT_NOT_FOUND", "Report not found");
+    const anon = !report.accountId || report.accountId === "demo-account";
+    if (!anon && report.accountId !== req.user?.id) return sendError(res, 403, "NOT_YOUR_REPORT", "This report belongs to another account");
+    const cards = require("../growth_engine_cards");
+    const kind = cards.KINDS.includes(req.body?.kind) ? req.body.kind : "score";
+    const data = cards.scoreDataFrom(report.reportBody || {}, { thenNow: !!req.body?.then_now });
+    if (!Number.isFinite(data.overall)) return sendError(res, 400, "NO_SCORE", "This report has no score to share");
+    const ref = req.user?.id ? req.user.id.replace(/^user_/, "").slice(0, 10) : null; // 1.8 replaces with the account's ref code
+    const share = await geDb.createShare({ accountId: anon ? null : report.accountId, reportId: report.reportId, kind, data, ref });
+    const base = (process.env.APP_URL || `${req.protocol}://${req.get("host")}`).replace(/\/$/, "");
+    events.track("share_clicked", { ...events.attribution(req), reportId: report.reportId, props: { kind, share_id: share.shareId } });
+    res.json({ share_id: share.shareId, url: `${base}/s/${share.shareId}`, png: { story: `${base}/cards/${share.shareId}.png?size=story`, square: `${base}/cards/${share.shareId}.png?size=square` } });
+  } catch (err) { sendError(res, 500, "SHARE_ERROR", err.message); }
+});
+
 // Your next posts (spec 1.12): rewrite one post. Paid reports only; metered.
 router.post("/reports/:reportId/posts/regenerate", authMiddleware, async (req, res) => {
   try {

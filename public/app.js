@@ -437,7 +437,7 @@
     const wrapped = rawR && rawR.reportBody && typeof rawR.reportBody === 'object';
     const body = wrapped ? rawR.reportBody : (rawR || {});
     const r = { ...body };
-    r.report_id = body.report_id || rawR?.reportId || reportId;
+    r.report_id = rawR?.reportId || body.report_id || reportId; // the row id wins over the body's provisional one
     r.tier = body.tier || rawR?.tier;
     r.business = body.business || rawR?.business || {};
     r.created_at = body.created_at || body.generated_at || rawR?.generatedAt || Date.now();
@@ -514,24 +514,37 @@
     document.body.appendChild(el);
     const canvas = el.querySelector('#shareCanvas');
     let size = 'story';
-    const redraw = () => { const tn = el.querySelector('#thenNow'); drawShareCard(canvas, s, size, tn && tn.checked ? { prev, span: report.history?.previous?.generated_at ? 'since ' + fmtShort(report.history.previous.generated_at) : 'in six weeks' } : {}); };
+    // Server-rendered card (spec 1.7) with a public share page; the client
+    // canvas stays as the fallback (mock mode, sample, or the call failing).
+    let share = null;
+    const isSample = report.report_id === 'sample';
+    const thenNowOn = () => { const tn = el.querySelector('#thenNow'); return !!(tn && tn.checked); };
+    const makeShare = async () => {
+      if (CFG.useMock || isSample) return null;
+      try { return await api('/reports/' + encodeURIComponent(report.report_id) + '/share', { method: 'POST', body: JSON.stringify({ kind: 'score', then_now: thenNowOn() }) }, { allow401: true }); } catch (e) { console.warn('[share] card unavailable:', e && e.message); return null; }
+    };
+    const redraw = async () => {
+      drawShareCard(canvas, s, size, thenNowOn() ? { prev, span: report.history?.previous?.generated_at ? 'since ' + fmtShort(report.history.previous.generated_at) : 'in six weeks' } : {});
+      if (!share) { share = await makeShare(); if (share) el.dataset.share = share.share_id; }
+      if (share) { const img = new Image(); img.onload = () => { const ctx = canvas.getContext('2d'); canvas.width = img.width; canvas.height = img.height; ctx.drawImage(img, 0, 0); }; img.src = share.png[size] + '&t=' + Date.now(); }
+    };
     redraw();
     el.querySelectorAll('[data-size]').forEach(b => b.addEventListener('click', () => { size = b.dataset.size; el.querySelectorAll('[data-size]').forEach(x => x.classList.toggle('dark', x === b)); redraw(); }));
-    el.querySelector('#thenNow')?.addEventListener('change', redraw);
+    el.querySelector('#thenNow')?.addEventListener('change', () => { share = null; redraw(); });
     const close = () => el.remove();
     el.addEventListener('click', e => { if (e.target === el) close(); });
-    const toBlob = () => new Promise(r => canvas.toBlob(r, 'image/png'));
+    const toBlob = async () => { if (share) { try { const r = await fetch(share.png[size]); if (r.ok) return await r.blob(); } catch { } } return new Promise(r => canvas.toBlob(r, 'image/png')); };
     el.querySelector('[data-share=save]').addEventListener('click', async () => {
       if (report.report_id !== 'sample') track('card_downloaded', { size }, report.report_id);
       const blob = await toBlob(); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `scalecraft-${s.handle}-${size}.png`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
     });
     el.querySelector('[data-share=post]').addEventListener('click', async () => {
       const blob = await toBlob(); const file = new File([blob], `scalecraft-${s.handle}.png`, { type: 'image/png' });
-      if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file], text: `My account scored ${s.overall}/100 on Scalecraft` }); return; } catch { } }
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file], text: `My account scored ${s.overall}/100 on Scalecraft`, url: share ? share.url : undefined }); return; } catch { } }
       el.querySelector('[data-share=save]').click(); toast('Saved — post it from your camera roll.');
     });
     el.querySelector('[data-share=copy]').addEventListener('click', async () => {
-      const url = location.origin + location.pathname + '#/report/' + report.report_id;
+      const url = share ? share.url : location.origin + location.pathname + '#/report/' + report.report_id;
       try { await navigator.clipboard.writeText(url); toast('Link copied.'); } catch { toast(url); }
     });
   }

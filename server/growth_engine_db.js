@@ -306,6 +306,21 @@ function initSchema() {
   `);
   db.run(`CREATE INDEX IF NOT EXISTS idx_move_outcomes_key ON growth_engine_move_outcomes (category, platform, move_key)`);
 
+
+  // Share cards (spec 1.7): a public card snapshot, never the report
+  db.run(`
+    CREATE TABLE IF NOT EXISTS growth_engine_shares (
+      share_id TEXT PRIMARY KEY,
+      account_id TEXT,
+      report_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      data TEXT NOT NULL,
+      ref TEXT,
+      views INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    )
+  `);
+
   // Tier history table: audit log of tier changes
   db.run(`
     CREATE TABLE IF NOT EXISTS tier_history (
@@ -676,6 +691,9 @@ async function createReport(accountId, tier, businessInfo, reportBody) {
 
   const reportId = "rpt_" + uid();
   const now = Date.now();
+  // The stored body must carry the row's id — the evaluator's provisional
+  // report_id would otherwise be what clients send back to us.
+  if (reportBody && typeof reportBody === "object") reportBody.report_id = reportId;
 
   db.run(
     `INSERT INTO growth_engine_reports
@@ -1020,6 +1038,24 @@ async function moveOutcomeSummary({ category = null, platform = null } = {}) {
     .map((r) => ({ ...r, n: Number(r.n), avg_delta: Number(r.avg_delta), avg_together: Number(r.avg_together) }));
 }
 
+
+// ===================== SHARE CARDS (spec 1.7) =====================
+async function createShare({ accountId, reportId, kind, data, ref }) {
+  if (!db) throw new Error("Database not initialized");
+  const shareId = crypto.randomBytes(6).toString("base64url");
+  db.run(`INSERT INTO growth_engine_shares (share_id, account_id, report_id, kind, data, ref, views, created_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?)`, [shareId, accountId || null, reportId, kind, JSON.stringify(data), ref || null, Date.now()]);
+  saveDb();
+  return getShare(shareId);
+}
+async function getShare(shareId) {
+  if (!db) throw new Error("Database not initialized");
+  const r = rowsOf(`SELECT * FROM growth_engine_shares WHERE share_id = ?`, [shareId])[0];
+  if (!r) return null;
+  let data = {}; try { data = JSON.parse(r.data); } catch { /* skip */ }
+  return { shareId: r.share_id, accountId: r.account_id, reportId: r.report_id, kind: r.kind, data, ref: r.ref, views: Number(r.views), createdAt: Number(r.created_at) };
+}
+async function bumpShareViews(shareId) { if (!db) throw new Error("Database not initialized"); db.run(`UPDATE growth_engine_shares SET views = views + 1 WHERE share_id = ?`, [shareId]); saveDb(); }
+
 // ===================== ENTITLEMENT OPERATIONS =====================
 
 async function getOrCreateEntitlement(accountId) {
@@ -1343,6 +1379,7 @@ module.exports = {
   insertEvent, eventFunnel, paidRetention, variantFunnel,
   insertCost, adminCosts, attachReportToCosts,
   logMove, recordMoveOutcomes, moveOutcomeSummary,
+  createShare, getShare, bumpShareViews,
   createPromo, getPromo, listPromos, setPromoActive, hasRedeemed, redeemPromo, listRedemptions,
   setCancelAt,
   setBillingPeriod,

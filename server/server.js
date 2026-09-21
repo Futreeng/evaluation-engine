@@ -119,6 +119,41 @@ app.use("/api/sessions", apiLimiter, sessionsRoutes);
 app.use("/api/proxy", apiLimiter, proxyRoutes);
 app.use("/api/growth-engine/v1", apiLimiter, growthEngineRoutes);
 
+// Share cards (spec 1.7): the PNG, and a public page that shows only the
+// card and a "Score my account" button — never the report.
+app.get("/cards/:id.png", async (req, res) => {
+  try {
+    const share = await geDb.getShare(String(req.params.id).slice(0, 32));
+    if (!share) return res.status(404).type("text").send("Not found");
+    const size = req.query.size === "square" ? "square" : "story";
+    const png = require("./growth_engine_cards").render(share.kind, share.data, size, share.shareId);
+    res.set({ "content-type": "image/png", "cache-control": "public, max-age=86400" }).send(png);
+  } catch (err) { console.error("[Cards] render failed:", err.message); res.status(500).type("text").send("Card unavailable"); }
+});
+app.get("/s/:id", async (req, res) => {
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  try {
+    const share = await geDb.getShare(String(req.params.id).slice(0, 32));
+    if (!share) return res.status(404).type("html").send("<!DOCTYPE html><meta charset=utf-8><title>Scalecraft</title><p style='font-family:sans-serif;padding:40px'>That card doesn't exist any more.</p>");
+    geDb.bumpShareViews(share.shareId).catch(() => { });
+    require("./growth_engine_events").track("share_page_visited", { anon: req.get("x-anon-id") || null, ref: share.ref || null, reportId: share.reportId, ip: req.ip, props: { share_id: share.shareId, kind: share.kind } });
+    const base = (process.env.APP_URL || `${req.protocol}://${req.get("host")}`).replace(/\/$/, "");
+    const d = share.data; const cta = `${base}/${share.ref ? `?ref=${encodeURIComponent(share.ref)}` : ""}`;
+    const title = `@${d.handle} scored ${d.overall}/100 on Scalecraft`;
+    res.type("html").send(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${esc(title)}</title><meta name="description" content="Scalecraft scores a public social account 0–100 and writes the plan. Score yours free.">
+<meta property="og:type" content="website"><meta property="og:title" content="${esc(title)}"><meta property="og:description" content="Score yours at ${esc(base.replace(/^https?:\/\//, ""))} — free, about a minute."><meta property="og:image" content="${base}/cards/${share.shareId}.png?size=square"><meta property="og:image:width" content="1080"><meta property="og:image:height" content="1080"><meta property="og:url" content="${base}/s/${share.shareId}">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${esc(title)}"><meta name="twitter:image" content="${base}/cards/${share.shareId}.png?size=square">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=Instrument+Sans:wght@400..700&display=swap">
+<style>body{margin:0;background:#FFF6E9;color:#2A2118;font-family:"Instrument Sans",system-ui,sans-serif}.wrap{max-width:520px;margin:0 auto;padding:28px 16px 48px;text-align:center}.brand{font-family:"Bricolage Grotesque",sans-serif;font-weight:700;font-size:20px;text-align:left}.card{margin:22px auto 0;width:100%;max-width:420px;border-radius:24px;overflow:hidden;box-shadow:0 3px 0 #EADFCB;background:#D2603A}.card img{display:block;width:100%;height:auto}h1{font-family:"Bricolage Grotesque",sans-serif;font-size:26px;letter-spacing:-.02em;margin:26px 0 8px}p{color:#5B4C3B;line-height:1.5;margin:0 0 20px}.btn{display:inline-block;padding:16px 26px;border-radius:14px;background:#D2603A;color:#FFF6E9;font-weight:700;text-decoration:none;font-size:17px}.fine{font-size:12px;color:#7A6A57;margin-top:22px}</style></head>
+<body><div class="wrap"><div class="brand">Scalecraft</div>
+<div class="card"><img src="${base}/cards/${share.shareId}.png?size=square" width="1080" height="1080" alt="${esc(title)}"></div>
+<h1>${esc(title)}</h1><p>Four dimensions, scored from public posts, with the first moves to change. Takes about a minute.</p>
+<a class="btn" href="${cta}">Score my account — free</a>
+<div class="fine">Scores read public data only. <a href="${base}/#/how" style="color:#7A6A57">How the score works</a></div></div></body></html>`);
+  } catch (err) { res.status(500).type("text").send("Card unavailable"); }
+});
+
 app.use(express.static(path.join(__dirname, "..", "public")));
 // Locally stored post thumbnails (THUMB_STORAGE=local)
 app.use("/thumbs", express.static(require("./growth_engine_thumbs").localDir, { maxAge: "365d", immutable: true, fallthrough: true }));

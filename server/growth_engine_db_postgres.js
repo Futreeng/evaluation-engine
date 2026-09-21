@@ -222,6 +222,11 @@ async function initSchema() {
       )`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_move_outcomes_key ON growth_engine_move_outcomes (category, platform, move_key)`);
     await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_shares (
+        share_id TEXT PRIMARY KEY, account_id TEXT, report_id TEXT NOT NULL, kind TEXT NOT NULL, data TEXT NOT NULL, ref TEXT,
+        views INTEGER NOT NULL DEFAULT 0, created_at BIGINT NOT NULL
+      )`);
+    await client.query(`
       CREATE TABLE IF NOT EXISTS growth_engine_plan_context (
         id TEXT PRIMARY KEY,
         account_id TEXT NOT NULL,
@@ -424,6 +429,7 @@ async function countFreeSnapshotsByEmail(email) {
 
 async function createReport(accountId, tier, businessInfo, reportBody) {
   const reportId = "rpt_" + uid();
+  if (reportBody && typeof reportBody === "object") reportBody.report_id = reportId;
   const now = Date.now();
   await q(
     `INSERT INTO growth_engine_reports
@@ -738,6 +744,19 @@ async function moveOutcomeSummary({ category = null, platform = null } = {}) {
   return r.rows.map((x) => ({ ...x, n: Number(x.n), avg_delta: Number(x.avg_delta), avg_together: Number(x.avg_together) }));
 }
 
+
+// ===================== SHARE CARDS (spec 1.7) =====================
+async function createShare({ accountId, reportId, kind, data, ref }) {
+  const shareId = crypto.randomBytes(6).toString("base64url");
+  await q(`INSERT INTO growth_engine_shares (share_id, account_id, report_id, kind, data, ref, views, created_at) VALUES ($1, $2, $3, $4, $5, $6, 0, $7)`, [shareId, accountId || null, reportId, kind, JSON.stringify(data), ref || null, Date.now()]);
+  return getShare(shareId);
+}
+async function getShare(shareId) {
+  const r = (await q(`SELECT * FROM growth_engine_shares WHERE share_id = $1`, [shareId])).rows[0];
+  return r ? { shareId: r.share_id, accountId: r.account_id, reportId: r.report_id, kind: r.kind, data: parseJson(r.data) || {}, ref: r.ref, views: Number(r.views), createdAt: Number(r.created_at) } : null;
+}
+async function bumpShareViews(shareId) { await q(`UPDATE growth_engine_shares SET views = views + 1 WHERE share_id = $1`, [shareId]); }
+
 // ===================== CATEGORY BASELINES =====================
 
 async function listBaselines() {
@@ -845,6 +864,7 @@ module.exports = {
   insertEvent, eventFunnel, paidRetention, variantFunnel,
   insertCost, adminCosts, attachReportToCosts,
   logMove, recordMoveOutcomes, moveOutcomeSummary,
+  createShare, getShare, bumpShareViews,
   createPromo, getPromo, listPromos, setPromoActive, hasRedeemed, redeemPromo, listRedemptions,
   setCancelAt,
   setBillingPeriod,
