@@ -170,6 +170,7 @@ function initSchema() {
   // Phase-2 signals (spec 1.9): business flag + confirmed niche on the account
   try { db.run(`ALTER TABLE users ADD COLUMN is_business INTEGER DEFAULT 0`); } catch { /* exists */ }
   try { db.run(`ALTER TABLE users ADD COLUMN niche TEXT`); } catch { /* exists */ }
+  try { db.run(`ALTER TABLE users ADD COLUMN price_variant TEXT`); } catch { /* exists */ }
 
   // Password reset tokens: sha256 of the emailed token, single use, 1h.
   db.run(`
@@ -924,6 +925,14 @@ async function eventFunnel(sinceTs, names) {
   for (const r of byRef) (refs[r.ref] ||= {})[r.name] = Number(r.actors);
   return { steps: out, by_ref: refs };
 }
+// Conversion by price variant: distinct people who viewed pricing vs subscribed/unlocked, per variant.
+async function variantFunnel(sinceTs) {
+  if (!db) throw new Error("Database not initialized");
+  const rows = rowsOf(`SELECT json_extract(props, '$.variant') AS v, name, COUNT(DISTINCT COALESCE(account_id, anon, ip)) AS actors, SUM(CAST(COALESCE(json_extract(props, '$.amount_cents'), 0) AS REAL)) AS cents FROM growth_engine_events WHERE created_at >= ? AND name IN ('pricing_viewed','subscribe','unlock') AND json_extract(props, '$.variant') IS NOT NULL GROUP BY v, name`, [sinceTs]);
+  const out = {};
+  for (const r of rows) { (out[r.v] ||= { pricing_viewed: 0, subscribe: 0, unlock: 0, revenue_cents: 0 })[r.name] = Number(r.actors); if (r.name !== "pricing_viewed") out[r.v].revenue_cents += Number(r.cents) || 0; }
+  return out;
+}
 // Month-two retention: accounts that subscribed 30–60 days ago and are still
 // on a paid tier now (cancel_at in the future counts as still paying).
 async function paidRetention() {
@@ -1176,6 +1185,7 @@ async function getUserByEmail(email) {
     updatedAt: row[columns.indexOf("updated_at")],
     emailPaused: columns.includes("email_paused") ? !!row[columns.indexOf("email_paused")] : false,
     isBusiness: columns.includes("is_business") ? !!row[columns.indexOf("is_business")] : false,
+    priceVariant: columns.includes("price_variant") ? row[columns.indexOf("price_variant")] || null : null,
     niche: columns.includes("niche") ? row[columns.indexOf("niche")] || null : null,
   };
 }
@@ -1204,12 +1214,14 @@ async function getUserById(userId) {
     updatedAt: row[columns.indexOf("updated_at")],
     emailPaused: columns.includes("email_paused") ? !!row[columns.indexOf("email_paused")] : false,
     isBusiness: columns.includes("is_business") ? !!row[columns.indexOf("is_business")] : false,
+    priceVariant: columns.includes("price_variant") ? row[columns.indexOf("price_variant")] || null : null,
     niche: columns.includes("niche") ? row[columns.indexOf("niche")] || null : null,
   };
 }
 
-async function setUserProfile(userId, { isBusiness, niche } = {}) {
+async function setUserProfile(userId, { isBusiness, niche, priceVariant } = {}) {
   if (!db) throw new Error("Database not initialized");
+  if (priceVariant !== undefined) db.run(`UPDATE users SET price_variant = ?, updated_at = ? WHERE user_id = ?`, [priceVariant || null, Date.now(), userId]);
   if (isBusiness !== undefined) db.run(`UPDATE users SET is_business = ?, updated_at = ? WHERE user_id = ?`, [isBusiness ? 1 : 0, Date.now(), userId]);
   if (niche !== undefined) db.run(`UPDATE users SET niche = ?, updated_at = ? WHERE user_id = ?`, [niche || null, Date.now(), userId]);
   saveDb();
@@ -1288,7 +1300,7 @@ module.exports = {
   adminRecentReports,
   adminFailedJobs,
   adminFindAccount,
-  insertEvent, eventFunnel, paidRetention,
+  insertEvent, eventFunnel, paidRetention, variantFunnel,
   insertCost, adminCosts, attachReportToCosts,
   logMove, recordMoveOutcomes, moveOutcomeSummary,
   createPromo, getPromo, listPromos, setPromoActive, hasRedeemed, redeemPromo, listRedemptions,

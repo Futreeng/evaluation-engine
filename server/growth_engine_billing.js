@@ -59,8 +59,8 @@ class BillingManager {
    * One-time purchase against a report (no entitlement change).
    * Mock mode records a charge; production goes through Stripe PaymentIntents.
    */
-  async purchaseOneTime(accountId, product, stripeCustomerId = null, promo = null) {
-    const list = ONE_TIME_PRICING[product];
+  async purchaseOneTime(accountId, product, stripeCustomerId = null, promo = null, listOverride = null) {
+    const list = listOverride || ONE_TIME_PRICING[product];
     if (!list) throw new Error(`Unknown product: ${product}`);
     // promo = { code, amountCents, description } already validated by the route
     const cents = promo ? promo.amountCents : list;
@@ -84,13 +84,13 @@ class BillingManager {
    * Mock mode: Simulates payment processing (for development)
    * Production: Uses real Stripe API
    */
-  async createSubscription(accountId, tier, stripeCustomerId, billingCycle = "monthly", promo = null) {
+  async createSubscription(accountId, tier, stripeCustomerId, billingCycle = "monthly", promo = null, priceOverride = null) {
     if (tier === "social_snapshot") {
       // Free tier: just create entitlement
       return await geDb.upgradeTier(accountId, tier);
     }
 
-    const priceInCents = TIER_PRICING[tier];
+    const priceInCents = (tier === "growth_plan" && priceOverride) || TIER_PRICING[tier];
     if (!priceInCents) {
       throw new Error(`Unknown tier: ${tier}`);
     }
@@ -294,7 +294,10 @@ class BillingManager {
   /**
    * Get pricing information
    */
-  getPricing() {
+  // variantPrices: { variant, growth_plan, plan_unlock } from growth_engine_pricing
+  getPricing(variantPrices = null) {
+    const GP = variantPrices?.growth_plan || TIER_PRICING.growth_plan;
+    const OT = variantPrices?.plan_unlock || ONE_TIME_PRICING.plan_unlock;
     const yr = (cents) => Math.floor((cents * 12 * (1 - ANNUAL_DISCOUNT)) / 100);
     return {
       audience: "creators",
@@ -318,8 +321,8 @@ class BillingManager {
           tier: "growth_plan",
           name: "Growth Plan",
           description: "Your account, re-scored every week, with the whole 90 days written from your own posts.",
-          monthlyPrice: TIER_PRICING.growth_plan / 100,
-          annualPrice: yr(TIER_PRICING.growth_plan),
+          monthlyPrice: GP / 100,
+          annualPrice: yr(GP),
           popular: true,
           features: [
             "All 90 days: every move, 01 through 13, with the how and a paste-ready example",
@@ -350,6 +353,7 @@ class BillingManager {
       // Business tiers are phase 2. Until the business pipeline exists they are
       // listed for the page but not purchasable (see /billing/subscribe).
       support_email: process.env.SUPPORT_EMAIL || null,
+      variant: variantPrices?.variant || "control",
       business_checkout_enabled: process.env.ENABLE_BUSINESS_CHECKOUT === "true",
       business: [
         {
@@ -377,7 +381,7 @@ class BillingManager {
           name: "60-day plan",
           days: 60,
           description: "Phases 1 and 2 of this report's plan, written once. No subscription, no refresh.",
-          price: ONE_TIME_PRICING.plan_unlock / 100,
+          price: OT / 100,
           features: ["Days 1–60: moves 01 through 09, with the how and examples", "Your 8-week calendar", "Keep it forever"],
           not_included: ["Days 61–90 (phase 3)", "Weekly re-score and what changed", "Day-30 and day-60 check-ins", "Competitors", "Score and follower history", "A fresh plan every 90 days"],
           cta: "Get the 60-day plan",

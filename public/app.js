@@ -84,6 +84,8 @@
     return r;
   }
   const clearPromo = () => { try { sessionStorage.removeItem('sc_promo'); } catch { } };
+  // Prices this visitor sees (may be an A/B variant): used by the report upsell and events.
+  function rememberPricing(p) { try { const g = (p.tiers || []).find(t => t.tier === 'growth_plan'); sset('sc_pricing', { variant: p.variant || 'control', growth_plan: g?.monthlyPrice, plan_unlock: p.one_time?.[0]?.price }); } catch { } }
   // Admin link in the nav: ask /auth/me once per token and remember the answer.
   async function refreshAdminFlag() {
     if (!token()) { try { localStorage.removeItem('sc_admin'); } catch { } return; }
@@ -646,8 +648,9 @@
     const doneKey = 'sc_done_' + report.report_id;
     const done = isSample ? {} : { ...(lget(doneKey, {})), ...(report.moves_done || {}) };
     const isDone = k => !!done[k];
-    const price = report.upsell?.monthly_price || 12;
-    const oneTime = report.upsell?.one_time_price || 15;
+    const pv = sget('sc_pricing', null);
+    const price = pv?.growth_plan ?? report.upsell?.monthly_price ?? 12;
+    const oneTime = pv?.plan_unlock ?? report.upsell?.one_time_price ?? 15;
     const thisWeek = phases[0];
     const nextPhase = phases[1];
     const followers = biz.followers || report.followers || (report.post_insights && report.post_insights.followers) || null;
@@ -813,7 +816,7 @@
       catch (e2) { if (e2.status === 401) return; if (e2.status === 402) { sset('sc_intent_tier', 'growth_plan'); go('#/pricing'); return; } out.innerHTML = h`<div class="form-error">${e2.message}</div>`; }
       btn.disabled = false; btn.textContent = 'Re-run';
     });
-    if (!paid) api('/billing/pricing', {}, { allow401: true }).then(p => { if (p.support_email) sset('sc_support', p.support_email); const t = (p.tiers || []).find(x => x.tier === 'growth_plan'); if (t && t.monthlyPrice != null) { const el = $view.querySelector('.upsell p'); if (el) el.textContent = el.textContent.replace(/\$\d+\/mo or \$\d+\/yr/, `$${t.monthlyPrice}/mo or $${t.annualPrice ?? Math.round(t.monthlyPrice * 9)}/yr`); } }).catch(() => { });
+    if (!paid) api('/billing/pricing', {}, { allow401: true }).then(p => { if (p.support_email) sset('sc_support', p.support_email); rememberPricing(p); const t = (p.tiers || []).find(x => x.tier === 'growth_plan'); if (t && t.monthlyPrice != null) { const el = $view.querySelector('.upsell p'); if (el) el.textContent = el.textContent.replace(/\$\d+\/mo or \$\d+\/yr/, `$${t.monthlyPrice}/mo or $${t.annualPrice ?? Math.round(t.monthlyPrice * 9)}/yr`); } }).catch(() => { });
   }
   // The "how" under a move: numbered steps, paste-ready example, done-when, time.
   function moveDetailHTML(d, dark) {
@@ -834,7 +837,7 @@
     renderHeader('pricing');
     $view.innerHTML = h`<div class="center-msg">Loading pricing…</div>`;
     let pricing, ent = null;
-    try { pricing = await api('/billing/pricing', {}, { allow401: true }); if (pricing.support_email) sset('sc_support', pricing.support_email); }
+    try { pricing = await api('/billing/pricing', {}, { allow401: true }); if (pricing.support_email) sset('sc_support', pricing.support_email); rememberPricing(pricing); }
     catch (e) { $view.innerHTML = h`<div class="center-msg"><h2>Pricing is unavailable right now.</h2>${e.message}</div>`; return; }
     if (token()) { try { ent = await api('/account/subscription-status', {}, { allow401: true }); } catch { } }
     const discM = /(\d+)\s*%/.exec(pricing.discount?.annual || ''); const disc = discM ? Number(discM[1]) / 100 : 0.25;
@@ -848,7 +851,7 @@
     const yr = t => t.annualPrice ?? Math.round((t.monthlyPrice || 0) * 12 * (1 - disc));
     const cur = t => ent && ent.current_tier === t;
     let promoState = promo();
-    track('pricing_viewed', { intent: intent || null, billing });
+    track('pricing_viewed', { intent: intent || null, billing, variant: pricing.variant || 'control' });
     const render = () => {
       const annual = billing === 'annual';
       const pcode = promoState && promoState.code;
@@ -1201,6 +1204,7 @@
       ${funnel ? raw(h`<section class="card"><h2>Funnel <span class="fine">last ${funnel.days} days · distinct people</span></h2>
         <div class="funnel">${raw(funnel.steps.map(st => h`<div class="fstep"><div class="n">${st.actors}</div><div class="l">${st.name.replace(/_/g, ' ')}</div>${st.from_previous != null ? raw(h`<div class="c">${Math.round(st.from_previous * 100)}% of previous</div>`) : raw('<div class="c">&nbsp;</div>')}</div>`).join(''))}</div>
         <div class="fine">${Object.entries(funnel.other || {}).filter(([, v]) => v.actors).map(([k, v]) => `${k.replace(/_/g, ' ')} ${v.actors}`).join(' · ') || 'No other events yet.'}${funnel.retention_month_two?.cohort ? ` · Month-two retention: ${funnel.retention_month_two.retained} of ${funnel.retention_month_two.cohort} still paying (${Math.round(funnel.retention_month_two.rate * 100)}%)` : ' · Month-two retention: no cohort yet (needs subscribers 30+ days old)'}</div>
+        ${funnel.testing ? raw(h`<div class="alist" style="margin-top:10px"><div class="arow head"><span></span><span class="h">price variant</span><span class="t">saw pricing · paid</span><span class="e">conversion</span><span class="n">revenue</span></div>${raw((funnel.variants || []).map(v => { const b = (funnel.by_variant || {})[v.name] || { pricing_viewed: 0, subscribe: 0, unlock: 0, revenue_cents: 0 }; const paidN = b.subscribe + b.unlock; return h`<div class="arow"><span></span><span class="h">${v.name} · $${v.growth_plan / 100}/mo · $${v.plan_unlock / 100} once</span><span class="t">${b.pricing_viewed} · ${paidN}</span><span class="e">${b.pricing_viewed ? Math.round(paidN / b.pricing_viewed * 100) + '%' : '—'}</span><span class="n">${money(b.revenue_cents / 100)}</span></div>`; }).join(''))}</div>`) : ''}
         ${Object.keys(funnel.by_ref || {}).length ? raw(h`<div class="alist" style="margin-top:10px">${raw(Object.entries(funnel.by_ref).map(([ref, v]) => h`<div class="arow promo"><span class="h">ref ${ref}</span><span class="t">${v.evaluate_started || 0} scored · ${v.signup || 0} signed up · ${v.subscribe || 0} paid</span><span class="e"></span><span class="n"></span></div>`).join(''))}</div>`) : ''}
       </section>`) : ''}
 

@@ -139,6 +139,7 @@ async function initSchema() {
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_paused BOOLEAN DEFAULT FALSE`);
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_business BOOLEAN DEFAULT FALSE`);
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS niche TEXT`);
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS price_variant TEXT`);
     await client.query(`
       CREATE TABLE IF NOT EXISTS growth_engine_password_resets (
         token_hash TEXT PRIMARY KEY,
@@ -262,7 +263,7 @@ async function createUser(email, passwordHash, companyName = null) {
 
 function userRow(row) {
   return row
-    ? { userId: row.user_id, email: row.email, passwordHash: row.password_hash, companyName: row.company_name, createdAt: Number(row.created_at), updatedAt: Number(row.updated_at), emailPaused: !!row.email_paused, isBusiness: !!row.is_business, niche: row.niche || null }
+    ? { userId: row.user_id, email: row.email, passwordHash: row.password_hash, companyName: row.company_name, createdAt: Number(row.created_at), updatedAt: Number(row.updated_at), emailPaused: !!row.email_paused, isBusiness: !!row.is_business, niche: row.niche || null, priceVariant: row.price_variant || null }
     : null;
 }
 async function getUserByEmail(email) {
@@ -271,7 +272,8 @@ async function getUserByEmail(email) {
 async function getUserById(userId) {
   return userRow((await q(`SELECT * FROM users WHERE user_id = $1`, [userId])).rows[0]);
 }
-async function setUserProfile(userId, { isBusiness, niche } = {}) {
+async function setUserProfile(userId, { isBusiness, niche, priceVariant } = {}) {
+  if (priceVariant !== undefined) await q(`UPDATE users SET price_variant = $1, updated_at = $2 WHERE user_id = $3`, [priceVariant || null, Date.now(), userId]);
   if (isBusiness !== undefined) await q(`UPDATE users SET is_business = $1, updated_at = $2 WHERE user_id = $3`, [!!isBusiness, Date.now(), userId]);
   if (niche !== undefined) await q(`UPDATE users SET niche = $1, updated_at = $2 WHERE user_id = $3`, [niche || null, Date.now(), userId]);
   return getUserById(userId);
@@ -666,6 +668,12 @@ async function eventFunnel(sinceTs, names) {
   for (const r of byRef) (refs[r.ref] ||= {})[r.name] = Number(r.actors);
   return { steps: out, by_ref: refs };
 }
+async function variantFunnel(sinceTs) {
+  const r = await q(`SELECT props::json->>'variant' AS v, name, COUNT(DISTINCT COALESCE(account_id, anon, ip)) AS actors, SUM(COALESCE((props::json->>'amount_cents')::numeric, 0)) AS cents FROM growth_engine_events WHERE created_at >= $1 AND name IN ('pricing_viewed','subscribe','unlock') AND props IS NOT NULL AND props::json->>'variant' IS NOT NULL GROUP BY v, name`, [sinceTs]);
+  const out = {};
+  for (const x of r.rows) { (out[x.v] ||= { pricing_viewed: 0, subscribe: 0, unlock: 0, revenue_cents: 0 })[x.name] = Number(x.actors); if (x.name !== "pricing_viewed") out[x.v].revenue_cents += Number(x.cents) || 0; }
+  return out;
+}
 async function paidRetention() {
   const now = Date.now(), d = 86400000;
   const cohort = (await q(`SELECT DISTINCT account_id FROM growth_engine_events WHERE name = 'subscribe' AND created_at BETWEEN $1 AND $2 AND account_id IS NOT NULL`, [now - 60 * d, now - 30 * d])).rows.map((r) => r.account_id);
@@ -814,7 +822,7 @@ module.exports = {
   adminRecentReports,
   adminFailedJobs,
   adminFindAccount,
-  insertEvent, eventFunnel, paidRetention,
+  insertEvent, eventFunnel, paidRetention, variantFunnel,
   insertCost, adminCosts, attachReportToCosts,
   logMove, recordMoveOutcomes, moveOutcomeSummary,
   createPromo, getPromo, listPromos, setPromoActive, hasRedeemed, redeemPromo, listRedemptions,
