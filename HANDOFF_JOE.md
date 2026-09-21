@@ -1,11 +1,13 @@
-# Scalecraft — handoff to Joe (updated 2026-09-20, evening)
+# Scalecraft — handoff to Joe (updated 2026-09-21)
 
 ## Where the code is
 
 - **`main`** — has PR #1, PR #2 and the whole `redesign/field-guide` branch (you hand-merged it; PR #3 is still open, just close it). Plus your own tidy-ups (Twitter/X removed, `API_KEYS_SETUP.md`, root `package.json`).
-- **`feat/sample-report`** — 12 commits on top of `main`, pushed, **no PR yet**. Everything in the "Built since" list below is here. Branch from `main` → review → merge. Nothing on it conflicts with `main`.
+- **`feat/sample-report`** — 21 commits on top of `main`, pushed, **no PR yet**. Everything in the "Built since" list below is here. Branch from `main` → review → merge. Nothing on it conflicts with `main`.
 
-Railway is still 502. `main` boots clean locally and the Postgres module passes its test, so it's env: the server exits at boot if `JWT_SECRET` or `ENCRYPTION_KEY` is missing (first lines of the deploy log will say). Needs `DATABASE_URL`, `JWT_SECRET`, `ENCRYPTION_KEY`, `APIFY_TOKEN`, and `GEMINI_API_KEY` or `GROQ_API_KEY`.
+**Render** (`scalecraft.onrender.com`) is up on `main` with Postgres and all four LLM keys — nice. That means none of this branch is in prod yet: no sample page, intake, check-ins, cancel, reset, mailer, admin or promo codes, and the one-time still reads "Unlock this report" instead of "60-day plan". Merging this branch is the highest-value thing on the board. After merge, add the new env vars (`ADMIN_EMAILS`, `SUPPORT_EMAIL`, `FOUNDERS_PROMO_CODE`, `RESEND_API_KEY`/`MAIL_FROM`/`APP_URL`) and run `scripts/smoke.js` against Render with a throwaway handle.
+
+QA on 2026-09-21 (`.gstack/qa-reports/`, local): every user flow passes end to end; 4 issues found and fixed (blank locked-move rows, review placeholders live on pricing, Gemini 503 storms stalling runs 12+ min → circuit breaker, phone-width overflow).
 
 ## Built since the last handoff (all on `feat/sample-report`)
 
@@ -35,7 +37,7 @@ New DB tables/columns (both backends create them on boot): `growth_engine_plan_c
 
 ## Your part
 
-1. **Railway env** (above) → deploy `main` → then merge `feat/sample-report` and deploy again. Run the smoke test against Railway with a throwaway handle.
+1. **Merge `feat/sample-report`** → Render redeploys → add the env vars above → smoke test against Render.
 2. **Stripe for real** — `growth_engine_billing.js` is mock unless `STRIPE_API_KEY` is set. `_createStripeSubscription` throws "not implemented"; `purchaseOneTime` already uses a PaymentIntent. The webhook (`POST /billing/webhook`) is a stub — payment failed → `setCancelAt(accountId, now)` is all it needs to downgrade. Stripe Tax is worth turning on. Annual is shown on the pricing page but `subscribe` only takes monthly — wire it or hide the toggle.
 3. **Resend** — key + a verified sending domain (`MAIL_FROM`), `APP_URL` for links. Until then no email leaves the box, including password reset.
 4. **Meta OAuth "connect your account"** — your Graph API fetcher only reads owner-connected accounts; the scorer doesn't consume that data yet, parked until the connect flow exists.
@@ -45,13 +47,13 @@ New DB tables/columns (both backends create them on boot): `growth_engine_plan_c
 
 - Seed baselines (script ready; ~$1 for all 16 Instagram niches).
 - Analytics script tag (Plausible/PostHog) — no funnel visibility yet.
-- Error monitoring (Sentry), Postgres backups on Railway.
+- Error monitoring (Sentry), Postgres backups on Render.
 - Lower free cap for TikTok (20× Instagram's per-pull cost).
 - Password minimum 6 → 8. Lawyer pass on `#/legal/*`. Domain.
 
 ## Rules we've been keeping
 
-- Never push to `main` directly — branch + PR, even hotfixes. Railway deploys from `main`.
+- Never push to `main` directly — branch + PR, even hotfixes. Render deploys from `main`.
 - Scores stay deterministic. If the LLM ever sets a number, that's a bug.
 - API keys go in `server/.env` (gitignored), never in chat or commits.
 - The sample report is a real person's account, used with permission. Don't swap it for a big-name account.
