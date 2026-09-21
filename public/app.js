@@ -758,6 +758,17 @@
             </details>`).join(''))}</div>
           </details>`) : ''}
 
+          ${paid && Array.isArray(report.next_posts) && report.next_posts.length ? raw(h`<details class="card acc" open>
+            <summary>Your next posts <span class="fine" style="font-weight:500">written from your best ones</span></summary>
+            <div class="body" id="nextPosts">${raw(report.next_posts.map((p, i) => h`<article class="npost bd${(i % 4) + 1}" data-post="${i}">
+              <div class="nh"><span class="when">${p.day} ${p.time}</span><span class="fmt">${String(p.format).toUpperCase()}</span>${p.source ? raw(h`<span class="src ${p.source}">${p.source === 'new' ? 'NEW SHOOT' : p.source === 'archive' ? 'FROM ARCHIVE' : 'NO CAMERA'}</span>`) : ''}<button class="btn ghost sm" data-regen="${i}" title="Rewrite this post">Regenerate</button></div>
+              <div class="fld"><div class="fl">Hook <button class="copy" data-copy="hook">Copy</button></div><p class="hook">${p.hook}</p></div>
+              <div class="fld"><div class="fl">Caption <button class="copy" data-copy="caption">Copy</button></div><p class="txt">${p.caption}</p></div>
+              ${p.script ? raw(h`<div class="fld"><div class="fl">${/reel|video/.test(p.format) ? 'Script' : /carousel/.test(p.format) ? 'Slides' : 'Shot idea'} <button class="copy" data-copy="script">Copy</button></div><p class="txt script">${p.script}</p></div>`) : ''}
+              ${p.why ? raw(h`<p class="w">Why: ${p.why}</p>`) : ''}
+            </article>`).join(''))}</div>
+          </details>`) : ''}
+
           <details class="card acc" ${paid && comp ? 'open' : ''}>
             <summary>Against your competitors</summary>
             <div class="body">
@@ -817,6 +828,20 @@
     $view.querySelectorAll('[data-nudge]').forEach(b => b.addEventListener('click', () => answer(b, { nudge: b.dataset.nudge, changed: b.dataset.changed === '1' }, 'Kept as is.')));
     if (subscriber && qs.get('checkin') && qs.get('changed') === '0' && !checkins['p' + qs.get('checkin')]) { const b = $view.querySelector('[data-checkin]'); if (b) b.click(); else answer({ disabled: false }, { phase: Number(qs.get('checkin')), changed: false }, 'Carrying on.'); }
     if (qs.get('nudge')) document.getElementById('nudge')?.scrollIntoView({ behavior: 'smooth' });
+    // next posts: copy fields, regenerate one
+    $view.querySelectorAll('.npost [data-copy]').forEach(b => b.addEventListener('click', async () => {
+      const art = b.closest('.npost'); const i = Number(art.dataset.post); const p = (report.next_posts || [])[i] || {}; const text = p[b.dataset.copy] || '';
+      try { await navigator.clipboard.writeText(text); b.textContent = 'Copied'; setTimeout(() => { b.textContent = 'Copy'; }, 1200); } catch { toast(text.slice(0, 80)); }
+      if (!isSample) track('post_copied', { field: b.dataset.copy, index: i }, report.report_id);
+    }));
+    $view.querySelectorAll('[data-regen]').forEach(b => b.addEventListener('click', async () => {
+      if (isSample) { toast('Regenerate works on your own report.'); return; }
+      const i = Number(b.dataset.regen); b.disabled = true; b.textContent = 'Writing…';
+      try {
+        const r = await api('/reports/' + encodeURIComponent(report.report_id) + '/posts/regenerate', { method: 'POST', body: JSON.stringify({ index: i }) });
+        report.next_posts[i] = r.post; sset('sc_report_' + report.report_id, report); toast('Rewritten.'); route();
+      } catch (e2) { if (e2.status === 401) return; toast(e2.message || 'Could not rewrite.'); b.disabled = false; b.textContent = 'Regenerate'; }
+    }));
     $view.querySelector('#compForm')?.addEventListener('submit', async e => {
       e.preventDefault(); const f = e.currentTarget; const btn = f.querySelector('button'); const out = $view.querySelector('#compResult');
       const handles = f.handles.value.split(/[,\s]+/).map(x => x.replace(/^@/, '').trim()).filter(Boolean).slice(0, 5);

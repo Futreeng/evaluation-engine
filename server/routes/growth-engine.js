@@ -588,6 +588,29 @@ router.post("/reports/:reportId/unlock", authMiddleware, async (req, res) => {
   }
 });
 
+// Your next posts (spec 1.12): rewrite one post. Paid reports only; metered.
+router.post("/reports/:reportId/posts/regenerate", authMiddleware, async (req, res) => {
+  try {
+    const report = await geDb.getReport(req.params.reportId);
+    if (!report) return sendError(res, 404, "REPORT_NOT_FOUND", "Report not found");
+    if (report.accountId !== req.user.id) return sendError(res, 403, "NOT_YOUR_REPORT", "This report belongs to another account");
+    const body = report.reportBody || {};
+    if (!report.tier || report.tier === "social_snapshot") return res.status(402).json({ error: "Post writing is part of the Growth Plan.", code: "UPGRADE_REQUIRED", required_tier: "growth_plan", status: 402 });
+    const index = Number(req.body?.index);
+    if (!Array.isArray(body.next_posts) || !Number.isInteger(index) || index < 0 || index >= body.next_posts.length) return sendError(res, 400, "INVALID_INDEX", "index must point at an existing post");
+    const limit = Number(process.env.POST_REGENS_PER_DAY || 20);
+    const used = await geDb.getUsage(req.user.id, "post_regen");
+    if (used >= limit) return res.status(429).json({ error: `That's ${used} rewrites today; the limit is ${limit}. Try again tomorrow.`, code: "REGEN_LIMIT_REACHED", status: 429 });
+    await geDb.bumpUsage(req.user.id, "post_regen");
+    const { rewriteOnePost } = require("../growth_engine_evaluator");
+    const post = await costs.run({ accountId: req.user.id, reportId: report.reportId, feature: "post_writing" }, () => rewriteOnePost(req.user.id, body, index));
+    const next = [...body.next_posts]; next[index] = post;
+    await geDb.patchReportBody(report.reportId, { next_posts: next });
+    events.track("post_regenerated", { ...events.attribution(req), reportId: report.reportId, props: { index } });
+    res.json({ post, index });
+  } catch (err) { sendError(res, 500, "REGEN_ERROR", err.message); }
+});
+
 // Phase check-in (day 30 / 60): "nothing changed" records the answer; "changed"
 // saves new answers and rewrites the plan. Also used to accept a nudge.
 router.post("/reports/:reportId/checkin", authMiddleware, async (req, res) => {

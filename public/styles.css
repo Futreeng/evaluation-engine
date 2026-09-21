@@ -698,3 +698,19 @@ p { margin: 0; }
 .ev .vid { position: absolute; top: 6px; right: 6px; width: 18px; height: 18px; border-radius: 999px; background: rgba(42,33,24,.75); color: #fff; font-size: 9px; display: flex; align-items: center; justify-content: center; }
 .ev .m { position: absolute; left: 0; right: 0; bottom: 0; padding: 3px 6px; font-size: 10px; line-height: 1.2; font-weight: 600; background: linear-gradient(transparent, rgba(42,33,24,.85)); color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 720px) { .ev { width: 72px; height: 72px; } }
+
+/* ---- your next posts ---- */
+#nextPosts { gap: 10px; }
+.npost { padding: 16px 18px; background: var(--ground); border-radius: var(--r-in); border-left: 4px solid var(--c1); }
+.npost.bd2 { border-left-color: var(--c2); } .npost.bd3 { border-left-color: var(--c3); } .npost.bd4 { border-left-color: var(--c4); }
+.npost .nh { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.npost .when { font-family: var(--display); font-size: 17px; font-weight: 700; }
+.npost .fmt { font-size: 11px; letter-spacing: .08em; font-weight: 700; color: var(--muted2); }
+.npost .nh .btn { margin-left: auto; }
+.npost .fld { margin-top: 12px; }
+.npost .fl { display: flex; align-items: center; gap: 8px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.npost .copy { border: 1px solid var(--line2); background: var(--card); border-radius: 999px; padding: 2px 9px; font: inherit; font-size: 11px; letter-spacing: 0; text-transform: none; color: var(--body); cursor: pointer; }
+.npost .hook { margin-top: 4px; font-family: var(--display); font-size: 17px; font-weight: 600; line-height: 1.3; }
+.npost .txt { margin-top: 4px; font-size: 14px; line-height: 1.55; color: var(--ink); white-space: pre-wrap; }
+.npost .script { font-family: inherit; }
+.npost .w { margin-top: 10px; font-size: 13px; color: var(--muted); }

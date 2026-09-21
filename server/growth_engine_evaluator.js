@@ -171,6 +171,24 @@ Produce ONLY a JSON array of {{WEEKS}} weeks, no prose, no markdown fences:
 [{"week":1,"slots":[{"day":"Mon","format":"reel","source":"new","angle":"what the post is about, under 10 words","prompt":"a shooting/caption brief the owner can follow, under 25 words"},{"day":"Wed",...},{"day":"Sat",...}]}, ... through week {{WEEKS}}]
 One slot per posting day per week. Formats: reel, carousel, static, story. "source" is where the material comes from: "new" (needs a new shoot), "archive" (re-cut, repurposed or throwback from existing posts) or "no_camera" (talk-to-camera at home, text, screenshots, planning). Vary subjects across weeks; reuse the account's proven formats. Valid JSON only.`;
 
+// Post writing (spec 1.12): the next N posts, written from the account's own
+// best posts and the current plan phase, each on a day/time from its best
+// windows. One call for the set; regeneration asks for one post at a time.
+const NEXT_POSTS_PROMPT = `You are the Post Writer for Scalecraft. A creator has paid for their Growth Plan. Write their next {{COUNT}} posts, ready to shoot and post. Every post must come from THIS account's own material and voice: reuse the hooks, subjects, locations, caption style and formats that already perform for them (see best posts), and serve the current plan phase. No generic advice, no invented facts, no numbers that aren't in the data. Scripts are plain wrapped text — no markdown, no bullet points, no code formatting.
+
+Handle: {{HANDLE}} ({{PLATFORM}})
+Category: {{CATEGORY}}
+Best and worst recent posts: {{POST_INSIGHTS}}
+Their bio: {{BIO}}
+Current plan phase: {{PHASE}}
+Upcoming calendar slots (follow their formats and angles where sensible): {{SLOTS}}
+Posting windows that perform for this account (use these day/time pairs, cycling through them in order): {{WINDOWS}}
+{{PLAN_CONTEXT}}
+{{AVOID}}
+Produce ONLY a JSON array of {{COUNT}} posts, no prose, no markdown fences:
+[{"n":1,"day":"Thu","time":"7pm","format":"reel","hook":"the first line on screen or the first sentence spoken, under 12 words","caption":"the full caption in their voice, 2–5 short lines, hashtags only if they already use them","script":"for a reel/video: a 4–8 line spoken script or shot list as plain text with line breaks; for a carousel: one line per slide; for a photo: what to shoot and the caption angle","why":"one sentence tying this post to a specific past post or number","source":"new|archive|no_camera"}]
+Valid JSON only.`;
+
 // Category benchmarks. These are working assumptions, not measured
 // averages — replace with real baselines once enough profiles are scored.
 const CATEGORY_BENCHMARKS = {
@@ -580,11 +598,13 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
   let followers = null;
   let postsLast14d = null;
   let postRecords = [];
+  let profileBio = null;
   try {
     await onStage("finding", 1);
     const realData = await getRealPostData(handle, platform, category);
     await onStage("reading", 2);
     postRecords = Array.isArray(realData.posts) ? realData.posts : [];
+    profileBio = realData.biography || null;
     followers = Number.isFinite(realData.follower_count) ? realData.follower_count : null;
     const acts = realData.recent_activity || realData.recent_posts || [];
     postsLast14d = acts.filter((p) => { const t = +new Date(p.date || p.timestamp); return Number.isFinite(t) && Date.now() - t <= 14 * 86400000; }).length;
@@ -690,6 +710,7 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
     posts_last_14d: postsLast14d,
     posts: postRecords,
     posts_sampled: postRecords.length,
+    bio: profileBio,
     tz: inputParams.tz || null,
     best_times: postRecords.length ? bestTimes(postRecords, { tz: inputParams.tz || "UTC", platform }) : null,
     data_window: postRecords.length ? `Based on your last ${postRecords.length} posts. We can't see saves, reach or story views.` : null,
@@ -923,6 +944,9 @@ async function evaluateTier1(accountId, inputParams, onStage = () => {}) {
   reportBody.calendar = { posting_days: days, posting_time: plan.posting_time ? String(plan.posting_time) : null, weeks };
   reportBody.plan_days = PHASES_BOUGHT * 30;
   reportBody.plan_context = planContext;
+  // Your next posts (spec 1.12): written now so the report arrives complete.
+  reportBody.plan_started_at = reportBody.plan_started_at || Date.now();
+  reportBody.next_posts = await writeNextPosts(accountId, reportBody);
   reportBody.upsell = { cta_label: "Upgrade to Business Evaluator", target_tier: "business_evaluator", unlock_count: 0 };
   return reportBody;
 }
@@ -1026,7 +1050,69 @@ async function evaluateTier2(accountId, inputParams) {
   return reportBody;
 }
 
+// Generic "ask for JSON" with the account's keys, for features outside the
+// evaluation pipeline (post regeneration). Retries once on unparseable output.
+async function llmJson(accountId, sys, prompt, label, budget = 4096) {
+  const { claudeKey, claudeWorkspaceId, geminiKey, groqKey } = getDecryptedKeys(accountId);
+  const openaiKey = process.env.OPENAI_API_KEY;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const raw = await withOutputTokens(budget, () => callWithQuadFallback(
+      () => callClaudeNonStreaming(claudeKey, claudeWorkspaceId, sys, prompt),
+      () => callGeminiNonStreaming(geminiKey, sys, prompt),
+      () => callGroqNonStreaming(groqKey, sys, prompt),
+      () => callOpenAINonStreaming(openaiKey, sys, prompt),
+      attempt ? `${label} (retry)` : label
+    ));
+    const parsed = parseJsonLoose(raw);
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
+const POST_SOURCES = new Set(["new", "archive", "no_camera"]);
+function normalizePost(p, i) {
+  return { n: i + 1, day: String(p.day || ""), time: String(p.time || ""), format: String(p.format || "reel").toLowerCase(), hook: String(p.hook || "").trim(), caption: String(p.caption || "").trim(), script: String(p.script || "").replace(/\r/g, "").trim(), why: String(p.why || "").trim(), source: POST_SOURCES.has(String(p.source || "").toLowerCase()) ? String(p.source).toLowerCase() : "new", written_at: Date.now() };
+}
+// Build the prompt from a finished report body. `regenerate` = index to rewrite one post (others listed as AVOID).
+function nextPostsPrompt(reportBody, { count, regenerate = null } = {}) {
+  const b = reportBody; const ctx = b.plan_context || null;
+  const phaseIdx = Math.min((b.growth_path?.phases || []).length - 1, Math.max(0, Math.floor(((Date.now() - (b.plan_started_at || Date.now())) / 86400000) / 30)));
+  const phase = (b.growth_path?.phases || [])[phaseIdx];
+  const windows = (b.best_times?.windows || []).map((w) => `${w.day} ${String(w.label).split(" ").slice(1).join(" ")}`);
+  const wk = (b.calendar?.weeks || []).filter((w) => w.phase === phaseIdx + 1).slice(0, 2).flatMap((w) => w.slots || []).map((s) => `${s.day} ${s.format}: ${s.angle}`);
+  const pi = b.post_insights || {};
+  const others = regenerate != null ? (b.next_posts || []).filter((_, i) => i !== regenerate).map((p) => p.hook).filter(Boolean) : [];
+  return interpolateTemplate(NEXT_POSTS_PROMPT, {
+    COUNT: count, HANDLE: b.business?.handle || "", PLATFORM: b.business?.platform || "instagram", CATEGORY: b.business?.category || "",
+    POST_INSIGHTS: JSON.stringify({ best_format: pi.patterns?.best_format, best_day: pi.patterns?.best_day, top: (pi.top || []).map((p) => ({ date: String(p.date).slice(0, 10), format: p.format, vs_avg: p.vs_avg, caption: p.caption })), bottom: (pi.bottom || []).map((p) => ({ date: String(p.date).slice(0, 10), format: p.format, vs_avg: p.vs_avg, caption: p.caption })) }),
+    BIO: (b.bio || b.profile?.biography || "").slice(0, 300) || "not available",
+    PHASE: phase ? `${phase.label} (days ${phase.range}) — first move: ${phase.visible_action}` : "phase 1",
+    SLOTS: wk.length ? wk.join(" | ") : "none yet",
+    WINDOWS: windows.length ? windows.join(", ") : "Tue 7pm, Thu 7pm, Sat 10am (starting points)",
+    PLAN_CONTEXT: planContextBlock(ctx, b.plan_days || 90),
+    AVOID: others.length ? `Already written (do not repeat these hooks or subjects): ${others.join(" | ")}` : "",
+  });
+}
+// The full set, for a paid report. Never throws; missing → null.
+async function writeNextPosts(accountId, reportBody, { count = Number(process.env.NEXT_POSTS_COUNT || 6) } = {}) {
+  try {
+    const out = await llmJson(accountId, "You write posts a creator can shoot and publish today, in their own voice. Output JSON only.", nextPostsPrompt(reportBody, { count }), "Post Writer", 6144);
+    const arr = Array.isArray(out) ? out : Array.isArray(out?.posts) ? out.posts : null;
+    if (!arr || !arr.length) return null;
+    return arr.slice(0, count).map(normalizePost);
+  } catch (err) { console.warn("[Growth Engine] Post Writer failed:", err.message); return null; }
+}
+async function rewriteOnePost(accountId, reportBody, index) {
+  const out = await llmJson(accountId, "You write posts a creator can shoot and publish today, in their own voice. Output JSON only.", nextPostsPrompt(reportBody, { count: 1, regenerate: index }), "Post Writer: one", 2048);
+  const arr = Array.isArray(out) ? out : Array.isArray(out?.posts) ? out.posts : null;
+  if (!arr || !arr[0]) throw new Error("The writer came back empty — try again in a moment.");
+  return normalizePost(arr[0], index);
+}
+
 module.exports = {
+  llmJson,
+  writeNextPosts,
+  rewriteOnePost,
   evaluateTier0,
   evaluateTier1,
   evaluateTier2,
