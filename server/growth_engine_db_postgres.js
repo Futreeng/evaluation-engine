@@ -605,7 +605,7 @@ async function recordBaseline({ category, platform, handle, overall, dimensions 
     [key, category, platform, String(handle).toLowerCase(), Math.round(overall), JSON.stringify(dims), Date.now()]
   );
 }
-async function getCategoryBaseline(category, { minN = 20, platform = null } = {}) {
+async function getCategoryBaseline(category, { minN = Number(process.env.BASELINE_MIN_N || 10), platform = null } = {}) {
   const r = platform
     ? await q(`SELECT overall, dimensions FROM growth_engine_baselines WHERE category = $1 AND platform = $2`, [category, platform])
     : await q(`SELECT overall, dimensions FROM growth_engine_baselines WHERE category = $1`, [category]);

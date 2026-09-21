@@ -295,7 +295,7 @@ async function recordBaseline({ category, platform, handle, overall, dimensions 
 }
 
 // Average scores for a category (any platform). Returns null below min_n.
-async function getCategoryBaseline(category, { minN = 20, platform = null } = {}) {
+async function getCategoryBaseline(category, { minN = Number(process.env.BASELINE_MIN_N || 10), platform = null } = {}) {
   if (!db) throw new Error("Database not initialized");
   const result = platform
     ? db.exec(`SELECT overall, dimensions FROM growth_engine_baselines WHERE category = ? AND platform = ?`, [category, platform])
