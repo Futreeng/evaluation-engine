@@ -193,7 +193,9 @@ p { margin: 0; }
 .founders .t { flex: 1 1 320px; }
 .founders h3 { font-size: 24px; color: var(--on-dark); letter-spacing: -.025em; }
 .founders p { margin-top: 8px; font-size: 15px; color: var(--on-dark-muted); line-height: 1.5; }
-.founders form { display: flex; gap: 8px; flex: 1 1 280px; }
+.founders form { display: flex; flex-wrap: wrap; gap: 8px; flex: 1 1 280px; min-width: 0; }
+.founders form input { flex: 1 1 180px; min-width: 0; }
+.founders form .btn { flex: 0 0 auto; }
 .founders input { flex: 1; min-width: 0; min-height: 48px; padding: 12px 16px; border: 0; border-radius: var(--r-pill); background: var(--dark-inset); color: var(--on-dark); font-size: 15px; outline: none; }
 .founders input::placeholder { color: var(--on-dark-dim); }
 .founders .btn { border-radius: var(--r-pill); }
