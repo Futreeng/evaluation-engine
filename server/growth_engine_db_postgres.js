@@ -141,6 +141,15 @@ async function initSchema() {
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS niche TEXT`);
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS price_variant TEXT`);
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_prefs TEXT`);
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ref_code TEXT`);
+    await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_ref_code ON users (ref_code)`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_referrals (
+        id TEXT PRIMARY KEY, ref_code TEXT NOT NULL, referrer_id TEXT NOT NULL, referred_id TEXT NOT NULL UNIQUE, signed_up_at BIGINT NOT NULL,
+        first_paid_at BIGINT, first_paid_cents INTEGER, first_paid_product TEXT, payout_status TEXT NOT NULL DEFAULT 'none', payout_cents INTEGER, created_at BIGINT NOT NULL
+      )`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_referrals_referrer ON growth_engine_referrals (referrer_id)`);
+
     await client.query(`
       CREATE TABLE IF NOT EXISTS growth_engine_email_log (
         id TEXT PRIMARY KEY, user_id TEXT, to_email TEXT NOT NULL, type TEXT NOT NULL, subject TEXT, status TEXT NOT NULL,
@@ -274,7 +283,7 @@ async function createUser(email, passwordHash, companyName = null) {
 
 function userRow(row) {
   return row
-    ? { userId: row.user_id, email: row.email, passwordHash: row.password_hash, companyName: row.company_name, createdAt: Number(row.created_at), updatedAt: Number(row.updated_at), emailPaused: !!row.email_paused, isBusiness: !!row.is_business, niche: row.niche || null, priceVariant: row.price_variant || null, emailPrefs: (() => { try { return row.email_prefs ? (typeof row.email_prefs === "string" ? JSON.parse(row.email_prefs) : row.email_prefs) : null; } catch { return null; } })() }
+    ? { userId: row.user_id, email: row.email, passwordHash: row.password_hash, companyName: row.company_name, createdAt: Number(row.created_at), updatedAt: Number(row.updated_at), emailPaused: !!row.email_paused, isBusiness: !!row.is_business, niche: row.niche || null, priceVariant: row.price_variant || null, refCode: row.ref_code || null, emailPrefs: (() => { try { return row.email_prefs ? (typeof row.email_prefs === "string" ? JSON.parse(row.email_prefs) : row.email_prefs) : null; } catch { return null; } })() }
     : null;
 }
 async function getUserByEmail(email) {
@@ -757,6 +766,33 @@ async function getShare(shareId) {
 }
 async function bumpShareViews(shareId) { await q(`UPDATE growth_engine_shares SET views = views + 1 WHERE share_id = $1`, [shareId]); }
 
+
+// ===================== REFERRALS (spec 1.8) =====================
+const REF_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
+function newRefCode() { const b = crypto.randomBytes(8); let s = ""; for (let i = 0; i < 8; i++) s += REF_ALPHABET[b[i] % REF_ALPHABET.length]; return s; }
+async function ensureRefCode(userId) {
+  const u = await getUserById(userId); if (!u) return null;
+  if (u.refCode) return u.refCode;
+  for (let i = 0; i < 5; i++) { try { await q(`UPDATE users SET ref_code = $1 WHERE user_id = $2 AND ref_code IS NULL`, [newRefCode(), userId]); return (await getUserById(userId)).refCode; } catch { /* collision */ } }
+  return null;
+}
+async function getUserByRefCode(code) { const r = (await q(`SELECT user_id FROM users WHERE ref_code = $1`, [String(code || "").toLowerCase()])).rows[0]; return r ? getUserById(r.user_id) : null; }
+async function recordReferralSignup({ refCode, referrerId, referredId }) {
+  if (!referrerId || !referredId || referrerId === referredId) return null;
+  try { await q(`INSERT INTO growth_engine_referrals (id, ref_code, referrer_id, referred_id, signed_up_at, created_at) VALUES ($1, $2, $3, $4, $5, $6)`, ["rf_" + uid(), refCode, referrerId, referredId, Date.now(), Date.now()]); return true; } catch { return null; }
+}
+async function recordReferralPayment({ referredId, cents, product }) {
+  await q(`UPDATE growth_engine_referrals SET first_paid_at = $1, first_paid_cents = $2, first_paid_product = $3, payout_status = CASE WHEN payout_status = 'none' THEN 'pending' ELSE payout_status END WHERE referred_id = $4 AND first_paid_at IS NULL`, [Date.now(), Number(cents) || 0, product || null, referredId]);
+}
+async function referralStats(referrerId) {
+  const r = (await q(`SELECT COUNT(*) AS signed_up, SUM(CASE WHEN first_paid_at IS NOT NULL THEN 1 ELSE 0 END) AS paid, SUM(COALESCE(first_paid_cents, 0)) AS cents FROM growth_engine_referrals WHERE referrer_id = $1`, [referrerId])).rows[0] || {};
+  return { signed_up: Number(r.signed_up || 0), paid: Number(r.paid || 0), paid_cents: Number(r.cents || 0) };
+}
+async function adminReferrals(limit = 50) {
+  const r = await q(`SELECT r.referrer_id, u.email, MIN(r.ref_code) AS ref_code, COUNT(*) AS signed_up, SUM(CASE WHEN r.first_paid_at IS NOT NULL THEN 1 ELSE 0 END) AS paid, SUM(COALESCE(r.first_paid_cents, 0)) AS cents FROM growth_engine_referrals r LEFT JOIN users u ON u.user_id = r.referrer_id GROUP BY r.referrer_id, u.email ORDER BY paid DESC, signed_up DESC LIMIT $1`, [limit]);
+  return r.rows.map((x) => ({ referrer_id: x.referrer_id, email: x.email, ref_code: x.ref_code, signed_up: Number(x.signed_up), paid: Number(x.paid), paid_cents: Number(x.cents) }));
+}
+
 // ===================== CATEGORY BASELINES =====================
 
 async function listBaselines() {
@@ -865,6 +901,7 @@ module.exports = {
   insertCost, adminCosts, attachReportToCosts,
   logMove, recordMoveOutcomes, moveOutcomeSummary,
   createShare, getShare, bumpShareViews,
+  ensureRefCode, getUserByRefCode, recordReferralSignup, recordReferralPayment, referralStats, adminReferrals,
   createPromo, getPromo, listPromos, setPromoActive, hasRedeemed, redeemPromo, listRedemptions,
   setCancelAt,
   setBillingPeriod,

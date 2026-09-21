@@ -321,6 +321,29 @@ function initSchema() {
     )
   `);
 
+
+  // Referrals (spec 1.8): every share link carries the sharer's ref code;
+  // attribution at signup and at first payment. Payout fields exist for
+  // later; nothing pays out yet.
+  try { db.run(`ALTER TABLE users ADD COLUMN ref_code TEXT`); } catch { /* exists */ }
+  db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_ref_code ON users (ref_code)`);
+  db.run(`
+    CREATE TABLE IF NOT EXISTS growth_engine_referrals (
+      id TEXT PRIMARY KEY,
+      ref_code TEXT NOT NULL,
+      referrer_id TEXT NOT NULL,
+      referred_id TEXT NOT NULL UNIQUE,
+      signed_up_at INTEGER NOT NULL,
+      first_paid_at INTEGER,
+      first_paid_cents INTEGER,
+      first_paid_product TEXT,
+      payout_status TEXT NOT NULL DEFAULT 'none',
+      payout_cents INTEGER,
+      created_at INTEGER NOT NULL
+    )
+  `);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_referrals_referrer ON growth_engine_referrals (referrer_id)`);
+
   // Tier history table: audit log of tier changes
   db.run(`
     CREATE TABLE IF NOT EXISTS tier_history (
@@ -1056,6 +1079,44 @@ async function getShare(shareId) {
 }
 async function bumpShareViews(shareId) { if (!db) throw new Error("Database not initialized"); db.run(`UPDATE growth_engine_shares SET views = views + 1 WHERE share_id = ?`, [shareId]); saveDb(); }
 
+
+// ===================== REFERRALS (spec 1.8) =====================
+const REF_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
+function newRefCode() { const b = crypto.randomBytes(8); let s = ""; for (let i = 0; i < 8; i++) s += REF_ALPHABET[b[i] % REF_ALPHABET.length]; return s; }
+// Every account gets a code on first use.
+async function ensureRefCode(userId) {
+  if (!db) throw new Error("Database not initialized");
+  const u = await getUserById(userId); if (!u) return null;
+  if (u.refCode) return u.refCode;
+  for (let i = 0; i < 5; i++) { const code = newRefCode(); try { db.run(`UPDATE users SET ref_code = ? WHERE user_id = ? AND ref_code IS NULL`, [code, userId]); saveDb(); return (await getUserById(userId)).refCode; } catch { /* collision: retry */ } }
+  return null;
+}
+async function getUserByRefCode(code) {
+  if (!db) throw new Error("Database not initialized");
+  const r = rowsOf(`SELECT user_id FROM users WHERE ref_code = ?`, [String(code || "").toLowerCase()])[0];
+  return r ? getUserById(r.user_id) : null;
+}
+async function recordReferralSignup({ refCode, referrerId, referredId }) {
+  if (!db) throw new Error("Database not initialized");
+  if (!referrerId || !referredId || referrerId === referredId) return null;
+  try { db.run(`INSERT INTO growth_engine_referrals (id, ref_code, referrer_id, referred_id, signed_up_at, created_at) VALUES (?, ?, ?, ?, ?, ?)`, ["rf_" + uid(), refCode, referrerId, referredId, Date.now(), Date.now()]); saveDb(); return true; } catch { return null; }
+}
+async function recordReferralPayment({ referredId, cents, product }) {
+  if (!db) throw new Error("Database not initialized");
+  db.run(`UPDATE growth_engine_referrals SET first_paid_at = ?, first_paid_cents = ?, first_paid_product = ?, payout_status = CASE WHEN payout_status = 'none' THEN 'pending' ELSE payout_status END WHERE referred_id = ? AND first_paid_at IS NULL`, [Date.now(), Number(cents) || 0, product || null, referredId]);
+  saveDb();
+}
+async function referralStats(referrerId) {
+  if (!db) throw new Error("Database not initialized");
+  const r = one(`SELECT COUNT(*) AS signed_up, SUM(CASE WHEN first_paid_at IS NOT NULL THEN 1 ELSE 0 END) AS paid, SUM(COALESCE(first_paid_cents, 0)) AS cents FROM growth_engine_referrals WHERE referrer_id = ?`, [referrerId]);
+  return { signed_up: Number(r.signed_up || 0), paid: Number(r.paid || 0), paid_cents: Number(r.cents || 0) };
+}
+async function adminReferrals(limit = 50) {
+  if (!db) throw new Error("Database not initialized");
+  return rowsOf(`SELECT r.referrer_id, u.email, r.ref_code, COUNT(*) AS signed_up, SUM(CASE WHEN r.first_paid_at IS NOT NULL THEN 1 ELSE 0 END) AS paid, SUM(COALESCE(r.first_paid_cents, 0)) AS cents FROM growth_engine_referrals r LEFT JOIN users u ON u.user_id = r.referrer_id GROUP BY r.referrer_id ORDER BY paid DESC, signed_up DESC LIMIT ?`, [limit])
+    .map((x) => ({ referrer_id: x.referrer_id, email: x.email, ref_code: x.ref_code, signed_up: Number(x.signed_up), paid: Number(x.paid), paid_cents: Number(x.cents) }));
+}
+
 // ===================== ENTITLEMENT OPERATIONS =====================
 
 async function getOrCreateEntitlement(accountId) {
@@ -1243,6 +1304,7 @@ async function getUserByEmail(email) {
     emailPaused: columns.includes("email_paused") ? !!row[columns.indexOf("email_paused")] : false,
     isBusiness: columns.includes("is_business") ? !!row[columns.indexOf("is_business")] : false,
     priceVariant: columns.includes("price_variant") ? row[columns.indexOf("price_variant")] || null : null,
+    refCode: columns.includes("ref_code") ? row[columns.indexOf("ref_code")] || null : null,
     emailPrefs: columns.includes("email_prefs") ? (() => { try { return JSON.parse(row[columns.indexOf("email_prefs")] || "null") || null; } catch { return null; } })() : null,
     niche: columns.includes("niche") ? row[columns.indexOf("niche")] || null : null,
   };
@@ -1273,6 +1335,7 @@ async function getUserById(userId) {
     emailPaused: columns.includes("email_paused") ? !!row[columns.indexOf("email_paused")] : false,
     isBusiness: columns.includes("is_business") ? !!row[columns.indexOf("is_business")] : false,
     priceVariant: columns.includes("price_variant") ? row[columns.indexOf("price_variant")] || null : null,
+    refCode: columns.includes("ref_code") ? row[columns.indexOf("ref_code")] || null : null,
     emailPrefs: columns.includes("email_prefs") ? (() => { try { return JSON.parse(row[columns.indexOf("email_prefs")] || "null") || null; } catch { return null; } })() : null,
     niche: columns.includes("niche") ? row[columns.indexOf("niche")] || null : null,
   };
@@ -1380,6 +1443,7 @@ module.exports = {
   insertCost, adminCosts, attachReportToCosts,
   logMove, recordMoveOutcomes, moveOutcomeSummary,
   createShare, getShare, bumpShareViews,
+  ensureRefCode, getUserByRefCode, recordReferralSignup, recordReferralPayment, referralStats, adminReferrals,
   createPromo, getPromo, listPromos, setPromoActive, hasRedeemed, redeemPromo, listRedemptions,
   setCancelAt,
   setBillingPeriod,

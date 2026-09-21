@@ -724,3 +724,14 @@ p { margin: 0; }
 .pref { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; background: var(--ground); border-radius: 12px; font-size: 14px; cursor: pointer; }
 .pref input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--act); }
 .pref span { display: flex; flex-direction: column; } .pref small { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+/* ---- referrals ---- */
+.refcard { padding: 22px; margin-bottom: 14px; }
+.refcard .n { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.refrow { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: flex-end; margin-top: 10px; }
+.refrow .stat { padding: 10px 14px; background: var(--ground); border-radius: 14px; min-width: 110px; }
+.refrow .stat .n { font-family: var(--display); font-size: 26px; font-weight: 700; letter-spacing: -.02em; text-transform: none; color: var(--ink); }
+.refrow .stat .l { font-size: 12px; color: var(--muted); }
+.reflink { flex: 1 1 280px; } .reflink .l { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.reflink .lk { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; } .reflink code { font-size: 13px; padding: 8px 10px; background: var(--ground); border-radius: 10px; word-break: break-all; }
+.refcard .fine { margin-top: 10px; }

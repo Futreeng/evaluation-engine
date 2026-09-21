@@ -136,6 +136,16 @@ const assert = require("assert");
   await db.insertEmailLog({ userId: "acct_a", to: "a@example.com", type: "weekly_score", subject: "s", status: "sent", provider: "log", providerId: "x" });
   assert.equal((await db.listEmailLog(10)).length, 1);
 
+  // referrals (1.8)
+  const ra = await db.createUser("ref-a@example.com", "h"), rb = await db.createUser("ref-b@example.com", "h");
+  const code = await db.ensureRefCode(ra.userId); assert.equal(code.length, 8); assert.equal(await db.ensureRefCode(ra.userId), code);
+  assert.equal((await db.getUserByRefCode(code)).userId, ra.userId);
+  assert.equal(await db.recordReferralSignup({ refCode: code, referrerId: ra.userId, referredId: rb.userId }), true);
+  assert.equal(await db.recordReferralSignup({ refCode: code, referrerId: ra.userId, referredId: rb.userId }), null); // once
+  await db.recordReferralPayment({ referredId: rb.userId, cents: 1200, product: "growth_plan" });
+  const st = await db.referralStats(ra.userId); assert.equal(st.signed_up, 1); assert.equal(st.paid, 1); assert.equal(st.paid_cents, 1200);
+  assert.equal((await db.adminReferrals())[0].paid, 1);
+
   console.log("postgres module: all assertions passed");
   process.exit(0);
 })().catch((e) => { console.error("FAILED:", e.message); process.exit(1); });

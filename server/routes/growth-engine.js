@@ -118,7 +118,12 @@ router.post("/auth/signup", authLimiter, validateAuthRequest, async (req, res) =
     const { email, password, company_name } = req.body;
     const profile = { isBusiness: req.body.is_business === true || req.body.is_business === "yes", niche: typeof req.body.niche === "string" ? req.body.niche.slice(0, 40) : undefined, priceVariant: pricingAB.assign(req.get("x-anon-id") || req.ip || "") };
     const result = await signup(email, password, company_name, profile);
-    events.track("signup", { ...events.attribution(req), accountId: result?.user?.user_id || null, props: { has_company: !!company_name } });
+    const newId = result?.user?.user_id || null;
+    events.track("signup", { ...events.attribution(req), accountId: newId, props: { has_company: !!company_name } });
+    // Referral attribution (spec 1.8): the ref code stored on first visit → the referrer's account.
+    const refCode = String(req.get("x-ref") || "").toLowerCase();
+    if (newId && refCode) { try { const referrer = await geDb.getUserByRefCode(refCode); if (referrer) { await geDb.recordReferralSignup({ refCode, referrerId: referrer.userId, referredId: newId }); events.track("referral_signup", { ...events.attribution(req), accountId: newId, props: { referrer: referrer.userId } }); } } catch (e) { console.warn("[Referral] signup attribution failed:", e.message); } }
+    if (newId) geDb.ensureRefCode(newId).catch(() => { });
     res.json(result);
   } catch (err) {
     if (err.message.includes("already registered")) {
@@ -181,6 +186,7 @@ router.get("/auth/me", authMiddleware, async (req, res) => {
       is_admin: isAdminEmail(user.email),
       is_business: !!user.isBusiness,
       niche: user.niche || null,
+      ref_code: user.refCode || null,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -243,6 +249,17 @@ router.get("/email/pause", async (req, res) => {
 <h1 style="margin:0;font-size:26px">${ok ? "Paused." : "That link didn't work."}</h1>
 <p style="font-size:16px;line-height:1.6;color:#5B4C3B">${ok ? "Check-ins and score updates are off. Your plan keeps running and your reports stay. Resume any time from your reports page." : "It may have been altered. Sign in and use the plan card on your reports page instead."}</p>
 <a href="${app}/#/reports" style="display:inline-block;margin-top:8px;padding:12px 18px;border-radius:12px;background:#D2603A;color:#FFF6E9;text-decoration:none;font-weight:700">Your reports</a></div>`);
+});
+// Referrals (spec 1.8): your code, your link, and how many people it brought.
+router.get("/account/referrals", authMiddleware, async (req, res) => {
+  try {
+    const code = await geDb.ensureRefCode(req.user.id);
+    const base = (process.env.APP_URL || `${req.protocol}://${req.get("host")}`).replace(/\/$/, "");
+    res.json({ ref_code: code, link: `${base}/?ref=${code}`, ...(await geDb.referralStats(req.user.id)) });
+  } catch (err) { sendError(res, 500, "REFERRAL_ERROR", err.message); }
+});
+router.get("/admin/referrals", requireAdmin, async (req, res) => {
+  try { res.json({ referrers: await geDb.adminReferrals(Math.min(200, Number(req.query.limit) || 50)) }); } catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
 });
 // Email preferences (spec 1.6): per-type toggles + the master pause.
 const emailSvc = require("../growth_engine_email");
@@ -612,6 +629,7 @@ router.post("/reports/:reportId/unlock", authMiddleware, async (req, res) => {
     const { jobId } = await geDb.createJob(req.user.id, "growth_plan", input);
     jobQueue.processJob(jobId, req.user.id, "growth_plan", input).catch((err) => console.error(`[Unlock] job ${jobId} failed:`, err.message));
     events.track("unlock", { ...events.attribution(req), reportId: report.reportId, props: { amount_cents: payment.amountInCents, promo: promo?.code || null, variant: vpu.variant } });
+    geDb.recordReferralPayment({ referredId: req.user.id, cents: payment.amountInCents ?? 0, product: "plan_unlock" }).catch(() => { });
     if (promo) events.track("promo_applied", { ...events.attribution(req), props: { code: promo.code, product: "plan_unlock" } });
     res.json({ job_id: jobId, status: "queued", tier: "growth_plan", one_time: true, payment: { id: payment.paymentId, amount: payment.amountFormatted } });
   } catch (err) {
@@ -631,7 +649,7 @@ router.post("/reports/:reportId/share", optionalAuth, async (req, res) => {
     const kind = cards.KINDS.includes(req.body?.kind) ? req.body.kind : "score";
     const data = cards.scoreDataFrom(report.reportBody || {}, { thenNow: !!req.body?.then_now });
     if (!Number.isFinite(data.overall)) return sendError(res, 400, "NO_SCORE", "This report has no score to share");
-    const ref = req.user?.id ? req.user.id.replace(/^user_/, "").slice(0, 10) : null; // 1.8 replaces with the account's ref code
+    const ref = req.user?.id ? await geDb.ensureRefCode(req.user.id).catch(() => null) : null;
     const share = await geDb.createShare({ accountId: anon ? null : report.accountId, reportId: report.reportId, kind, data, ref });
     const base = (process.env.APP_URL || `${req.protocol}://${req.get("host")}`).replace(/\/$/, "");
     events.track("share_clicked", { ...events.attribution(req), reportId: report.reportId, props: { kind, share_id: share.shareId } });
@@ -806,6 +824,7 @@ router.post("/billing/subscribe", authMiddleware, validateSubscriptionRequest, a
     const vp = pricingAB.prices(await variantFor(req));
     const result = await billingManager.createSubscription(accountId, tier, null, billingCycle || "monthly", promo, vp.growth_plan);
     events.track("subscribe", { ...events.attribution(req), props: { tier, billingCycle: billingCycle || "monthly", promo: promo?.code || null, amount_cents: result.amountInCents ?? null, variant: vp.variant } });
+    geDb.recordReferralPayment({ referredId: accountId, cents: result.amountInCents ?? 0, product: tier }).catch(() => { });
     if (promo) events.track("promo_applied", { ...events.attribution(req), props: { code: promo.code, product: "growth_plan" } });
     if (promo) { try { await geDb.redeemPromo(promo.code, accountId, "growth_plan", (TIER_PRICING[tier] || 0) - promo.amountCents); } catch (e) { console.warn("[Promo] redemption record failed:", e.message); } }
 

@@ -1093,8 +1093,8 @@
     renderHeader('reports');
     if (!token()) { sset('sc_next', '#/reports'); go('#/signin'); return; }
     $view.innerHTML = h`<div class="center-msg">Loading your reports…</div>`;
-    let list, subn = null;
-    try { [list, subn] = await Promise.all([api('/account/reports'), api('/account/subscription-status').catch(() => null)]); } catch (e) { if (e.status === 401) return; $view.innerHTML = h`<div class="center-msg"><h2>Couldn’t load reports.</h2>${e.message}</div>`; return; }
+    let list, subn = null, refs = null;
+    try { [list, subn, refs] = await Promise.all([api('/account/reports'), api('/account/subscription-status').catch(() => null), api('/account/referrals').catch(() => null)]); } catch (e) { if (e.status === 401) return; $view.innerHTML = h`<div class="center-msg"><h2>Couldn’t load reports.</h2>${e.message}</div>`; return; }
     // Email preferences (spec 1.6): four toggles + pause all. Receipts, report-ready and password emails always send.
     const PREF_LABELS = [['weekly_score', 'Weekly score', 'Your re-score and what changed'], ['monday_move', 'Plan check-ins and Monday move', 'Day-30/60 check-ins, the week\'s move'], ['milestones', 'Milestones', 'Rank-ups and personal records'], ['product_news', 'Product news', 'What\'s new, occasionally']];
     const emailPrefsHTML = prefs => {
@@ -1129,9 +1129,14 @@
         </details>`; }).join(''))
       : raw('<div class="center-msg"><h2>No reports yet.</h2>Run an evaluation while signed in and it will show up here.</div>')}
       ${unknownNiches.length ? raw(h`<div class="fine">Scored against all creators — we don't have enough ${unknownNiches.join(' / ')} accounts yet.</div>`) : ''}
+      ${refs && refs.ref_code ? raw(h`<div class="card refcard"><div class="n">Your referrals</div>
+        <div class="refrow"><div class="stat"><div class="n">${refs.signed_up}</div><div class="l">signed up</div></div><div class="stat"><div class="n">${refs.paid}</div><div class="l">started a plan</div></div>
+          <div class="reflink"><div class="l">Your link — every share card carries it too</div><div class="lk"><code>${refs.link}</code><button type="button" class="btn ghost sm" data-action="copy-ref">Copy</button></div></div></div>
+        <div class="fine">When someone scores their account from your link and later pays, it's counted here. Referral rewards are coming; the count starts now.</div></div>`) : ''}
       <div class="card settings"><div class="n">Settings · your data</div><p>Delete my account and reports — removes your account, every report we've written for you and your score history. Payment records we're required to keep are retained by Stripe.</p><button type="button" class="btn danger" data-action="delete-account">Delete my account</button></div>
     </div></div>${raw(footer())}`;
     $view.querySelector('[data-action=delete-account]').addEventListener('click', () => openDeleteDialog(reports.length));
+    $view.querySelector('[data-action=copy-ref]')?.addEventListener('click', async () => { try { await navigator.clipboard.writeText(refs.link); toast('Link copied.'); } catch { toast(refs.link); } });
     $view.querySelector('[data-action=cancel-plan]')?.addEventListener('click', () => openCancelDialog(subn));
     $view.querySelectorAll('[data-pref]').forEach(cb => cb.addEventListener('change', async e => {
       const k = e.currentTarget.dataset.pref, on = e.currentTarget.checked;
