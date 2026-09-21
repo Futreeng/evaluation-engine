@@ -39,7 +39,7 @@
   ];
   const STEPS = [
     ['finding', 'Finding the account', 'Found the account'],
-    ['reading', 'Reading the last 12 posts', 'Read the last 12 posts'],
+    ['reading', 'Reading your recent posts', 'Read your recent posts'],
     ['scoring', 'Scoring the four dimensions', 'Scored the four dimensions'],
     ['writing', 'Writing your 30-60-90 plan', 'Wrote your 30-60-90 plan']
   ];
@@ -1295,7 +1295,7 @@
       <h1>How the score works</h1>
       <p class="lede">Your score out of 100 is the plain average of four dimensions. Nothing is weighted secretly at the top level — if one number is low, you can see exactly which one and why. Under 50 is Weak, 50 to 69 is Fair, 70 and up is Strong.</p>
       <div class="dimlist">${raw(dims.map(([l, hue, t, chips, moves]) => h`<div class="card dimx bd${hue}"><div class="n">${l}</div><p>${t}</p><div class="chips2">${raw(chips.map(c => h`<span class="pill tone">${c}</span>`).join(''))}</div><p class="mv">What moves it: ${moves}</p></div>`).join(''))}</div>
-      <div class="cannot"><div class="n">What we cannot see</div><p>We read public data only. That means no saves, no reach, no story views, no audience demographics, and nothing from a private account. A report is based on your last 12 posts within the window shown on it. If a number here disagrees with your own analytics, yours is the more complete one — ours is the one a stranger can see.</p></div>
+      <div class="cannot"><div class="n">What we cannot see</div><p>We read public data only. That means no saves, no reach, no story views, no audience demographics, and nothing from a private account. A report is based on your most recent public posts — usually 30, fewer on a newer account — within the window shown on it. If a number here disagrees with your own analytics, yours is the more complete one — ours is the one a stranger can see.</p></div>
       <p class="lede sm">Your niche average appears once 20 accounts in that niche are scored. Until then the marker is the all-creator average and the report says so.</p>
     </div></div>${raw(footer())}`;
   }

@@ -15,7 +15,7 @@
 const { calculateMetrics } = require("./instagram_fetcher");
 
 const ACTOR = "clockworks~tiktok-scraper";
-const VIDEOS = 15;
+const VIDEOS = Math.max(12, Math.min(50, Number(process.env.SCRAPE_POSTS || 30)));
 const RUN_TIMEOUT_SECS = 150;
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -76,6 +76,7 @@ function normalizeVideo(v) {
     location: v.locationMeta?.city || v.locationMeta?.locationName || null,
     is_pinned: !!v.isPinned,
     permalink: v.webVideoUrl || null,
+    thumbnail_url: v.videoMeta?.coverUrl || v.videoMeta?.originalCoverUrl || null,
   };
 }
 
@@ -87,7 +88,7 @@ async function analyzeTikTokAccountViaApify(rawHandle) {
   if (hit && Date.now() - hit.at < CACHE_TTL_MS) { console.log(`[TikTok/Apify] Cache hit for @${handle}`); return hit.data; }
   try {
     const c = await geDb.getCachedProfile("tiktok", handle, CACHE_TTL_MS);
-    if (c) { console.log(`[TikTok/Apify] DB cache hit for @${handle}`); cache.set(handle, { at: c.fetchedAt, data: c.data }); return c.data; }
+    if (c && (c.data?.recent_posts?.length || 0) >= Math.min(VIDEOS, c.data?.post_count || VIDEOS)) { console.log(`[TikTok/Apify] DB cache hit for @${handle}`); cache.set(handle, { at: c.fetchedAt, data: c.data }); return c.data; }
   } catch { /* cache is best-effort */ }
 
   console.log(`[TikTok/Apify] Fetching @${handle}...`);
@@ -101,11 +102,19 @@ async function analyzeTikTokAccountViaApify(rawHandle) {
 
   const user = { followers_count: Number(author.fans) || 0, follows_count: Number(author.following) || 0 };
   const feed = posts.filter((p) => !p.is_pinned);
-  const cadenceSet = feed.length >= 3 ? feed : posts;
+  // Cadence is judged on a fixed recent window so scrape depth doesn't move
+  // the score: 30 posts from a sparse account can span years. Falls back to
+  // the latest posts when the window holds fewer than 3.
+  const CADENCE_DAYS = Number(process.env.CADENCE_WINDOW_DAYS || 90);
+  const recent = feed.filter((p) => Date.now() - +new Date(p.timestamp) <= CADENCE_DAYS * 86400000);
+  const cadenceSet = recent.length >= 3 ? recent : (feed.length >= 3 ? feed.slice(0, 12) : posts.slice(0, 12));
   const metrics = calculateMetrics(user, posts);
   metrics.posting_frequency = calculateMetrics(user, cadenceSet).posting_frequency;
-  metrics.posting_frequency.pinned_excluded = posts.length - cadenceSet.length;
-  metrics.posting_frequency.note = `Only the most recent ${VIDEOS} public videos are sampled; cadence reflects that window.`;
+  metrics.posting_frequency.pinned_excluded = posts.length - feed.length;
+  metrics.posting_frequency.window_days = CADENCE_DAYS;
+  metrics.posting_frequency.posts_in_window = recent.length;
+  metrics.posting_frequency.note = `Only the most recent ${posts.length} public videos are sampled; cadence reflects that window.`;
+  metrics.posts_sampled = posts.length;
 
   // TikTok engagement: plays and shares are the reach signals; saves are the
   // "worth keeping" signal. Recompute the rate to include them lightly.

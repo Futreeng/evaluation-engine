@@ -23,6 +23,24 @@ const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // a retry within a day shouldn't re-b
 const cache = new Map(); // in-process fallback; the DB cache is authoritative
 const geDb = require("./growth_engine_db_select");
 
+// How many recent posts to score on (spec 1.3). The profile scraper returns
+// ~12; anything beyond that comes from the post scraper (per-result price).
+const SCRAPE_POSTS = Math.max(12, Math.min(50, Number(process.env.SCRAPE_POSTS || 30)));
+const POST_ACTOR = "apify~instagram-scraper";
+
+async function fetchPostsFromApify(handle, limit) {
+  const token = process.env.APIFY_TOKEN;
+  const url = `https://api.apify.com/v2/acts/${POST_ACTOR}/run-sync-get-dataset-items?timeout=${RUN_TIMEOUT_SECS}&format=json&clean=true`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ directUrls: [`https://www.instagram.com/${handle}/`], resultsType: "posts", resultsLimit: limit, addParentData: false }),
+  });
+  if (!response.ok) throw new Error(`Apify post scraper error ${response.status}`);
+  const items = await response.json();
+  return Array.isArray(items) ? items.filter((p) => p && p.id && p.timestamp && !p.error) : [];
+}
+
 async function fetchProfileFromApify(handle) {
   const token = process.env.APIFY_TOKEN;
   if (!token) throw new Error("APIFY_TOKEN not configured");
@@ -77,6 +95,10 @@ function normalizePost(p) {
     location: p.locationName || null,
     is_pinned: !!p.isPinned,
     permalink: p.url,
+    // Stored per post (spec 1.3). Saves aren't public on Instagram → null.
+    save_count: null,
+    thumbnail_url: p.displayUrl || null,
+    short_code: p.shortCode || null,
   };
 }
 
@@ -91,7 +113,8 @@ async function analyzeInstagramAccountViaApify(rawHandle) {
   }
   try {
     const c = await geDb.getCachedProfile("instagram", handle, CACHE_TTL_MS);
-    if (c) { console.log(`[Instagram/Apify] DB cache hit for @${handle}`); cache.set(handle, { at: c.fetchedAt, data: c.data }); return c.data; }
+    // A cache entry from before the deeper scrape holds ~12 posts; refetch.
+    if (c && (c.data?.recent_posts?.length || 0) >= Math.min(SCRAPE_POSTS, c.data?.post_count || SCRAPE_POSTS)) { console.log(`[Instagram/Apify] DB cache hit for @${handle}`); cache.set(handle, { at: c.fetchedAt, data: c.data }); return c.data; }
   } catch { /* cache is best-effort */ }
 
   console.log(`[Instagram/Apify] Fetching @${handle}...`);
@@ -104,9 +127,22 @@ async function analyzeInstagramAccountViaApify(rawHandle) {
     );
   }
 
-  const posts = (profile.latestPosts || []).map(normalizePost).filter((p) => p.timestamp);
+  let posts = (profile.latestPosts || []).map(normalizePost).filter((p) => p.timestamp);
   if (posts.length === 0) {
     throw new Error(`No public posts found for @${handle}`);
+  }
+  // Deeper scrape: top up to SCRAPE_POSTS from the post scraper. Never fail
+  // the report over it — 12 posts is still a report.
+  if (posts.length < SCRAPE_POSTS && (profile.postsCount || SCRAPE_POSTS) > posts.length) {
+    try {
+      const more = await fetchPostsFromApify(handle, SCRAPE_POSTS);
+      require("./growth_engine_costs").scrape({ unit: "apify:instagram-post", quantity: Math.max(1, more.length), handle, platform: "instagram" });
+      const seen = new Set(posts.map((p) => p.id));
+      for (const raw of more) { const p = normalizePost(raw); if (p.timestamp && !seen.has(p.id)) { posts.push(p); seen.add(p.id); } }
+      posts.sort((a, b) => +new Date(b.timestamp) - +new Date(a.timestamp));
+      posts = posts.slice(0, SCRAPE_POSTS);
+      console.log(`[Instagram/Apify] @${handle}: ${posts.length} posts after deeper scrape`);
+    } catch (err) { console.warn(`[Instagram/Apify] deeper scrape failed for @${handle}: ${err.message} — scoring on ${posts.length} posts`); }
   }
 
   // Reuse the Graph-API metrics math so both fetchers score the same way.
@@ -118,11 +154,19 @@ async function analyzeInstagramAccountViaApify(rawHandle) {
   // stretch the date range and make a daily poster look dormant. Score cadence
   // on the unpinned feed, engagement on everything.
   const feed = posts.filter((p) => !p.is_pinned);
-  const cadenceSet = feed.length >= 3 ? feed : posts;
+  // Cadence is judged on a fixed recent window so scrape depth doesn't move
+  // the score: 30 posts from a sparse account can span years. Falls back to
+  // the latest posts when the window holds fewer than 3.
+  const CADENCE_DAYS = Number(process.env.CADENCE_WINDOW_DAYS || 90);
+  const recent = feed.filter((p) => Date.now() - +new Date(p.timestamp) <= CADENCE_DAYS * 86400000);
+  const cadenceSet = recent.length >= 3 ? recent : (feed.length >= 3 ? feed.slice(0, 12) : posts.slice(0, 12));
   const metrics = calculateMetrics(user, posts);
   metrics.posting_frequency = calculateMetrics(user, cadenceSet).posting_frequency;
-  metrics.posting_frequency.pinned_excluded = posts.length - cadenceSet.length;
-  metrics.posting_frequency.note = "Only the most recent ~12 public posts are sampled; cadence reflects that window.";
+  metrics.posting_frequency.pinned_excluded = posts.length - feed.length;
+  metrics.posting_frequency.window_days = CADENCE_DAYS;
+  metrics.posting_frequency.posts_in_window = recent.length;
+  metrics.posting_frequency.note = `Only the most recent ${posts.length} public posts are sampled; cadence reflects that window.`;
+  metrics.posts_sampled = posts.length;
 
   // Signals the Graph fetcher can't see but the free report copy depends on
   // (the bio/link/booking-path read).

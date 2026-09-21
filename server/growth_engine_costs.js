@@ -28,7 +28,7 @@ const DEFAULT_RATES = {
     "gpt-4o-mini": { in: 0.15, out: 0.60 },
     _default: { in: 0.50, out: 1.50 },
   },
-  scrape: { "apify:instagram-profile": 0.003, "apify:tiktok-video": 0.004, _default: 0.003 },
+  scrape: { "apify:instagram-profile": 0.003, "apify:instagram-post": 0.0023, "apify:tiktok-video": 0.004, _default: 0.003 },
 };
 let RATES = DEFAULT_RATES;
 try { if (process.env.COST_RATES_JSON) { const o = JSON.parse(process.env.COST_RATES_JSON); RATES = { llm: { ...DEFAULT_RATES.llm, ...(o.llm || {}) }, scrape: { ...DEFAULT_RATES.scrape, ...(o.scrape || {}) } }; } } catch { console.warn("[Costs] COST_RATES_JSON did not parse; using defaults"); }

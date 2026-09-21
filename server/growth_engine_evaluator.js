@@ -243,7 +243,8 @@ function formatInstagramDataForAnalysis(instagramData) {
     biography: instagramData.biography || null,
     website: instagramData.website || "empty (no link in bio)",
     metrics: instagramData.analysis,
-    recent_activity: instagramData.recent_posts.slice(0, 12).map((p) => ({
+    posts_sampled: instagramData.recent_posts.length,
+    recent_activity: instagramData.recent_posts.map((p) => ({
       date: p.timestamp.split("T")[0],
       engagement: (p.like_count || 0) + (p.comments_count || 0),
       likes: p.like_count || 0,
@@ -255,6 +256,16 @@ function formatInstagramDataForAnalysis(instagramData) {
       duration_s: p.duration || undefined,
       location: p.location || undefined,
       caption_preview: p.caption ? p.caption.substring(0, 100) : "",
+    })),
+    // Per-post record kept on the report (spec 1.3): what 1.4 evidence and
+    // 1.10 best-time read from. Thumbnail URLs here are the scraper's signed
+    // ones — never rendered; 1.4 replaces them with our own copies.
+    posts: instagramData.recent_posts.map((p) => ({
+      id: String(p.id || p.short_code || ""), posted_at: p.timestamp,
+      type: p.is_reel ? (instagramData.platform === "tiktok" ? "video" : "reel") : String(p.media_type || "").toLowerCase() === "carousel" ? "carousel" : String(p.media_type || "").toLowerCase() === "video" ? "video" : instagramData.platform === "tiktok" ? "slideshow" : "image",
+      caption: (p.caption || "").slice(0, 300), likes: p.like_count || 0, comments: p.comments_count || 0,
+      views: p.video_view_count || null, saves: p.save_count ?? null, shares: p.share_count ?? null, duration_s: p.duration || null,
+      permalink: p.permalink || null, source_thumbnail_url: p.thumbnail_url || null, is_pinned: !!p.is_pinned,
     })),
   };
 }
@@ -566,14 +577,22 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
   let postInsights = null;
   let followers = null;
   let postsLast14d = null;
+  let postRecords = [];
   try {
     await onStage("finding", 1);
     const realData = await getRealPostData(handle, platform, category);
     await onStage("reading", 2);
+    postRecords = Array.isArray(realData.posts) ? realData.posts : [];
     followers = Number.isFinite(realData.follower_count) ? realData.follower_count : null;
     const acts = realData.recent_activity || realData.recent_posts || [];
     postsLast14d = acts.filter((p) => { const t = +new Date(p.date || p.timestamp); return Number.isFinite(t) && Date.now() - t <= 14 * 86400000; }).length;
-    postSummary = JSON.stringify(realData); // compact: every token counts against free-tier TPM caps
+    // What the model sees: metrics + one compact row per post. No URLs,
+    // thumbnails or full captions — 30 posts must still fit Groq's 8k TPM.
+    postSummary = JSON.stringify({
+      ...realData, posts: undefined,
+      recent_activity: (realData.recent_activity || []).map((p) => { const o = { d: p.date, t: p.media_type, l: p.likes, c: p.comments }; if (p.video_views) o.v = p.video_views; if (p.saves) o.s = p.saves; if (p.shares) o.sh = p.shares; if (p.caption_preview) o.cap = p.caption_preview.slice(0, 60); return o; }),
+      recent_activity_key: "d=date t=type l=likes c=comments v=views s=saves sh=shares cap=caption start",
+    });
     computed = scoreProfile(realData, category); // null for fetchers without the metric shape (Twitter)
     postInsights = rankPosts(realData.recent_activity || realData.recent_posts);
   } catch (err) {
@@ -666,6 +685,9 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
     generated_at: Date.now(),
     refresh_due_at: null,
     posts_last_14d: postsLast14d,
+    posts: postRecords,
+    posts_sampled: postRecords.length,
+    data_window: postRecords.length ? `Based on your last ${postRecords.length} posts. We can't see saves, reach or story views.` : null,
     plan_context: inputParams.plan_context || null,
     data_confidence: structured ? "full" : "narrative_only",
     narrative,
