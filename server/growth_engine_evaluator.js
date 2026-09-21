@@ -302,14 +302,34 @@ async function callClaudeNonStreaming(claudeKey, claudeWorkspaceId, system, user
   return data.content[0].text;
 }
 
+// Circuit breaker: when Gemini is shedding load (a run of 503/429 across
+// models), stop knocking for a while and let the next provider take the
+// call. Without this a 503 storm turned a 3-minute plan into 12 minutes of
+// retries before Groq ever saw a request.
+const geminiBreaker = { fails: 0, openUntil: 0 };
+const GEMINI_BREAK_AFTER = 4;          // consecutive overload responses
+const GEMINI_BREAK_MS = 3 * 60 * 1000; // stay open this long
+const GEMINI_CALL_BUDGET_MS = 45 * 1000; // max wall time one call may spend retrying
+function geminiOverloaded() {
+  geminiBreaker.fails++;
+  if (geminiBreaker.fails >= GEMINI_BREAK_AFTER) {
+    geminiBreaker.openUntil = Date.now() + GEMINI_BREAK_MS;
+    geminiBreaker.fails = 0;
+    console.warn(`[Growth Engine] Gemini overloaded — skipping it for ${GEMINI_BREAK_MS / 60000} min`);
+  }
+}
+
 async function callGeminiNonStreaming(geminiKey, systemInstruction, userMessage) {
   if (!geminiKey) throw new Error("Gemini API key not configured");
+  if (geminiBreaker.openUntil > Date.now()) throw new Error(`Gemini skipped: overloaded until ${new Date(geminiBreaker.openUntil).toISOString().slice(11, 19)}`);
   // Free-tier Gemini sheds load with 503s on the busiest model; walk a short
   // list and retry briefly rather than giving the call away to the next provider.
   const models = [process.env.GEMINI_MODEL || "gemini-2.5-flash", "gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"];
+  const started = Date.now();
   let lastErr;
   for (const model of models) {
     for (let attempt = 0; attempt < 2; attempt++) {
+      if (Date.now() - started > GEMINI_CALL_BUDGET_MS) { geminiOverloaded(); throw lastErr || new Error("Gemini retry budget exhausted"); }
       const url = `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${encodeURIComponent(geminiKey)}`;
       const response = await fetch(url, {
         method: "POST",
@@ -323,6 +343,7 @@ async function callGeminiNonStreaming(geminiKey, systemInstruction, userMessage)
         }),
       });
       if (response.ok) {
+        geminiBreaker.fails = 0;
         const data = await response.json();
         const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("") || "";
         if (text.trim()) return text;
@@ -333,6 +354,8 @@ async function callGeminiNonStreaming(geminiKey, systemInstruction, userMessage)
       const detail = await response.text();
       lastErr = new Error(`Gemini API error ${response.status} (${model}): ${detail.slice(0, 200)}`);
       if (response.status === 503 || response.status === 429) {
+        geminiOverloaded();
+        if (geminiBreaker.openUntil > Date.now()) throw lastErr;
         if (attempt === 0) { console.log(`[Growth Engine] Gemini ${response.status} on ${model}, retrying in 4s...`); await new Promise((r) => setTimeout(r, 4000)); continue; }
         break; // next model
       }
