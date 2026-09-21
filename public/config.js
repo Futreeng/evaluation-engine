@@ -7,10 +7,10 @@ window.SCALECRAFT_CONFIG = {
   // Real customer quotes only. Empty → the pricing page shows no quote card.
   // Each: { quote, name, meta } e.g. { quote: '…', name: 'Ava', meta: '@ava · Fitness · 41 → 58' }
   testimonials: [],
-  // Same origin when Express serves this folder (local dev, Railway). The
-  // Vercel-hosted copy has no backend of its own, so it talks to Railway.
+  // Same origin when Express serves this folder (local dev, Render). The
+  // Vercel-hosted copy has no backend of its own, so it talks to Render.
   apiBase: /\.vercel\.app$/.test(location.hostname)
-    ? 'https://discerning-wisdom-production-6696.up.railway.app/api/growth-engine/v1'
+    ? 'https://scalecraft.onrender.com/api/growth-engine/v1'
     : '/api/growth-engine/v1',
   pollIntervalMs: 2000,
   // Platforms the backend's validateEvaluationRequest accepts today.
