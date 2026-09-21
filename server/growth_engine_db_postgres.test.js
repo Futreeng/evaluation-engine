@@ -116,6 +116,13 @@ const assert = require("assert");
   assert.equal(fn.steps.evaluate_started.actors, 1); assert.equal(fn.steps.evaluate_started.total, 2); assert.equal(fn.by_ref.REF1.signup, 1);
   assert.equal((await db.paidRetention()).cohort, 0);
 
+  // costs
+  await db.insertCost({ accountId: "acct_z", jobId: "j1", reportId: "r1", feature: "free_report", kind: "scrape", provider: "apify", model: "apify:instagram-profile", label: "@x", quantity: 1, detail: null, cents: 0.3 });
+  await db.insertCost({ accountId: "acct_z", jobId: "j1", reportId: "r1", feature: "free_report", kind: "llm", provider: "gemini", model: "gemini-2.5-flash", label: "Merge", quantity: 3000, detail: { in: 2000, out: 1000 }, cents: 0.031 });
+  const cs = await db.adminCosts(0);
+  assert.ok(Math.abs(cs.total_cents - 0.331) < 1e-6, "total " + cs.total_cents);
+  assert.equal(cs.users[0].account_id, "acct_z"); assert.equal(cs.by_kind.length, 2);
+
   console.log("postgres module: all assertions passed");
   process.exit(0);
 })().catch((e) => { console.error("FAILED:", e.message); process.exit(1); });

@@ -92,6 +92,7 @@ async function analyzeTikTokAccountViaApify(rawHandle) {
 
   console.log(`[TikTok/Apify] Fetching @${handle}...`);
   const items = await fetchVideosFromApify(handle);
+  require("./growth_engine_costs").scrape({ unit: "apify:tiktok-video", quantity: Math.max(1, items.length), handle, platform: "tiktok" });
   const author = items.find((it) => it.authorMeta)?.authorMeta || {};
   if (author.privateAccount) throw new Error(`TikTok returned the profile @${handle} as private, so there are no public posts for us to score.`);
 

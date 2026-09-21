@@ -3,6 +3,9 @@ const db = require("./db");
 const { analyzeInstagramAccount } = require("./instagram_fetcher");
 const { analyzeInstagramAccountViaApify } = require("./instagram_apify_fetcher");
 const { TIER_PRICING, ONE_TIME_PRICING } = require("./growth_engine_billing");
+const costs = require("./growth_engine_costs");
+// Label of the LLM call in flight, for cost rows (set by callWithQuadFallback).
+let currentLlmLabel = "";
 const { analyzeTikTokAccountViaApify } = require("./tiktok_apify_fetcher");
 const { scoreProfile, rankPosts } = require("./growth_engine_scoring");
 
@@ -299,6 +302,7 @@ async function callClaudeNonStreaming(claudeKey, claudeWorkspaceId, system, user
   }
 
   const data = await response.json();
+  costs.llm({ provider: "claude", model: "claude-opus-4-1", label: currentLlmLabel, usage: { in: data.usage?.input_tokens, out: data.usage?.output_tokens } });
   return data.content[0].text;
 }
 
@@ -346,6 +350,7 @@ async function callGeminiNonStreaming(geminiKey, systemInstruction, userMessage)
         geminiBreaker.fails = 0;
         const data = await response.json();
         const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("") || "";
+        costs.llm({ provider: "gemini", model, label: currentLlmLabel, usage: { in: data.usageMetadata?.promptTokenCount, out: (data.usageMetadata?.candidatesTokenCount || 0) + (data.usageMetadata?.thoughtsTokenCount || 0) } });
         if (text.trim()) return text;
         lastErr = new Error(`Gemini returned an empty completion (${model})`);
         console.warn("[Growth Engine]", lastErr.message, JSON.stringify(data.candidates?.[0]?.finishReason || data.promptFeedback || "").slice(0, 80));
@@ -389,6 +394,7 @@ async function callGroqNonStreaming(groqKey, systemInstruction, userMessage) {
       if (response.ok) {
         const data = await response.json();
         const content = data.choices?.[0]?.message?.content;
+        costs.llm({ provider: "groq", model, label: currentLlmLabel, usage: { in: data.usage?.prompt_tokens, out: data.usage?.completion_tokens } });
         if (content && content.trim()) return content;
         // Empty completion (budget spent on hidden reasoning) — try the next model.
         lastErr = new Error(`Groq returned an empty completion (${model})`);
@@ -467,6 +473,7 @@ async function callOpenAINonStreaming(openaiKey, system, userMessage) {
   }
 
   const data = await response.json();
+  costs.llm({ provider: "openai", model: "gpt-4o-mini", label: currentLlmLabel, usage: { in: data.usage?.prompt_tokens, out: data.usage?.completion_tokens } });
   return data.choices[0].message.content;
 }
 
@@ -493,6 +500,7 @@ async function callWithFallback(primaryCall, fallbackCall, label) {
 
 // 4-way fallback: try all four LLMs in sequence
 async function callWithQuadFallback(primaryCall, secondaryCall, tertiaryCall, quaternaryCall, label) {
+  currentLlmLabel = label;
   try {
     console.log(`[Growth Engine] ${label}: trying primary LLM (Claude)...`);
     return await primaryCall();

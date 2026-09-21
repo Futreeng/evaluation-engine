@@ -95,6 +95,7 @@ async function analyzeInstagramAccountViaApify(rawHandle) {
   } catch { /* cache is best-effort */ }
 
   console.log(`[Instagram/Apify] Fetching @${handle}...`);
+  require("./growth_engine_costs").scrape({ unit: "apify:instagram-profile", quantity: 1, handle, platform: "instagram" });
   const profile = await fetchProfileFromApify(handle);
 
   if (profile.private) {

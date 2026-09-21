@@ -15,6 +15,7 @@ const { compareCompetitors } = require("./growth_engine_competitors");
 const { saveReportAsMarkdown } = require("./report_saver");
 const mailer = require("./mailer");
 const events = require("./growth_engine_events");
+const costs = require("./growth_engine_costs");
 
 // Weekly refresh: does what the creator told us still match what they're
 // doing? At most one nudge per phase; the report and the score-changed
@@ -80,6 +81,10 @@ class JobQueue {
   }
 
   async processJob(jobId, accountId, tier, inputParams) {
+    const feature = inputParams.scheduled ? "rescore" : inputParams.rerun_of ? "rerun" : inputParams.one_time_unlock ? "unlock" : tier === "social_snapshot" ? "free_report" : "paid_report";
+    return costs.run({ accountId: accountId !== "demo-account" ? accountId : null, jobId, feature }, () => this._processJob(jobId, accountId, tier, inputParams));
+  }
+  async _processJob(jobId, accountId, tier, inputParams) {
     (this._started ||= new Map()).set(jobId, Date.now());
     if (this.processingJobs.has(jobId)) {
       console.log(`[JobQueue] Job ${jobId} already processing`);
@@ -230,6 +235,8 @@ class JobQueue {
 
       const { reportId } = await geDb.createReport(accountId, tier, inputParams, reportBody);
       reportBody.report_id = reportId;
+      costs.setReport(reportId);
+      geDb.attachReportToCosts(jobId, reportId).catch((e) => console.warn("[Costs] attach failed:", e.message));
       events.track("evaluate_completed", { accountId: accountId !== "demo-account" ? accountId : null, anon: inputParams.attribution?.anon || null, ref: inputParams.attribution?.ref || null, reportId, props: { tier, platform: inputParams.platform, category: inputParams.category, overall: reportBody.scores?.overall ?? null, scheduled: !!inputParams.scheduled, ms: Date.now() - (this._started?.get?.(jobId) || Date.now()) } });
 
       // Emails: report ready on a fresh run; score changed on a weekly refresh.

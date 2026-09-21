@@ -182,6 +182,24 @@ async function initSchema() {
       )`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_events_name_time ON growth_engine_events (name, created_at)`);
     await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_costs (
+        id TEXT PRIMARY KEY,
+        account_id TEXT,
+        job_id TEXT,
+        report_id TEXT,
+        feature TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        provider TEXT,
+        model TEXT,
+        label TEXT,
+        quantity DOUBLE PRECISION NOT NULL DEFAULT 0,
+        detail TEXT,
+        cents DOUBLE PRECISION NOT NULL DEFAULT 0,
+        created_at BIGINT NOT NULL
+      )`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_costs_time ON growth_engine_costs (created_at)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_costs_account ON growth_engine_costs (account_id)`);
+    await client.query(`
       CREATE TABLE IF NOT EXISTS growth_engine_plan_context (
         id TEXT PRIMARY KEY,
         account_id TEXT NOT NULL,
@@ -625,6 +643,26 @@ async function paidRetention() {
   return { cohort: cohort.length, retained, rate: cohort.length ? retained / cohort.length : null };
 }
 
+
+// ===================== COSTS =====================
+async function insertCost(c) {
+  await q(`INSERT INTO growth_engine_costs (id, account_id, job_id, report_id, feature, kind, provider, model, label, quantity, detail, cents, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+    ["c_" + uid(), c.accountId, c.jobId, c.reportId, c.feature, c.kind, c.provider || null, c.model || null, c.label || null, Number(c.quantity) || 0, c.detail ? JSON.stringify(c.detail) : null, Number(c.cents) || 0, Date.now()]);
+}
+async function attachReportToCosts(jobId, reportId) { await q(`UPDATE growth_engine_costs SET report_id = $1 WHERE job_id = $2 AND report_id IS NULL`, [reportId, jobId]); }
+async function adminCosts(sinceTs, limit = 50) {
+  const by = async (col) => (await q(`SELECT ${col} AS k, SUM(cents) AS cents, COUNT(*) AS n, SUM(quantity) AS qty FROM growth_engine_costs WHERE created_at >= $1 GROUP BY ${col} ORDER BY cents DESC`, [sinceTs])).rows.map((r) => ({ key: r.k, cents: Number(r.cents), n: Number(r.n), quantity: Number(r.qty) }));
+  const total = Number((await q(`SELECT COALESCE(SUM(cents), 0) AS c FROM growth_engine_costs WHERE created_at >= $1`, [sinceTs])).rows[0].c);
+  const perReport = (await q(`SELECT AVG(c) AS avg FROM (SELECT SUM(cents) AS c FROM growth_engine_costs WHERE created_at >= $1 AND report_id IS NOT NULL GROUP BY report_id) t`, [sinceTs])).rows[0];
+  const users = (await q(`SELECT c.account_id, u.email, SUM(c.cents) AS cents, COUNT(DISTINCT c.report_id) AS reports FROM growth_engine_costs c LEFT JOIN users u ON u.user_id = c.account_id WHERE c.created_at >= $1 AND c.account_id IS NOT NULL GROUP BY c.account_id, u.email ORDER BY cents DESC LIMIT $2`, [sinceTs, limit])).rows;
+  let revenue = [];
+  try { revenue = (await q(`SELECT account_id, SUM((props::json->>'amount_cents')::numeric) AS cents FROM growth_engine_events WHERE name IN ('subscribe','unlock') AND account_id IS NOT NULL AND props IS NOT NULL GROUP BY account_id`)).rows; }
+  catch (e) { console.warn("[Costs] revenue query failed:", e.message); }
+  const rev = Object.fromEntries(revenue.map((r) => [r.account_id, Number(r.cents) || 0]));
+  return { total_cents: total, avg_cents_per_report: Number(perReport?.avg || 0), by_kind: await by("kind"), by_provider: await by("provider"), by_feature: await by("feature"), by_model: await by("model"),
+    users: users.map((u) => ({ account_id: u.account_id, email: u.email, cost_cents: Number(u.cents), reports: Number(u.reports), revenue_cents: rev[u.account_id] || 0 })) };
+}
+
 // ===================== CATEGORY BASELINES =====================
 
 async function listBaselines() {
@@ -723,6 +761,7 @@ module.exports = {
   adminFailedJobs,
   adminFindAccount,
   insertEvent, eventFunnel, paidRetention,
+  insertCost, adminCosts, attachReportToCosts,
   createPromo, getPromo, listPromos, setPromoActive, hasRedeemed, redeemPromo, listRedemptions,
   setCancelAt,
   setBillingPeriod,

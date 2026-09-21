@@ -224,6 +224,28 @@ function initSchema() {
   `);
   db.run(`CREATE INDEX IF NOT EXISTS idx_events_name_time ON growth_engine_events (name, created_at)`);
 
+
+  // Costs (spec 1.2): one row per scrape or LLM call, attributed to account/job/report
+  db.run(`
+    CREATE TABLE IF NOT EXISTS growth_engine_costs (
+      id TEXT PRIMARY KEY,
+      account_id TEXT,
+      job_id TEXT,
+      report_id TEXT,
+      feature TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      provider TEXT,
+      model TEXT,
+      label TEXT,
+      quantity REAL NOT NULL DEFAULT 0,
+      detail TEXT,
+      cents REAL NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    )
+  `);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_costs_time ON growth_engine_costs (created_at)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_costs_account ON growth_engine_costs (account_id)`);
+
   // Tier history table: audit log of tier changes
   db.run(`
     CREATE TABLE IF NOT EXISTS tier_history (
@@ -860,6 +882,35 @@ async function paidRetention() {
   return { cohort: cohort.length, retained, rate: cohort.length ? retained / cohort.length : null };
 }
 
+
+// ===================== COSTS =====================
+async function insertCost(c) {
+  if (!db) throw new Error("Database not initialized");
+  db.run(`INSERT INTO growth_engine_costs (id, account_id, job_id, report_id, feature, kind, provider, model, label, quantity, detail, cents, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ["c_" + uid(), c.accountId, c.jobId, c.reportId, c.feature, c.kind, c.provider || null, c.model || null, c.label || null, Number(c.quantity) || 0, c.detail ? JSON.stringify(c.detail) : null, Number(c.cents) || 0, Date.now()]);
+  saveDb();
+}
+// Cost rows are written before the report exists; stamp them once it does.
+async function attachReportToCosts(jobId, reportId) {
+  if (!db) throw new Error("Database not initialized");
+  db.run(`UPDATE growth_engine_costs SET report_id = ? WHERE job_id = ? AND report_id IS NULL`, [reportId, jobId]);
+  saveDb();
+}
+// Totals by kind/provider/feature since a time, plus per-account cost next to
+// revenue (mock revenue = subscribe/unlock events' amount_cents; real Stripe
+// later replaces this with invoices).
+async function adminCosts(sinceTs, limit = 50) {
+  if (!db) throw new Error("Database not initialized");
+  const by = (col) => rowsOf(`SELECT ${col} AS k, SUM(cents) AS cents, COUNT(*) AS n, SUM(quantity) AS qty FROM growth_engine_costs WHERE created_at >= ? GROUP BY ${col} ORDER BY cents DESC`, [sinceTs]).map((r) => ({ key: r.k, cents: Number(r.cents), n: Number(r.n), quantity: Number(r.qty) }));
+  const total = Number(one(`SELECT SUM(cents) AS c FROM growth_engine_costs WHERE created_at >= ?`, [sinceTs]).c || 0);
+  const perReport = one(`SELECT AVG(c) AS avg FROM (SELECT SUM(cents) AS c FROM growth_engine_costs WHERE created_at >= ? AND report_id IS NOT NULL GROUP BY report_id)`, [sinceTs]);
+  const users = rowsOf(`SELECT c.account_id, u.email, SUM(c.cents) AS cents, COUNT(DISTINCT c.report_id) AS reports FROM growth_engine_costs c LEFT JOIN users u ON u.user_id = c.account_id WHERE c.created_at >= ? AND c.account_id IS NOT NULL GROUP BY c.account_id ORDER BY cents DESC LIMIT ?`, [sinceTs, limit]);
+  const revenue = rowsOf(`SELECT account_id, SUM(CAST(json_extract(props, '$.amount_cents') AS REAL)) AS cents FROM growth_engine_events WHERE name IN ('subscribe','unlock') AND account_id IS NOT NULL GROUP BY account_id`);
+  const rev = Object.fromEntries(revenue.map((r) => [r.account_id, Number(r.cents) || 0]));
+  return { total_cents: total, avg_cents_per_report: Number(perReport.avg || 0), by_kind: by("kind"), by_provider: by("provider"), by_feature: by("feature"), by_model: by("model"),
+    users: users.map((u) => ({ account_id: u.account_id, email: u.email, cost_cents: Number(u.cents), reports: Number(u.reports), revenue_cents: rev[u.account_id] || 0 })) };
+}
+
 // ===================== ENTITLEMENT OPERATIONS =====================
 
 async function getOrCreateEntitlement(accountId) {
@@ -1139,6 +1190,7 @@ module.exports = {
   adminFailedJobs,
   adminFindAccount,
   insertEvent, eventFunnel, paidRetention,
+  insertCost, adminCosts, attachReportToCosts,
   createPromo, getPromo, listPromos, setPromoActive, hasRedeemed, redeemPromo, listRedemptions,
   setCancelAt,
   setBillingPeriod,

@@ -1146,8 +1146,8 @@
     if (!token()) { sset('sc_next', '#/admin'); go('#/signin'); return; }
     $view.innerHTML = h`<div class="center-msg">Loading…</div>`;
     let ov, reports, failed;
-    let funnel = null;
-    try { [ov, reports, failed, funnel] = await Promise.all([api('/admin/overview'), api('/admin/reports?limit=50'), api('/admin/failed-jobs?limit=30'), api('/admin/funnel?days=30').catch(() => null)]); }
+    let funnel = null, costs = null;
+    try { [ov, reports, failed, funnel, costs] = await Promise.all([api('/admin/overview'), api('/admin/reports?limit=50'), api('/admin/failed-jobs?limit=30'), api('/admin/funnel?days=30').catch(() => null), api('/admin/costs?days=30').catch(() => null)]); }
     catch (e) {
       if (e.status === 401) return;
       if (e.status === 403 || e.status === 404) { lset('sc_admin', false); $view.innerHTML = h`<div class="center-msg"><h2>This account isn't an admin.</h2>Add your email to <code>ADMIN_EMAILS</code> on the server, then sign in again.</div>`; return; }
@@ -1189,6 +1189,16 @@
         <div class="funnel">${raw(funnel.steps.map(st => h`<div class="fstep"><div class="n">${st.actors}</div><div class="l">${st.name.replace(/_/g, ' ')}</div>${st.from_previous != null ? raw(h`<div class="c">${Math.round(st.from_previous * 100)}% of previous</div>`) : raw('<div class="c">&nbsp;</div>')}</div>`).join(''))}</div>
         <div class="fine">${Object.entries(funnel.other || {}).filter(([, v]) => v.actors).map(([k, v]) => `${k.replace(/_/g, ' ')} ${v.actors}`).join(' · ') || 'No other events yet.'}${funnel.retention_month_two?.cohort ? ` · Month-two retention: ${funnel.retention_month_two.retained} of ${funnel.retention_month_two.cohort} still paying (${Math.round(funnel.retention_month_two.rate * 100)}%)` : ' · Month-two retention: no cohort yet (needs subscribers 30+ days old)'}</div>
         ${Object.keys(funnel.by_ref || {}).length ? raw(h`<div class="alist" style="margin-top:10px">${raw(Object.entries(funnel.by_ref).map(([ref, v]) => h`<div class="arow promo"><span class="h">ref ${ref}</span><span class="t">${v.evaluate_started || 0} scored · ${v.signup || 0} signed up · ${v.subscribe || 0} paid</span><span class="e"></span><span class="n"></span></div>`).join(''))}</div>`) : ''}
+      </section>`) : ''}
+
+      ${costs ? raw(h`<section class="card"><h2>Costs <span class="fine">last ${costs.days} days · measured, not estimated</span></h2>
+        <div class="stats">
+          ${raw(stat(money(costs.total_cents / 100), 'total spend', `${costs.by_kind.map(k => `${k.key} ${money(k.cents / 100)}`).join(' · ') || '—'}`))}
+          ${raw(stat(money(costs.avg_cents_per_report / 100), 'avg per report', 'scrape + every LLM call'))}
+          ${raw(costs.by_feature.slice(0, 4).map(f => stat(money(f.cents / 100), f.key.replace(/_/g, ' '), `${f.n} calls`)).join(''))}
+        </div>
+        <div class="fine">By model: ${costs.by_model.filter(m => m.key).map(m => `${m.key} ${money(m.cents / 100)} (${fmtN(m.quantity)} ${/apify/.test(m.key) ? 'units' : 'tokens'})`).join(' · ') || 'nothing yet'}</div>
+        ${costs.users.length ? raw(h`<div class="alist" style="margin-top:10px"><div class="arow head"><span></span><span class="h">account</span><span class="t">cost · reports</span><span class="e">revenue</span><span class="n">margin</span></div>${raw(costs.users.slice(0, 15).map(u => { const m = u.revenue_cents - u.cost_cents; return h`<div class="arow"><span></span><span class="h">${u.email || u.account_id}</span><span class="t">${money(u.cost_cents / 100)} · ${u.reports} report${u.reports === 1 ? '' : 's'}</span><span class="e">${money(u.revenue_cents / 100)}</span><span class="n ${m < 0 ? 'neg' : ''}">${m < 0 ? '−' : ''}${money(Math.abs(m) / 100)}</span></div>`; }).join(''))}</div>`) : ''}
       </section>`) : ''}
 
       <section class="card"><h2>Look up an account</h2>

@@ -676,3 +676,6 @@ p { margin: 0; }
 .fstep .n { font-family: var(--display); font-size: 24px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
 .fstep .l { font-size: 12px; color: var(--body); text-transform: capitalize; }
 .fstep .c { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.arow.head { background: transparent; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 2px 12px; }
+.arow.head .h, .arow.head .n { font: inherit; color: inherit; }
+.arow .n.neg { color: var(--c1t); }

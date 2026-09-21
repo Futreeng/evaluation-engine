@@ -9,6 +9,7 @@ const { signup, login, verifyJWT, requestPasswordReset, resetPassword } = requir
 const mailer = require("../mailer");
 const promos = require("../growth_engine_promos");
 const events = require("../growth_engine_events");
+const costs = require("../growth_engine_costs");
 const { TIER_PRICING, ONE_TIME_PRICING } = require("../growth_engine_billing");
 
 // Resolve a promo code for a product into a quote, or an error string.
@@ -487,9 +488,9 @@ router.post("/reports/:reportId/competitors", authMiddleware, async (req, res) =
     const cused = await geDb.getUsage(req.user.id, "competitor");
     if (cused + handles.length > climit) return res.status(429).json({ error: `That's ${cused + handles.length} competitor pulls today; the limit is ${climit}. Try again tomorrow.`, code: "COMPETITOR_LIMIT_REACHED", status: 429 });
     await geDb.bumpUsage(req.user.id, "competitor", handles.length);
-    const comparison = await compareCompetitors({
+    const comparison = await costs.run({ accountId: req.user.id, reportId: report.reportId, feature: "competitors" }, () => compareCompetitors({
       handle: report.business.handle, platform: report.business.platform, category: report.business.category, handles,
-    });
+    }));
     // The owner's row should match the report they're looking at, not a re-pull.
     const own = report.reportBody?.scores;
     if (own && Number.isFinite(own.overall)) {
@@ -812,6 +813,14 @@ router.post("/admin/baselines/import", requireAdmin, async (req, res) => {
 });
 // Funnel: distinct actors per step and step-to-step conversion, by-ref
 // attribution, month-two paid retention.
+// Costs: totals by kind/provider/feature/model, average per report, and
+// cost vs revenue per user.
+router.get("/admin/costs", requireAdmin, async (req, res) => {
+  try {
+    const days = Math.min(365, Math.max(1, Number(req.query.days) || 30));
+    res.json({ days, ...(await geDb.adminCosts(Date.now() - days * 86400000, Math.min(200, Number(req.query.limit) || 50))), rates: costs.RATES });
+  } catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
+});
 router.get("/admin/funnel", requireAdmin, async (req, res) => {
   try {
     const days = Math.min(365, Math.max(1, Number(req.query.days) || 30));
