@@ -171,6 +171,21 @@ function initSchema() {
   try { db.run(`ALTER TABLE users ADD COLUMN is_business INTEGER DEFAULT 0`); } catch { /* exists */ }
   try { db.run(`ALTER TABLE users ADD COLUMN niche TEXT`); } catch { /* exists */ }
   try { db.run(`ALTER TABLE users ADD COLUMN price_variant TEXT`); } catch { /* exists */ }
+  try { db.run(`ALTER TABLE users ADD COLUMN email_prefs TEXT`); } catch { /* exists */ }
+  db.run(`
+    CREATE TABLE IF NOT EXISTS growth_engine_email_log (
+      id TEXT PRIMARY KEY,
+      user_id TEXT,
+      to_email TEXT NOT NULL,
+      type TEXT NOT NULL,
+      subject TEXT,
+      status TEXT NOT NULL,
+      provider TEXT,
+      provider_id TEXT,
+      error TEXT,
+      created_at INTEGER NOT NULL
+    )
+  `);
 
   // Password reset tokens: sha256 of the emailed token, single use, 1h.
   db.run(`
@@ -1192,6 +1207,7 @@ async function getUserByEmail(email) {
     emailPaused: columns.includes("email_paused") ? !!row[columns.indexOf("email_paused")] : false,
     isBusiness: columns.includes("is_business") ? !!row[columns.indexOf("is_business")] : false,
     priceVariant: columns.includes("price_variant") ? row[columns.indexOf("price_variant")] || null : null,
+    emailPrefs: columns.includes("email_prefs") ? (() => { try { return JSON.parse(row[columns.indexOf("email_prefs")] || "null") || null; } catch { return null; } })() : null,
     niche: columns.includes("niche") ? row[columns.indexOf("niche")] || null : null,
   };
 }
@@ -1221,6 +1237,7 @@ async function getUserById(userId) {
     emailPaused: columns.includes("email_paused") ? !!row[columns.indexOf("email_paused")] : false,
     isBusiness: columns.includes("is_business") ? !!row[columns.indexOf("is_business")] : false,
     priceVariant: columns.includes("price_variant") ? row[columns.indexOf("price_variant")] || null : null,
+    emailPrefs: columns.includes("email_prefs") ? (() => { try { return JSON.parse(row[columns.indexOf("email_prefs")] || "null") || null; } catch { return null; } })() : null,
     niche: columns.includes("niche") ? row[columns.indexOf("niche")] || null : null,
   };
 }
@@ -1240,6 +1257,22 @@ async function listBusinessAccounts() {
   const reports = rowsOf(`SELECT r.account_id, r.business_handle AS handle, r.business_platform AS platform, r.business_category AS category, r.generated_at, r.report_body, u.email AS user_email FROM growth_engine_reports r LEFT JOIN users u ON u.user_id = r.account_id WHERE r.report_body LIKE '%"is_business_account":true%' ORDER BY r.generated_at DESC`)
     .map((r) => { let b = {}; try { b = JSON.parse(r.report_body); } catch { /* skip */ } return { account_id: r.account_id, email: b.email || r.user_email || null, handle: r.handle, platform: r.platform, category: r.category, overall: b.scores?.overall ?? null, generated_at: Number(r.generated_at) }; });
   return { users: users.map((u) => ({ ...u, created_at: Number(u.created_at) })), reports };
+}
+async function setEmailPrefs(userId, prefs) {
+  if (!db) throw new Error("Database not initialized");
+  db.run(`UPDATE users SET email_prefs = ?, updated_at = ? WHERE user_id = ?`, [JSON.stringify(prefs || {}), Date.now(), userId]);
+  saveDb();
+  return getUserById(userId);
+}
+async function insertEmailLog(e) {
+  if (!db) throw new Error("Database not initialized");
+  db.run(`INSERT INTO growth_engine_email_log (id, user_id, to_email, type, subject, status, provider, provider_id, error, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ["em_" + uid(), e.userId || null, e.to, e.type, (e.subject || "").slice(0, 200), e.status, e.provider || null, e.providerId || null, e.error ? String(e.error).slice(0, 300) : null, Date.now()]);
+  saveDb();
+}
+async function listEmailLog(limit = 100) {
+  if (!db) throw new Error("Database not initialized");
+  return rowsOf(`SELECT * FROM growth_engine_email_log ORDER BY created_at DESC LIMIT ?`, [limit]).map((r) => ({ ...r, created_at: Number(r.created_at) }));
 }
 async function setEmailPaused(userId, paused) {
   if (!db) throw new Error("Database not initialized");
@@ -1324,6 +1357,9 @@ module.exports = {
   updateUserPassword,
   setEmailPaused,
   isEmailPaused,
+  setEmailPrefs,
+  insertEmailLog,
+  listEmailLog,
   setUserProfile,
   listBusinessAccounts,
 };

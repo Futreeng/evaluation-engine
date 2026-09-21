@@ -714,3 +714,13 @@ p { margin: 0; }
 .npost .txt { margin-top: 4px; font-size: 14px; line-height: 1.55; color: var(--ink); white-space: pre-wrap; }
 .npost .script { font-family: inherit; }
 .npost .w { margin-top: 10px; font-size: 13px; color: var(--muted); }
+
+/* ---- email preferences ---- */
+.emailprefs { flex: 1 1 100%; margin-top: 4px; padding-top: 12px; border-top: 1px dashed var(--line2); }
+.emailprefs .n { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; margin-bottom: 6px; }
+.pausetog.master { margin: 0; padding: 0; border: 0; }
+.prefgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; margin-top: 10px; }
+.prefgrid.off { opacity: .45; }
+.pref { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; background: var(--ground); border-radius: 12px; font-size: 14px; cursor: pointer; }
+.pref input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--act); }
+.pref span { display: flex; flex-direction: column; } .pref small { font-size: 12px; color: var(--muted); margin-top: 2px; }

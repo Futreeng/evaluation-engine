@@ -129,6 +129,13 @@ const assert = require("assert");
   const mo = await db.moveOutcomeSummary({ category: "travel" });
   assert.equal(mo.length, 2); assert.equal(mo[0].avg_delta, 8); assert.equal(mo[0].avg_together, 2);
 
+  // email prefs + log (1.6)
+  const pu = await db.createUser("prefs@example.com", "hash", null);
+  await db.setEmailPrefs(pu.userId, { weekly_score: false, monday_move: true, milestones: true, product_news: false });
+  assert.equal((await db.getUserById(pu.userId)).emailPrefs.weekly_score, false);
+  await db.insertEmailLog({ userId: "acct_a", to: "a@example.com", type: "weekly_score", subject: "s", status: "sent", provider: "log", providerId: "x" });
+  assert.equal((await db.listEmailLog(10)).length, 1);
+
   console.log("postgres module: all assertions passed");
   process.exit(0);
 })().catch((e) => { console.error("FAILED:", e.message); process.exit(1); });

@@ -224,6 +224,7 @@ router.get("/account/subscription-status", authMiddleware, async (req, res) => {
       cancel_at: ent.cancelAt || null,
       status: ent.currentTier === "social_snapshot" ? "free" : ent.cancelAt ? "cancel_pending" : "active",
       email_paused: !!(await geDb.getUserById(req.user.id))?.emailPaused,
+      email_prefs: await require("../growth_engine_email").prefsFor(req.user.id),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -242,6 +243,36 @@ router.get("/email/pause", async (req, res) => {
 <h1 style="margin:0;font-size:26px">${ok ? "Paused." : "That link didn't work."}</h1>
 <p style="font-size:16px;line-height:1.6;color:#5B4C3B">${ok ? "Check-ins and score updates are off. Your plan keeps running and your reports stay. Resume any time from your reports page." : "It may have been altered. Sign in and use the plan card on your reports page instead."}</p>
 <a href="${app}/#/reports" style="display:inline-block;margin-top:8px;padding:12px 18px;border-radius:12px;background:#D2603A;color:#FFF6E9;text-decoration:none;font-weight:700">Your reports</a></div>`);
+});
+// Email preferences (spec 1.6): per-type toggles + the master pause.
+const emailSvc = require("../growth_engine_email");
+router.get("/account/email-prefs", authMiddleware, async (req, res) => {
+  try { res.json({ prefs: await emailSvc.prefsFor(req.user.id), types: emailSvc.PREF_TYPES }); } catch (err) { sendError(res, 500, "PREFS_ERROR", err.message); }
+});
+router.put("/account/email-prefs", authMiddleware, async (req, res) => {
+  try {
+    const cur = await emailSvc.prefsFor(req.user.id);
+    const next = {}; for (const t of emailSvc.PREF_TYPES) next[t] = req.body?.[t] === undefined ? cur[t] !== false : !!req.body[t];
+    await geDb.setEmailPrefs(req.user.id, next);
+    if (req.body?.paused !== undefined) await geDb.setEmailPaused(req.user.id, !!req.body.paused);
+    res.json({ prefs: await emailSvc.prefsFor(req.user.id), types: emailSvc.PREF_TYPES });
+  } catch (err) { sendError(res, 500, "PREFS_ERROR", err.message); }
+});
+// One-click unsubscribe from an email footer: signed, no login. t=all pauses everything but receipts.
+router.get("/email/unsubscribe", async (req, res) => {
+  const u = String(req.query.u || ""), t = String(req.query.t || "all"), s = String(req.query.s || "");
+  const ok = emailSvc.verifyUnsub(u, t, s) && (t === "all" || emailSvc.PREF_TYPES.includes(t));
+  if (ok) { try { if (t === "all") await geDb.setEmailPaused(u, true); else { const cur = await emailSvc.prefsFor(u); const next = {}; for (const k of emailSvc.PREF_TYPES) next[k] = cur[k] !== false; next[t] = false; await geDb.setEmailPrefs(u, next); } } catch { /* fall through */ } }
+  const app = (process.env.APP_URL || "").replace(/\/$/, "") || "";
+  const label = { weekly_score: "weekly score emails", monday_move: "plan check-ins and Monday moves", milestones: "milestone emails", product_news: "product news" }[t] || "all emails except receipts";
+  res.type("html").send(`<!DOCTYPE html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Scalecraft</title>
+<body style="margin:0;background:#FFF6E9;font-family:Helvetica,Arial,sans-serif;color:#2A2118"><div style="max-width:520px;margin:48px auto;padding:28px;background:#FFFDF8;border:1px solid #EADFCB;border-radius:24px">
+<h1 style="margin:0;font-size:26px">${ok ? "Unsubscribed." : "That link didn't work."}</h1>
+<p style="font-size:16px;line-height:1.6;color:#5B4C3B">${ok ? `You won't get ${label} any more. Your plan keeps running and your reports stay. Change this any time under Email on your reports page.` : "It may have been altered. Sign in and change your email preferences on your reports page instead."}</p>
+<a href="${app}/#/reports" style="display:inline-block;margin-top:8px;padding:12px 18px;border-radius:12px;background:#D2603A;color:#FFF6E9;text-decoration:none;font-weight:700">Your reports</a></div>`);
+});
+router.get("/admin/emails", requireAdmin, async (req, res) => {
+  try { res.json({ provider: emailSvc.providerName(), emails: await geDb.listEmailLog(Math.min(500, Number(req.query.limit) || 100)) }); } catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
 });
 router.post("/account/email/pause", authMiddleware, async (req, res) => {
   try { const u = await geDb.setEmailPaused(req.user.id, !!req.body.paused); res.json({ email_paused: !!u.emailPaused }); }

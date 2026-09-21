@@ -1082,6 +1082,14 @@
     $view.innerHTML = h`<div class="center-msg">Loading your reports…</div>`;
     let list, subn = null;
     try { [list, subn] = await Promise.all([api('/account/reports'), api('/account/subscription-status').catch(() => null)]); } catch (e) { if (e.status === 401) return; $view.innerHTML = h`<div class="center-msg"><h2>Couldn’t load reports.</h2>${e.message}</div>`; return; }
+    // Email preferences (spec 1.6): four toggles + pause all. Receipts, report-ready and password emails always send.
+    const PREF_LABELS = [['weekly_score', 'Weekly score', 'Your re-score and what changed'], ['monday_move', 'Plan check-ins and Monday move', 'Day-30/60 check-ins, the week\'s move'], ['milestones', 'Milestones', 'Rank-ups and personal records'], ['product_news', 'Product news', 'What\'s new, occasionally']];
+    const emailPrefsHTML = prefs => {
+      const p = prefs || {};
+      return h`<div class="emailprefs"><div class="n">Email</div>
+        <label class="pausetog master"><input type="checkbox" data-pref="paused" ${p.paused ? 'checked' : ''}> Pause everything except receipts, report-ready and password emails</label>
+        <div class="prefgrid ${p.paused ? 'off' : ''}">${raw(PREF_LABELS.map(([k, t, d]) => h`<label class="pref"><input type="checkbox" data-pref="${k}" ${p[k] !== false ? 'checked' : ''} ${p.paused ? 'disabled' : ''}><span><b>${t}</b><small>${d}</small></span></label>`).join(''))}</div></div>`;
+    };
     const planCard = () => {
       if (!subn) return '';
       const free = subn.status === 'free';
@@ -1089,7 +1097,7 @@
       return h`<div class="card plancard ${pending ? 'pending' : ''}"><div class="t"><div class="n">Your plan</div><h2>${subn.tier_name || 'Free Snapshot'}${free ? '' : raw(h` <span class="pr">· $${subn.monthly_price}/mo</span>`)}</h2>
         <p>${free ? 'One free score per account. The Growth Plan writes the whole 90 days and re-scores you weekly.' : pending ? `Cancelled. You keep everything until ${fmtDate(subn.cancel_at)}, then the weekly refresh stops. Your reports stay.` : subn.billing_period_end ? `Renews ${fmtDate(subn.billing_period_end)}. Cancel any time — you keep the plan to the end of the period and every report after.` : 'Cancel any time — you keep the plan to the end of the period and every report after.'}</p></div>
         <div class="acts">${free ? raw(h`<a class="btn" href="#/pricing">See the plan</a>`) : pending ? raw(h`<button type="button" class="btn green" data-action="resume-plan">Resume the plan</button>`) : raw(h`<button type="button" class="btn ghost" data-action="cancel-plan">Cancel plan</button>`)}</div>
-        ${free ? '' : raw(h`<label class="pausetog"><input type="checkbox" data-action="email-pause" ${subn.email_paused ? 'checked' : ''}> Pause check-in and score emails${subn.email_paused ? ' — paused' : ''}<span class="fine">Report-ready and password emails still send.</span></label>`)}</div>`;
+        ${raw(emailPrefsHTML(subn.email_prefs))}</div>`;
     };
     const reports = (list.reports || []).map(r => ({ id: r.reportId || r.report_id, tier: r.tier, at: r.generatedAt || r.generated_at, handle: r.business?.handle, platform: r.business?.platform, category: r.business?.category, overall: r.reportBody?.scores?.overall ?? null, known: r.reportBody?.scores?.niche_known !== false })).sort((a, b) => b.at - a.at);
     const byHandle = {}; for (const r of reports) (byHandle[`${r.platform}:${r.handle}`] ||= []).push(r);
@@ -1112,11 +1120,11 @@
     </div></div>${raw(footer())}`;
     $view.querySelector('[data-action=delete-account]').addEventListener('click', () => openDeleteDialog(reports.length));
     $view.querySelector('[data-action=cancel-plan]')?.addEventListener('click', () => openCancelDialog(subn));
-    $view.querySelector('[data-action=email-pause]')?.addEventListener('change', async e => {
-      const on = e.currentTarget.checked;
-      try { await api('/account/email/pause', { method: 'POST', body: JSON.stringify({ paused: on }) }); toast(on ? 'Paused. Your plan keeps running.' : 'Emails back on.'); }
+    $view.querySelectorAll('[data-pref]').forEach(cb => cb.addEventListener('change', async e => {
+      const k = e.currentTarget.dataset.pref, on = e.currentTarget.checked;
+      try { const r = await api('/account/email-prefs', { method: 'PUT', body: JSON.stringify({ [k]: on }) }); subn.email_prefs = r.prefs; toast(k === 'paused' ? (on ? 'Paused. Your plan keeps running.' : 'Emails back on.') : 'Saved.'); if (k === 'paused') viewReports(); }
       catch (e2) { if (e2.status === 401) return; toast(e2.message); e.currentTarget.checked = !on; }
-    });
+    }));
     $view.querySelector('[data-action=resume-plan]')?.addEventListener('click', async e => {
       e.currentTarget.disabled = true;
       try { await api('/billing/resume', { method: 'POST', body: '{}' }); toast('Welcome back. The plan carries on.'); viewReports(); }

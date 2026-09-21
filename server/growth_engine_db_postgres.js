@@ -140,6 +140,12 @@ async function initSchema() {
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_business BOOLEAN DEFAULT FALSE`);
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS niche TEXT`);
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS price_variant TEXT`);
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_prefs TEXT`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_email_log (
+        id TEXT PRIMARY KEY, user_id TEXT, to_email TEXT NOT NULL, type TEXT NOT NULL, subject TEXT, status TEXT NOT NULL,
+        provider TEXT, provider_id TEXT, error TEXT, created_at BIGINT NOT NULL
+      )`);
     await client.query(`
       CREATE TABLE IF NOT EXISTS growth_engine_password_resets (
         token_hash TEXT PRIMARY KEY,
@@ -263,7 +269,7 @@ async function createUser(email, passwordHash, companyName = null) {
 
 function userRow(row) {
   return row
-    ? { userId: row.user_id, email: row.email, passwordHash: row.password_hash, companyName: row.company_name, createdAt: Number(row.created_at), updatedAt: Number(row.updated_at), emailPaused: !!row.email_paused, isBusiness: !!row.is_business, niche: row.niche || null, priceVariant: row.price_variant || null }
+    ? { userId: row.user_id, email: row.email, passwordHash: row.password_hash, companyName: row.company_name, createdAt: Number(row.created_at), updatedAt: Number(row.updated_at), emailPaused: !!row.email_paused, isBusiness: !!row.is_business, niche: row.niche || null, priceVariant: row.price_variant || null, emailPrefs: (() => { try { return row.email_prefs ? (typeof row.email_prefs === "string" ? JSON.parse(row.email_prefs) : row.email_prefs) : null; } catch { return null; } })() }
     : null;
 }
 async function getUserByEmail(email) {
@@ -284,6 +290,12 @@ async function listBusinessAccounts() {
     .map((r) => { const b = parseJson(r.report_body) || {}; return { account_id: r.account_id, email: b.email || r.user_email || null, handle: r.handle, platform: r.platform, category: r.category, overall: b.scores?.overall ?? null, generated_at: Number(r.generated_at) }; });
   return { users, reports };
 }
+async function setEmailPrefs(userId, prefs) { await q(`UPDATE users SET email_prefs = $1, updated_at = $2 WHERE user_id = $3`, [JSON.stringify(prefs || {}), Date.now(), userId]); return getUserById(userId); }
+async function insertEmailLog(e) {
+  await q(`INSERT INTO growth_engine_email_log (id, user_id, to_email, type, subject, status, provider, provider_id, error, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+    ["em_" + uid(), e.userId || null, e.to, e.type, (e.subject || "").slice(0, 200), e.status, e.provider || null, e.providerId || null, e.error ? String(e.error).slice(0, 300) : null, Date.now()]);
+}
+async function listEmailLog(limit = 100) { return (await q(`SELECT * FROM growth_engine_email_log ORDER BY created_at DESC LIMIT $1`, [limit])).rows.map((r) => ({ ...r, created_at: Number(r.created_at) })); }
 async function setEmailPaused(userId, paused) {
   await q(`UPDATE users SET email_paused = $1, updated_at = $2 WHERE user_id = $3`, [!!paused, Date.now(), userId]);
   return getUserById(userId);
@@ -789,6 +801,9 @@ module.exports = {
   updateUserPassword,
   setEmailPaused,
   isEmailPaused,
+  setEmailPrefs,
+  insertEmailLog,
+  listEmailLog,
   setUserProfile,
   listBusinessAccounts,
   // Jobs
