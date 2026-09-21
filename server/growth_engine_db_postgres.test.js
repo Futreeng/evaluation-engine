@@ -90,6 +90,13 @@ const assert = require("assert");
   await db.createPasswordReset("u1", "hash2", Date.now() - 1);
   assert.equal(await db.consumePasswordReset("hash2"), null);
 
+  // admin aggregates run and have the expected shape
+  const ov = await db.adminOverview();
+  assert.ok(ov.today && ov.people && typeof ov.people.users === "number");
+  assert.ok(Array.isArray(await db.adminRecentReports(5)));
+  assert.ok(Array.isArray(await db.adminFailedJobs(5)));
+  assert.equal(await db.adminFindAccount("nobody@example.test"), null);
+
   console.log("postgres module: all assertions passed");
   process.exit(0);
 })().catch((e) => { console.error("FAILED:", e.message); process.exit(1); });

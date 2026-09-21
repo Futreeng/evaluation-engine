@@ -497,6 +497,49 @@ async function listPaidReportsBetween(fromTs, toTs) {
   return r.rows.map(reportRow);
 }
 
+
+// ===================== ADMIN =====================
+async function adminOverview() {
+  const now = Date.now(), day = 86400000, today = dayKey();
+  const usage = (await q(`SELECT kind, SUM(count) AS n FROM growth_engine_usage WHERE day = $1 GROUP BY kind`, [today])).rows;
+  const u = Object.fromEntries(usage.map((r) => [r.kind, Number(r.n)]));
+  const tiers = (await q(`SELECT current_tier, COUNT(*) AS n, SUM(CASE WHEN cancel_at IS NOT NULL THEN 1 ELSE 0 END) AS pending FROM entitlements GROUP BY current_tier`)).rows;
+  const s7 = Number((await q(`SELECT COUNT(*) AS n FROM users WHERE created_at > $1`, [now - 7 * day])).rows[0].n);
+  const s30 = Number((await q(`SELECT COUNT(*) AS n FROM users WHERE created_at > $1`, [now - 30 * day])).rows[0].n);
+  const reports = (await q(`SELECT tier, COUNT(*) AS n FROM growth_engine_reports WHERE generated_at > $1 GROUP BY tier`, [now - day])).rows;
+  const oneTime = Number((await q(`SELECT COUNT(*) AS n FROM growth_engine_reports WHERE report_body LIKE '%"one_time_unlock":{%'`)).rows[0].n);
+  const jobs = (await q(`SELECT status, COUNT(*) AS n FROM growth_engine_jobs WHERE created_at > $1 GROUP BY status`, [now - day])).rows;
+  const waitlist = (await q(`SELECT platform, COUNT(*) AS n FROM growth_engine_waitlist GROUP BY platform ORDER BY n DESC`)).rows;
+  const users = Number((await q(`SELECT COUNT(*) AS n FROM users`)).rows[0].n);
+  return {
+    today: { free_scores: u.free_eval || 0, paid_runs: u.eval || 0, competitor_pulls: u.competitor || 0, jobs: Object.fromEntries(jobs.map((j) => [j.status, Number(j.n)])), reports: Object.fromEntries(reports.map((r) => [r.tier, Number(r.n)])) },
+    people: { users, signups_7d: s7, signups_30d: s30, tiers: tiers.map((t) => ({ tier: t.current_tier, n: Number(t.n), cancel_pending: Number(t.pending) })), one_time_buyers: oneTime, waitlist: waitlist.map((w) => ({ platform: w.platform, n: Number(w.n) })) },
+  };
+}
+async function adminRecentReports(limit = 50) {
+  const r = await q(`SELECT report_id, account_id, tier, handle, platform, category, generated_at, report_body FROM growth_engine_reports ORDER BY generated_at DESC NULLS LAST LIMIT $1`, [limit]);
+  return r.rows.map((x) => { const b = parseJson(x.report_body) || {}; return { report_id: x.report_id, account_id: x.account_id, tier: x.tier, handle: x.handle, platform: x.platform, category: x.category, generated_at: Number(x.generated_at), overall: b.scores?.overall ?? null, email: b.email || null, one_time: !!b.one_time_unlock, partial: !!b.plan_incomplete }; });
+}
+async function adminFailedJobs(limit = 30) {
+  const r = await q(`SELECT job_id, account_id, tier, stage, error, input_params, created_at FROM growth_engine_jobs WHERE status = 'failed' ORDER BY created_at DESC LIMIT $1`, [limit]);
+  return r.rows.map((j) => { const p = parseJson(j.input_params) || {}; return { job_id: j.job_id, account_id: j.account_id, tier: j.tier, stage: j.stage, error: j.error, handle: p.handle, platform: p.platform, email: p.email || null, created_at: Number(j.created_at) }; });
+}
+async function adminFindAccount(query) {
+  const s = String(query || "").trim().toLowerCase().replace(/^@/, "");
+  if (!s) return null;
+  let user = await getUserByEmail(s);
+  if (!user) {
+    const r = await q(`SELECT account_id FROM growth_engine_reports WHERE lower(handle) = $1 AND account_id <> 'demo-account' ORDER BY generated_at DESC NULLS LAST LIMIT 1`, [s]);
+    if (r.rows[0]) user = await getUserById(r.rows[0].account_id);
+  }
+  if (!user) return null;
+  const ent = await getEffectiveEntitlement(user.userId);
+  const reports = (await listReportsByAccount(user.userId)).map((x) => ({ report_id: x.reportId, tier: x.tier, handle: x.business?.handle, platform: x.business?.platform, generated_at: x.generatedAt, overall: x.reportBody?.scores?.overall ?? null, moves_done: Object.keys(x.reportBody?.moves_done || {}).length, checkins: x.reportBody?.checkins || null, emails_sent: x.reportBody?.emails_sent || [], one_time: !!x.reportBody?.one_time_unlock }));
+  const ctx = (await q(`SELECT handle, platform, context, updated_at FROM growth_engine_plan_context WHERE account_id = $1`, [user.userId])).rows.map((c) => ({ handle: c.handle, platform: c.platform, ...(parseJson(c.context) || {}), updated_at: Number(c.updated_at) }));
+  const usage = (await q(`SELECT kind, count FROM growth_engine_usage WHERE account_id = $1 AND day = $2`, [user.userId, dayKey()])).rows;
+  return { user: { user_id: user.userId, email: user.email, created_at: user.createdAt, email_paused: !!user.emailPaused }, entitlement: { tier: ent.currentTier, cancel_at: ent.cancelAt || null, period_end: ent.billingPeriodEnd || null }, reports, plan_contexts: ctx, usage_today: Object.fromEntries(usage.map((x) => [x.kind, Number(x.count)])) };
+}
+
 // ===================== CATEGORY BASELINES =====================
 
 async function recordBaseline({ category, platform, handle, overall, dimensions }) {
@@ -586,6 +629,10 @@ module.exports = {
   getOrCreateEntitlement,
   getEntitlement,
   getEffectiveEntitlement,
+  adminOverview,
+  adminRecentReports,
+  adminFailedJobs,
+  adminFindAccount,
   setCancelAt,
   setBillingPeriod,
   createPasswordReset,

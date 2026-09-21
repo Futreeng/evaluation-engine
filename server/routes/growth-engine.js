@@ -138,6 +138,8 @@ router.post("/auth/login", authLimiter, validateAuthRequest, async (req, res) =>
 });
 
 // GET /auth/me
+const adminEmails = () => String(process.env.ADMIN_EMAILS || "").split(/[,\s]+/).map((e) => e.trim().toLowerCase()).filter(Boolean);
+const isAdminEmail = (email) => adminEmails().includes(String(email || "").toLowerCase());
 router.get("/auth/me", authMiddleware, async (req, res) => {
   try {
     const user = await geDb.getUserById(req.user.id);
@@ -147,6 +149,7 @@ router.get("/auth/me", authMiddleware, async (req, res) => {
       user_id: user.userId,
       email: user.email,
       company_name: user.companyName,
+      is_admin: isAdminEmail(user.email),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -678,10 +681,58 @@ router.post("/billing/webhook", async (req, res) => {
 });
 
 // Queue stats (admin endpoint)
-router.get("/admin/queue-stats", async (req, res) => {
+// Admin: a signed-in account whose email is in ADMIN_EMAILS, or the
+// ADMIN_TOKEN header for scripts. Neither configured → routes 404.
+async function requireAdmin(req, res, next) {
   const want = process.env.ADMIN_TOKEN;
   const got = req.get("x-admin-token") || req.query.token;
-  if (!want || got !== want) return sendError(res, want ? 401 : 404, want ? "UNAUTHORIZED" : "NOT_FOUND", want ? "Admin token required" : "Not found");
+  if (want && got === want) { req.admin = { via: "token" }; return next(); }
+  if (!adminEmails().length && !want) return sendError(res, 404, "NOT_FOUND", "Not found");
+  const token = req.headers.authorization?.split(" ")[1];
+  const user = token ? await verifyJWT(token) : null;
+  if (user && isAdminEmail(user.email)) { req.user = user; req.admin = { via: "email" }; return next(); }
+  return sendError(res, user ? 403 : 401, user ? "NOT_ADMIN" : "MISSING_TOKEN", user ? "This account is not an admin" : "Sign in as an admin");
+}
+router.get("/admin/overview", requireAdmin, async (req, res) => {
+  try { res.json({ ...(await geDb.adminOverview()), caps: { free_runs_per_day_global: Number(process.env.FREE_RUNS_PER_DAY_GLOBAL || 500), paid_runs_per_day: Number(process.env.PAID_RUNS_PER_DAY || 5), competitor_pulls_per_day: Number(process.env.COMPETITOR_PULLS_PER_DAY || 15) }, cost: { instagram: 0.003, tiktok: 0.06 }, queue: jobQueue.getStats(), outcomes: await geDb.getOutcomeSummary().catch(() => null), baselines: await geDb.getBaselineSummary().catch(() => null), mail: { configured: mailer.configured() } }); }
+  catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
+});
+router.get("/admin/reports", requireAdmin, async (req, res) => {
+  try { res.json({ reports: await geDb.adminRecentReports(Math.min(200, Number(req.query.limit) || 50)) }); } catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
+});
+router.get("/admin/failed-jobs", requireAdmin, async (req, res) => {
+  try { res.json({ jobs: await geDb.adminFailedJobs(Math.min(200, Number(req.query.limit) || 30)) }); } catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
+});
+router.get("/admin/account", requireAdmin, async (req, res) => {
+  try { const a = await geDb.adminFindAccount(String(req.query.q || "")); if (!a) return sendError(res, 404, "NOT_FOUND", "No account matches that email or handle"); res.json(a); } catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
+});
+// Account actions: resend the latest report email, comp a month, delete.
+router.post("/admin/account/:userId/resend", requireAdmin, async (req, res) => {
+  try {
+    const user = await geDb.getUserById(req.params.userId); if (!user) return sendError(res, 404, "NOT_FOUND", "No such account");
+    const reports = await geDb.listReportsByAccount(user.userId); const r = reports[0]; if (!r) return sendError(res, 404, "NO_REPORT", "No reports for this account");
+    const b = r.reportBody || {}; const first = b.growth_path?.phases?.[0];
+    const out = await mailer.reportReady({ to: user.email, handle: r.business?.handle, reportId: r.reportId, overall: b.scores?.overall, grade: b.scores?.overall >= 70 ? "Strong" : b.scores?.overall >= 40 ? "Fair" : "Weak", summary: b.scores?.summary, firstMove: first ? { action: first.visible_action, why: first.detail } : null, paid: r.tier !== "social_snapshot" });
+    res.json({ ok: true, sent: out });
+  } catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
+});
+router.post("/admin/account/:userId/comp", requireAdmin, async (req, res) => {
+  try {
+    const user = await geDb.getUserById(req.params.userId); if (!user) return sendError(res, 404, "NOT_FOUND", "No such account");
+    const days = Math.min(365, Math.max(1, Number(req.body?.days) || 30));
+    const ent = await geDb.getEffectiveEntitlement(user.userId);
+    if (ent.currentTier === "social_snapshot") await geDb.upgradeTier(user.userId, "growth_plan");
+    const end = Math.max(ent.billingPeriodEnd || 0, Date.now()) + days * 86400000;
+    await geDb.setBillingPeriod(user.userId, Date.now(), end); await geDb.setCancelAt(user.userId, end);
+    console.log(`[Admin] ${req.admin.via} comped ${days}d to ${user.email}`);
+    res.json({ ok: true, tier: "growth_plan", until: end });
+  } catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
+});
+router.delete("/admin/account/:userId", requireAdmin, async (req, res) => {
+  try { const user = await geDb.getUserById(req.params.userId); if (!user) return sendError(res, 404, "NOT_FOUND", "No such account"); console.log(`[Admin] ${req.admin.via} deleted ${user.email}`); res.json(await geDb.deleteAccount(user.userId)); }
+  catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
+});
+router.get("/admin/queue-stats", requireAdmin, async (req, res) => {
   try {
     const stats = jobQueue.getStats();
     res.json(stats);

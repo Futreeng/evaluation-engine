@@ -676,6 +676,63 @@ async function listReportsDueForRefresh(beforeTimestamp) {
   }));
 }
 
+
+// ===================== ADMIN =====================
+// Read-only aggregates for #/admin. Each returns plain objects.
+function rowsOf(sql, params = []) {
+  const r = db.exec(sql, params);
+  if (!r.length) return [];
+  const cols = r[0].columns;
+  return r[0].values.map((v) => Object.fromEntries(cols.map((c, i) => [c, v[i]])));
+}
+const one = (sql, params) => rowsOf(sql, params)[0] || {};
+async function adminOverview() {
+  if (!db) throw new Error("Database not initialized");
+  const now = Date.now(), day = 86400000, today = dayKey();
+  const usage = rowsOf(`SELECT kind, SUM(count) AS n FROM growth_engine_usage WHERE day = ? GROUP BY kind`, [today]);
+  const u = Object.fromEntries(usage.map((r) => [r.kind, Number(r.n)]));
+  const tiers = rowsOf(`SELECT current_tier, COUNT(*) AS n, SUM(CASE WHEN cancel_at IS NOT NULL THEN 1 ELSE 0 END) AS pending FROM entitlements GROUP BY current_tier`);
+  const signups = [7, 30].map((d) => Number(one(`SELECT COUNT(*) AS n FROM users WHERE created_at > ?`, [now - d * day]).n || 0));
+  const reports = rowsOf(`SELECT tier, COUNT(*) AS n FROM growth_engine_reports WHERE generated_at > ? GROUP BY tier`, [now - day]);
+  const oneTime = Number(one(`SELECT COUNT(*) AS n FROM growth_engine_reports WHERE report_body LIKE '%"one_time_unlock":{%'`).n || 0);
+  const jobs = rowsOf(`SELECT status, COUNT(*) AS n FROM growth_engine_jobs WHERE created_at > ? GROUP BY status`, [now - day]);
+  const waitlist = rowsOf(`SELECT platform, COUNT(*) AS n FROM growth_engine_waitlist GROUP BY platform ORDER BY n DESC`);
+  return {
+    today: { free_scores: u.free_eval || 0, paid_runs: u.eval || 0, competitor_pulls: u.competitor || 0, jobs: Object.fromEntries(jobs.map((j) => [j.status, Number(j.n)])), reports: Object.fromEntries(reports.map((r) => [r.tier, Number(r.n)])) },
+    people: { users: Number(one(`SELECT COUNT(*) AS n FROM users`).n || 0), signups_7d: signups[0], signups_30d: signups[1], tiers: tiers.map((t) => ({ tier: t.current_tier, n: Number(t.n), cancel_pending: Number(t.pending) })), one_time_buyers: oneTime, waitlist: waitlist.map((w) => ({ platform: w.platform, n: Number(w.n) })) },
+  };
+}
+async function adminRecentReports(limit = 50) {
+  if (!db) throw new Error("Database not initialized");
+  return rowsOf(`SELECT report_id, account_id, tier, business_handle AS handle, business_platform AS platform, business_category AS category, generated_at, report_body FROM growth_engine_reports ORDER BY generated_at DESC LIMIT ?`, [limit]).map((r) => {
+    let b = {}; try { b = JSON.parse(r.report_body); } catch { /* skip */ }
+    return { report_id: r.report_id, account_id: r.account_id, tier: r.tier, handle: r.handle, platform: r.platform, category: r.category, generated_at: Number(r.generated_at), overall: b.scores?.overall ?? null, email: b.email || null, one_time: !!b.one_time_unlock, partial: !!b.plan_incomplete };
+  });
+}
+async function adminFailedJobs(limit = 30) {
+  if (!db) throw new Error("Database not initialized");
+  return rowsOf(`SELECT job_id, account_id, tier, stage, error, input_params, created_at FROM growth_engine_jobs WHERE status = 'failed' ORDER BY created_at DESC LIMIT ?`, [limit]).map((j) => {
+    let p = {}; try { p = JSON.parse(j.input_params); } catch { /* skip */ }
+    return { job_id: j.job_id, account_id: j.account_id, tier: j.tier, stage: j.stage, error: j.error, handle: p.handle, platform: p.platform, email: p.email || null, created_at: Number(j.created_at) };
+  });
+}
+async function adminFindAccount(query) {
+  if (!db) throw new Error("Database not initialized");
+  const s = String(query || "").trim().toLowerCase().replace(/^@/, "");
+  if (!s) return null;
+  let user = await getUserByEmail(s);
+  if (!user) {
+    const r = one(`SELECT account_id FROM growth_engine_reports WHERE lower(business_handle) = ? AND account_id != 'demo-account' ORDER BY generated_at DESC LIMIT 1`, [s]);
+    if (r.account_id) user = await getUserById(r.account_id);
+  }
+  if (!user) return null;
+  const ent = await getEffectiveEntitlement(user.userId);
+  const reports = (await listReportsByAccount(user.userId)).map((r) => ({ report_id: r.reportId, tier: r.tier, handle: r.business?.handle, platform: r.business?.platform, generated_at: r.generatedAt, overall: r.reportBody?.scores?.overall ?? null, moves_done: Object.keys(r.reportBody?.moves_done || {}).length, checkins: r.reportBody?.checkins || null, emails_sent: r.reportBody?.emails_sent || [], one_time: !!r.reportBody?.one_time_unlock }));
+  const contexts = rowsOf(`SELECT handle, platform, context, updated_at FROM growth_engine_plan_context WHERE account_id = ?`, [user.userId]).map((c) => { let ctx = {}; try { ctx = JSON.parse(c.context); } catch { /* skip */ } return { handle: c.handle, platform: c.platform, ...ctx, updated_at: Number(c.updated_at) }; });
+  const usage = rowsOf(`SELECT kind, count FROM growth_engine_usage WHERE account_id = ? AND day = ?`, [user.userId, dayKey()]);
+  return { user: { user_id: user.userId, email: user.email, created_at: user.createdAt, email_paused: !!user.emailPaused }, entitlement: { tier: ent.currentTier, cancel_at: ent.cancelAt || null, period_end: ent.billingPeriodEnd || null }, reports, plan_contexts: contexts, usage_today: Object.fromEntries(usage.map((x) => [x.kind, Number(x.count)])) };
+}
+
 // ===================== ENTITLEMENT OPERATIONS =====================
 
 async function getOrCreateEntitlement(accountId) {
@@ -949,6 +1006,10 @@ module.exports = {
   getOrCreateEntitlement,
   getEntitlement,
   getEffectiveEntitlement,
+  adminOverview,
+  adminRecentReports,
+  adminFailedJobs,
+  adminFindAccount,
   setCancelAt,
   setBillingPeriod,
   createPasswordReset,

@@ -59,8 +59,16 @@
   const lget = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
   const lset = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { } };
   const token = () => { try { return localStorage.getItem('sc_token'); } catch { return null; } };
-  const setToken = t => { try { t ? localStorage.setItem('sc_token', t) : localStorage.removeItem('sc_token'); } catch { } };
+  const setTokenRaw = t => { try { t ? localStorage.setItem('sc_token', t) : localStorage.removeItem('sc_token'); } catch { } };
+  const setToken = t => { setTokenRaw(t); if (t) refreshAdminFlag(); else { try { localStorage.removeItem('sc_admin'); } catch { } } };
   const go = hash => { location.hash = hash; };
+  // Admin link in the nav: ask /auth/me once per token and remember the answer.
+  async function refreshAdminFlag() {
+    if (!token()) { try { localStorage.removeItem('sc_admin'); } catch { } return; }
+    const before = lget('sc_admin', false);
+    try { const me = await api('/auth/me', {}, { allow401: true }); lset('sc_admin', !!me.is_admin); } catch { lset('sc_admin', false); }
+    if (lget('sc_admin', false) !== before) { const cur = $header.querySelector('.nav a.strong'); renderHeader(cur ? (cur.getAttribute('href') || '').replace('#/', '') : ''); }
+  }
   const grade = s => s < 50 ? ['Weak', 'weak'] : s < 70 ? ['Fair', 'fair'] : ['Strong', 'strong'];
 
   let toastTimer;
@@ -100,7 +108,7 @@
           <a href="#/pricing" class="${kind === 'pricing' ? 'strong' : ''}">Pricing</a>
           <a href="#/business">For businesses</a>
           ${token()
-            ? raw(h`<a href="#/reports" class="${kind === 'reports' ? 'strong' : ''}">Reports</a><a href="#" data-action="signout">Sign out</a>`)
+            ? raw(h`<a href="#/reports" class="${kind === 'reports' ? 'strong' : ''}">Reports</a>${lget('sc_admin', false) ? raw(h`<a href="#/admin" class="${kind === 'admin' ? 'strong' : ''}">Admin</a>`) : ''}<a href="#" data-action="signout">Sign out</a>`)
             : raw(h`<a href="#/signin" class="strong">Sign in</a>`)}
         </nav>
       </div></div>`;
@@ -1077,6 +1085,95 @@
     });
   }
 
+  // ------------------------------------------------------------ admin
+  const money = n => '$' + (Math.round(n * 100) / 100).toFixed(2);
+  async function viewAdmin() {
+    renderHeader('admin');
+    if (!token()) { sset('sc_next', '#/admin'); go('#/signin'); return; }
+    $view.innerHTML = h`<div class="center-msg">Loading…</div>`;
+    let ov, reports, failed;
+    try { [ov, reports, failed] = await Promise.all([api('/admin/overview'), api('/admin/reports?limit=50'), api('/admin/failed-jobs?limit=30')]); }
+    catch (e) {
+      if (e.status === 401) return;
+      if (e.status === 403 || e.status === 404) { lset('sc_admin', false); $view.innerHTML = h`<div class="center-msg"><h2>This account isn't an admin.</h2>Add your email to <code>ADMIN_EMAILS</code> on the server, then sign in again.</div>`; return; }
+      $view.innerHTML = h`<div class="center-msg"><h2>Couldn't load admin.</h2>${e.message}</div>`; return;
+    }
+    lset('sc_admin', true);
+    const t = ov.today, p = ov.people, caps = ov.caps;
+    const spend = (t.free_scores + t.paid_runs + t.competitor_pulls) * ov.cost.instagram;
+    const tierName = k => ({ social_snapshot: 'Free', growth_plan: 'Growth Plan', growth_plan_pro: 'Pro', business_growth: 'Business Growth', business_evaluator: 'Business Evaluator', agency: 'Agency' }[k] || k);
+    const stat = (n, l, sub) => h`<div class="stat"><div class="n">${n}</div><div class="l">${l}</div>${sub ? raw(h`<div class="s">${sub}</div>`) : ''}</div>`;
+    const bar = (used, cap) => h`<div class="capbar"><div class="fill ${used / cap > 0.8 ? 'hot' : ''}" style="width:${Math.min(100, Math.round(used / cap * 100))}%"></div></div>`;
+    const reportRow = r => h`<a class="arow" href="#/report/${r.report_id}"><span>${fmtDate(r.generated_at)}</span><span class="h">@${r.handle || '—'}</span><span class="t">${platName(r.platform)} · ${r.one_time ? '60-day' : tierName(r.tier)}${r.partial ? ' · partial' : ''}</span><span class="e">${r.email || ''}</span><span class="n">${r.overall ?? '—'}</span></a>`;
+    $view.innerHTML = h`<div class="wrap"><div class="admin">
+      <div class="ph"><h1>Admin</h1><span class="fine">${ov.mail.configured ? 'Email: sending' : 'Email: logging only (no RESEND_API_KEY)'} · queue: ${ov.queue?.processingCount ?? 0} running of ${ov.queue?.numWorkers ?? '?'}</span></div>
+
+      <section class="card"><h2>Today</h2>
+        <div class="stats">
+          ${raw(stat(t.free_scores, 'free scores', `cap ${caps.free_runs_per_day_global}`))}
+          ${raw(stat(t.paid_runs, 'paid runs', `${caps.paid_runs_per_day}/account cap`))}
+          ${raw(stat(t.competitor_pulls, 'competitor pulls', `${caps.competitor_pulls_per_day}/account cap`))}
+          ${raw(stat(money(spend), 'est. Apify spend', 'at Instagram rates; TikTok is 20×'))}
+          ${raw(stat(t.jobs.failed || 0, 'jobs failed', `${(t.jobs.complete || 0)} completed`))}
+        </div>
+        <div class="fine">Global free cap</div>${raw(bar(t.free_scores, caps.free_runs_per_day_global))}
+      </section>
+
+      <section class="card"><h2>People</h2>
+        <div class="stats">
+          ${raw(stat(p.users, 'accounts', `+${p.signups_7d} this week · +${p.signups_30d} this month`))}
+          ${raw(p.tiers.filter(x => x.tier !== 'social_snapshot').map(x => stat(x.n, tierName(x.tier), x.cancel_pending ? `${x.cancel_pending} cancelling` : 'subscribers')).join(''))}
+          ${raw(stat(p.one_time_buyers, '60-day plans sold', 'one-time'))}
+          ${raw(stat(p.waitlist.reduce((n, w) => n + w.n, 0), 'on waitlists', p.waitlist.map(w => `${w.platform} ${w.n}`).join(' · ') || '—'))}
+        </div>
+        ${ov.outcomes && ov.outcomes.n ? raw(h`<div class="fine">Evidence: ${ov.outcomes.n} refreshes recorded · creators who did 3+ moves moved ${ov.outcomes.avg_delta_active ?? '—'} points on average.</div>`) : raw('<div class="fine">Evidence: no refresh outcomes yet.</div>')}
+        ${ov.baselines ? raw(h`<div class="fine">Baselines: ${ov.baselines.total} accounts across ${Object.keys(ov.baselines.by_category || {}).length} niches.</div>`) : ''}
+      </section>
+
+      <section class="card"><h2>Look up an account</h2>
+        <form class="compform" id="adminFind"><input type="text" name="q" placeholder="email or @handle" autocomplete="off"><button class="btn dark" type="submit">Find</button></form>
+        <div id="adminAccount"></div>
+      </section>
+
+      <section class="card"><h2>Recent reports <span class="fine">last ${reports.reports.length}</span></h2>
+        <div class="alist">${raw(reports.reports.map(reportRow).join('') || '<div class="fine">None yet.</div>')}</div>
+      </section>
+
+      <section class="card"><h2>Failed jobs <span class="fine">last 24h and older</span></h2>
+        <div class="alist">${raw(failed.jobs.map(j => h`<div class="arow fail"><span>${fmtDate(j.created_at)}</span><span class="h">@${j.handle || '—'}</span><span class="t">${platName(j.platform)} · ${tierName(j.tier)} · ${j.stage || ''}</span><span class="e">${j.email || ''}</span><span class="err">${j.error || ''}</span></div>`).join('') || '<div class="fine">No failures.</div>')}</div>
+      </section>
+    </div></div>${raw(footer())}`;
+
+    const box = $view.querySelector('#adminAccount');
+    const showAccount = a => {
+      const u = a.user, en = a.entitlement;
+      box.innerHTML = h`<div class="acct">
+        <div class="top"><div><b>${u.email}</b><div class="fine">${u.user_id} · joined ${fmtDate(u.created_at)}${u.email_paused ? ' · emails paused' : ''}</div></div>
+          <div class="tagline"><span class="tag ${en.tier === 'social_snapshot' ? 'fair' : 'dark'}">${tierName(en.tier)}</span>${en.cancel_at ? raw(h`<span class="fine">ends ${fmtDate(en.cancel_at)}</span>`) : en.period_end ? raw(h`<span class="fine">renews ${fmtDate(en.period_end)}</span>`) : ''}</div></div>
+        <div class="fine">Today: ${Object.entries(a.usage_today).map(([k, v]) => `${k} ${v}`).join(' · ') || 'no runs'}</div>
+        ${a.plan_contexts.length ? raw(h`<div class="ctxrow">${raw(a.plan_contexts.map(c => contextChips(c) + (c.notes ? h`<span class="chip note">“${c.notes}”</span>` : '') + h`<span class="fine">(@${c.handle})</span>`).join(''))}</div>`) : ''}
+        <div class="alist">${raw(a.reports.map(r => h`<a class="arow" href="#/report/${r.report_id}"><span>${fmtDate(r.generated_at)}</span><span class="h">@${r.handle}</span><span class="t">${r.one_time ? '60-day' : tierName(r.tier)} · ${r.moves_done} moves done${r.checkins ? ' · check-ins ' + Object.keys(r.checkins).join(',') : ''}${r.emails_sent.length ? ' · emailed ' + r.emails_sent.join(',') : ''}</span><span class="n">${r.overall ?? '—'}</span></a>`).join('') || '<div class="fine">No reports.</div>')}</div>
+        <div class="acts"><button class="btn ghost sm" data-adm="resend">Resend latest report email</button><button class="btn ghost sm" data-adm="comp">Comp 30 days</button><button class="btn danger sm" data-adm="delete">Delete account</button></div></div>`;
+      box.querySelectorAll('[data-adm]').forEach(b => b.addEventListener('click', async () => {
+        const act = b.dataset.adm;
+        if (act === 'delete' && !confirm(`Delete ${u.email} and every report? This can't be undone.`)) return;
+        b.disabled = true;
+        try {
+          if (act === 'resend') { await api(`/admin/account/${u.user_id}/resend`, { method: 'POST', body: '{}' }); toast('Sent (or logged, if email isn’t configured).'); }
+          if (act === 'comp') { const r = await api(`/admin/account/${u.user_id}/comp`, { method: 'POST', body: JSON.stringify({ days: 30 }) }); toast(`Growth Plan until ${fmtDate(r.until)}.`); showAccount(await api('/admin/account?q=' + encodeURIComponent(u.email))); return; }
+          if (act === 'delete') { await api(`/admin/account/${u.user_id}`, { method: 'DELETE' }); toast('Deleted.'); box.innerHTML = ''; return; }
+        } catch (e) { toast(e.message); }
+        b.disabled = false;
+      }));
+    };
+    $view.querySelector('#adminFind').addEventListener('submit', async e => {
+      e.preventDefault(); const q = e.currentTarget.q.value.trim(); if (!q) return;
+      box.innerHTML = '<div class="fine">Looking…</div>';
+      try { showAccount(await api('/admin/account?q=' + encodeURIComponent(q))); }
+      catch (e2) { box.innerHTML = h`<div class="form-error">${e2.status === 404 ? 'No account matches that.' : e2.message}</div>`; }
+    });
+  }
+
   // ------------------------------------------------------------ how the score works (batch 3)
   function viewHow() {
     renderHeader('how');
@@ -1169,6 +1266,7 @@
     if (parts[0] === 'forgot') return viewForgot();
     if (parts[0] === 'reset') return viewReset();
     if (parts[0] === 'reports') return viewReports();
+    if (parts[0] === 'admin') return viewAdmin();
     if (parts[0] === 'how') return viewHow();
     if (parts[0] === 'legal') return viewLegal(parts[1] || 'terms');
     renderHeader('landing');
