@@ -83,7 +83,8 @@ Rules: the scores in GAP_AUDITOR_OUTPUT are final — copy them exactly into the
 
 Finally, after the report, output a machine-readable block on its own lines, exactly like this, with real values (no comments, valid JSON):
 \`\`\`json
-{"overall": 0, "dimensions": [{"label": "Posting Consistency", "score": 0, "explanation": ""}, {"label": "Content Mix", "score": 0, "explanation": ""}, {"label": "Engagement Quality", "score": 0, "explanation": ""}, {"label": "Profile Clarity", "score": 0, "explanation": ""}], "summary": "one sentence naming what drives most of the gap", "best_posts_note": "two sentences: what the top posts share and what the bottom posts share", "phases": [{"range": "1-30", "label": "", "visible_action": "", "detail": "", "locked": {"count": 4, "teaser": ""}}, {"range": "31-60", "label": "", "visible_action": "", "detail": "", "locked": {"count": 4, "teaser": ""}}, {"range": "61-90", "label": "", "visible_action": "", "detail": "", "locked": {"count": 4, "teaser": ""}}]}
+{"overall": 0, "dimensions": [{"label": "Posting Consistency", "score": 0, "explanation": ""}, {"label": "Content Mix", "score": 0, "explanation": ""}, {"label": "Engagement Quality", "score": 0, "explanation": ""}, {"label": "Profile Clarity", "score": 0, "explanation": ""}], "summary": "one sentence naming what drives most of the gap", "best_posts_note": "two sentences: what the top posts share and what the bottom posts share", "phases": [{"range": "1-30", "label": "", "visible_action": "", "detail": "", "locked": {"count": 4, "teaser": "", "items": ["move title under 6 words", "…", "…", "…"]}}, {"range": "31-60", "label": "", "visible_action": "", "detail": "", "locked": {"count": 4, "teaser": "", "items": ["…", "…", "…", "…"]}}, {"range": "61-90", "label": "", "visible_action": "", "detail": "", "locked": {"count": 4, "teaser": "", "items": ["…", "…", "…", "…"]}}]}
+"items" are the titles of the four locked moves in that phase — specific to this account (a bio line, a day, a format, a post), under 6 words each, no numbers or "MOVE" prefix. They are shown dimmed as a preview; the moves themselves are written when the plan is bought.
 \`\`\``
   },
 };
@@ -688,7 +689,7 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
           label: String(p.label || ""),
           visible_action: String(p.visible_action || ""),
           detail: String(p.detail || ""),
-          locked: { count: Number(p?.locked?.count) || 4, teaser: String(p?.locked?.teaser || "") },
+          locked: { count: Number(p?.locked?.count) || 4, teaser: String(p?.locked?.teaser || ""), items: Array.isArray(p?.locked?.items) ? p.locked.items.map((it) => (typeof it === "string" ? { meta: it } : it)).filter((it) => it && (it.meta || it.title)).slice(0, 4) : [] },
         })),
       };
     }
@@ -828,7 +829,7 @@ async function evaluateTier1(accountId, inputParams, onStage = () => {}) {
     if (i >= PHASES_BOUGHT) {
       // Not bought: keep the free-report shape (opener visible, rows locked)
       // so the report shows exactly what the subscription adds.
-      return { ...p, moves: [], opener: null, locked: { count: Number(p?.locked?.count) || 4, teaser: `Days ${p.range || "61-90"} unlock with the Growth Plan` }, calendar_weeks: [], not_included: true };
+      return { ...p, moves: [], opener: null, locked: { count: Number(p?.locked?.count) || 4, teaser: `Days ${p.range || "61-90"} unlock with the Growth Plan`, items: p?.locked?.items || [] }, calendar_weeks: [], not_included: true };
     }
     const extra = planPhases.find((x) => x.range === normRange(p.range)) || planPhases[i] || { moves: [] };
     const detail = (m) => ({
