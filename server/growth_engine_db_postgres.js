@@ -145,6 +145,30 @@ async function initSchema() {
         used_at BIGINT
       )`);
     await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_promo_codes (
+        code TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        value INTEGER NOT NULL DEFAULT 0,
+        applies_to TEXT NOT NULL DEFAULT 'any',
+        max_redemptions INTEGER,
+        redemptions INTEGER NOT NULL DEFAULT 0,
+        expires_at BIGINT,
+        active BOOLEAN NOT NULL DEFAULT TRUE,
+        note TEXT,
+        stripe_coupon_id TEXT,
+        created_at BIGINT NOT NULL
+      )`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_promo_redemptions (
+        id TEXT PRIMARY KEY,
+        code TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        product TEXT NOT NULL,
+        amount_off INTEGER NOT NULL DEFAULT 0,
+        created_at BIGINT NOT NULL,
+        UNIQUE (code, account_id)
+      )`);
+    await client.query(`
       CREATE TABLE IF NOT EXISTS growth_engine_plan_context (
         id TEXT PRIMARY KEY,
         account_id TEXT NOT NULL,
@@ -540,6 +564,29 @@ async function adminFindAccount(query) {
   return { user: { user_id: user.userId, email: user.email, created_at: user.createdAt, email_paused: !!user.emailPaused }, entitlement: { tier: ent.currentTier, cancel_at: ent.cancelAt || null, period_end: ent.billingPeriodEnd || null }, reports, plan_contexts: ctx, usage_today: Object.fromEntries(usage.map((x) => [x.kind, Number(x.count)])) };
 }
 
+
+// ===================== PROMO CODES =====================
+const promoRow = (r) => r ? { ...r, max_redemptions: r.max_redemptions == null ? null : Number(r.max_redemptions), redemptions: Number(r.redemptions || 0), expires_at: r.expires_at == null ? null : Number(r.expires_at), active: !!r.active, value: Number(r.value || 0), created_at: Number(r.created_at) } : null;
+async function createPromo(p) {
+  await q(`INSERT INTO growth_engine_promo_codes (code, kind, value, applies_to, max_redemptions, redemptions, expires_at, active, note, stripe_coupon_id, created_at) VALUES ($1, $2, $3, $4, $5, 0, $6, $7, $8, $9, $10)`,
+    [p.code, p.kind, p.value, p.applies_to, p.max_redemptions, p.expires_at, !!p.active, p.note || null, p.stripe_coupon_id || null, Date.now()]);
+  return getPromo(p.code);
+}
+async function getPromo(code) { return promoRow((await q(`SELECT * FROM growth_engine_promo_codes WHERE code = $1`, [String(code || "").toUpperCase()])).rows[0]); }
+async function listPromos() { return (await q(`SELECT * FROM growth_engine_promo_codes ORDER BY created_at DESC`)).rows.map(promoRow); }
+async function setPromoActive(code, active) { await q(`UPDATE growth_engine_promo_codes SET active = $1 WHERE code = $2`, [!!active, String(code).toUpperCase()]); return getPromo(code); }
+async function hasRedeemed(code, accountId) { return (await q(`SELECT 1 FROM growth_engine_promo_redemptions WHERE code = $1 AND account_id = $2`, [String(code).toUpperCase(), accountId])).rows.length > 0; }
+async function redeemPromo(code, accountId, product, amountOff) {
+  const c = String(code).toUpperCase();
+  await q(`INSERT INTO growth_engine_promo_redemptions (id, code, account_id, product, amount_off, created_at) VALUES ($1, $2, $3, $4, $5, $6)`, ["pr_" + uid(), c, accountId, product, Number(amountOff) || 0, Date.now()]);
+  await q(`UPDATE growth_engine_promo_codes SET redemptions = redemptions + 1 WHERE code = $1`, [c]);
+  return getPromo(c);
+}
+async function listRedemptions(code, limit = 100) {
+  const r = await q(`SELECT r.*, u.email FROM growth_engine_promo_redemptions r LEFT JOIN users u ON u.user_id = r.account_id WHERE r.code = $1 ORDER BY r.created_at DESC LIMIT $2`, [String(code).toUpperCase(), limit]);
+  return r.rows.map((x) => ({ ...x, amount_off: Number(x.amount_off), created_at: Number(x.created_at) }));
+}
+
 // ===================== CATEGORY BASELINES =====================
 
 async function recordBaseline({ category, platform, handle, overall, dimensions }) {
@@ -633,6 +680,7 @@ module.exports = {
   adminRecentReports,
   adminFailedJobs,
   adminFindAccount,
+  createPromo, getPromo, listPromos, setPromoActive, hasRedeemed, redeemPromo, listRedemptions,
   setCancelAt,
   setBillingPeriod,
   createPasswordReset,

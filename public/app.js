@@ -4,6 +4,13 @@
 (function () {
   'use strict';
   const CFG = window.SCALECRAFT_CONFIG || {};
+  // Promo code from a link: scalecraft.app/?promo=CODE or #/pricing?promo=CODE.
+  (() => { try {
+    const fromSearch = new URLSearchParams(location.search).get('promo');
+    const fromHash = new URLSearchParams((location.hash.split('?')[1] || '')).get('promo');
+    const c = (fromSearch || fromHash || '').trim().toUpperCase();
+    if (c) { sessionStorage.setItem('sc_promo', JSON.stringify({ code: c, pending: true })); if (fromSearch) history.replaceState(null, '', location.pathname + location.hash); }
+  } catch { } })();
   const API = CFG.apiBase || '/api/growth-engine/v1';
   const POLL = CFG.pollIntervalMs || 2000;
   const $view = document.getElementById('view');
@@ -62,6 +69,14 @@
   const setTokenRaw = t => { try { t ? localStorage.setItem('sc_token', t) : localStorage.removeItem('sc_token'); } catch { } };
   const setToken = t => { setTokenRaw(t); if (t) refreshAdminFlag(); else { try { localStorage.removeItem('sc_admin'); } catch { } } };
   const go = hash => { location.hash = hash; };
+  // Promo: { code, description, amount_cents, base_cents, product, free_months } once checked; { code, pending } before.
+  const promo = () => sget('sc_promo', null);
+  async function checkPromo(code, product, billingCycle) {
+    const r = await api('/billing/promo/check', { method: 'POST', body: JSON.stringify({ code, product, billingCycle }) }, { allow401: true });
+    if (r.valid) sset('sc_promo', { ...r, checked_for: product + ':' + (billingCycle || 'monthly') });
+    return r;
+  }
+  const clearPromo = () => { try { sessionStorage.removeItem('sc_promo'); } catch { } };
   // Admin link in the nav: ask /auth/me once per token and remember the answer.
   async function refreshAdminFlag() {
     if (!token()) { try { localStorage.removeItem('sc_admin'); } catch { } return; }
@@ -162,8 +177,10 @@
     const niche = last.category || 'fitness_creator';
     const sample = sget('sc_sample', null);
     const hero = sample ? { ...sample, link: '#/report/' + sample.report_id } : SAMPLE;
+    const pr = promo();
     $view.innerHTML = h`
       <div class="wrap">
+        ${pr ? raw(h`<div class="promobar">Code <b>${pr.code}</b> ${pr.description ? '— ' + pr.description + '. ' : 'is ready. '}It's applied when you start the plan. <a href="#/pricing">See pricing →</a></div>`) : ''}
         <section class="hero">
           <div class="l">
             <h1>Score your account. See exactly why. Get the plan.</h1>
@@ -265,8 +282,9 @@
     $view.querySelector('#foundersForm').addEventListener('submit', async e => {
       e.preventDefault(); const f = e.currentTarget; const email = f.email.value.trim();
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast('Add an email first.'); return; }
-      try { await api('/waitlist', { method: 'POST', body: JSON.stringify({ email, platform: 'founders' }) }); } catch { }
-      f.innerHTML = h`<div class="waitdone" style="flex:1">You're in. We'll email you when your month starts.</div>`;
+      let r = null; try { r = await api('/waitlist', { method: 'POST', body: JSON.stringify({ email, platform: 'founders' }) }); } catch { }
+      if (r && r.promo) { sset('sc_promo', { code: r.promo.code, pending: true }); f.innerHTML = h`<div class="waitdone" style="flex:1">You're in. Your code is <b class="code">${r.promo.code}</b> — ${r.promo.description}. It's applied when you <a href="#/pricing">start the plan</a>.</div>`; }
+      else f.innerHTML = h`<div class="waitdone" style="flex:1">You're in. We'll email you when your month starts.</div>`;
     });
     const scrollTo = sget('sc_scroll', null);
     if (scrollTo) { sessionStorage.removeItem('sc_scroll'); document.getElementById(scrollTo)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
@@ -510,7 +528,7 @@
     const parts = INTAKE.map(q => ctxLabel(q.key, ctx[q.key])).filter(Boolean);
     return parts.map(t => h`<span class="chip">${t}</span>`).join('');
   }
-  function viewPlanSetup() {
+  async function viewPlanSetup() {
     renderHeader('report');
     const q = new URLSearchParams((location.hash.split('?')[1] || ''));
     const reportId = q.get('report') || '';
@@ -522,6 +540,8 @@
     const state = { ...saved };
     const days = path === 'once' ? 60 : 90;
     const heading = path === 'edit' ? 'Update your next 90 days' : path === 'checkin' ? `Phase ${phase} starts. What changed?` : `60 seconds so the plan fits your life.`;
+    let oncePromo = null;
+    if (path === 'once' && promo() && promo().code) { try { const r = await checkPromo(promo().code, 'plan_unlock'); if (r.valid) oncePromo = r; } catch { } }
     const sub = path === 'once' ? 'Four taps. The 60-day plan is written around your answers.' : path === 'checkin' ? 'Change what changed. The plan is rewritten tonight.' : path === 'edit' ? 'The plan is rewritten against your new answers.' : 'Four taps. Every move and calendar slot is written around your answers, and we check back at day 30 and 60.';
     const render = () => {
       const needLink = state.goal === 'sell' || state.goal === 'bookings';
@@ -537,7 +557,8 @@
             ${needLink ? raw(h`<div class="qblock"><div class="q">Where should the link go?</div><input type="url" id="ctxLink" class="txt" placeholder="yoursite.com/guide" value="${state.link || ''}"><div class="fine">The bio and CTA moves use this exact link instead of a placeholder.</div></div>`) : ''}
             ${needContact ? raw(h`<div class="qblock"><div class="q">Email brands should use <span class="opt-note">optional</span></div><input type="email" id="ctxContact" class="txt" placeholder="collabs@you.com" value="${state.contact || ''}"><div class="fine">Goes into the bio and contact moves exactly as written.</div></div>`) : ''}
             <div class="qblock"><div class="q">Anything else? <span class="opt-note">optional</span></div><input type="text" id="ctxNotes" class="txt" maxlength="140" placeholder="moving in November · just got a drone · off for three weeks" value="${state.notes || ''}"></div>
-            <button class="btn block" id="ctxGo" ${complete ? '' : 'disabled'}>${path === 'once' ? 'Continue to the $' + (sget('sc_once_price', 15)) + ' plan' : path === 'edit' || path === 'checkin' ? 'Rewrite my plan' : 'Continue to the plan'}</button>
+            ${oncePromo ? raw(h`<div class="promobox inline">Code <b>${oncePromo.code}</b> applied — ${oncePromo.description}.</div>`) : ''}
+            <button class="btn block" id="ctxGo" ${complete ? '' : 'disabled'}>${path === 'once' ? (oncePromo ? (oncePromo.amount_cents === 0 ? 'Get the 60-day plan — free' : `Continue to the $${(oncePromo.amount_cents / 100).toFixed(oncePromo.amount_cents % 100 ? 2 : 0)} plan`) : 'Continue to the $' + (sget('sc_once_price', 15)) + ' plan') : path === 'edit' || path === 'checkin' ? 'Rewrite my plan' : 'Continue to the plan'}</button>
             ${path === 'checkin' ? raw(h`<a class="btn ghost block" href="#/report/${reportId}?checkin=${phase}&changed=0">Nothing changed — carry on</a>`) : path === 'edit' ? raw(h`<a class="btn ghost block" href="#/report/${reportId}">Cancel</a>`) : raw(h`<div class="fine center">You can change these any time from your report.</div>`)}
           </div>
         </div>${raw(footer())}`;
@@ -552,10 +573,11 @@
         if (path === 'once') {
           if (!token()) { sset('sc_next', '#/report/' + reportId); sset('sc_unlock_once', reportId); go('#/signup'); return; }
           try {
-            const res = await api('/reports/' + encodeURIComponent(reportId) + '/unlock', { method: 'POST', body: JSON.stringify({ plan_context: ctx }) });
+            const res = await api('/reports/' + encodeURIComponent(reportId) + '/unlock', { method: 'POST', body: JSON.stringify({ plan_context: ctx, ...(oncePromo ? { promo_code: oncePromo.code } : {}) }) });
             if (res.already_unlocked) { go('#/report/' + encodeURIComponent(res.report_id)); return; }
             sset('sc_job_' + res.job_id, { handle: biz.handle, platform: biz.platform, category: biz.category, submitted_at: Date.now(), one_time: true });
-            toast(`Charged ${res.payment?.amount || ''} once. Writing your 60-day plan…`); go('#/evaluating/' + encodeURIComponent(res.job_id));
+            if (oncePromo) clearPromo();
+            toast(res.payment?.amount === '$0.00' ? 'Free with your code. Writing your 60-day plan…' : `Charged ${res.payment?.amount || ''} once. Writing your 60-day plan…`); go('#/evaluating/' + encodeURIComponent(res.job_id));
           } catch (e2) { if (e2.status === 401) return; toast(e2.message || 'Unlock failed.'); b.disabled = false; b.textContent = 'Try again'; }
           return;
         }
@@ -803,8 +825,12 @@
     const pro = tiers.find(t => t.tier === 'growth_plan_pro');
     const yr = t => t.annualPrice ?? Math.round((t.monthlyPrice || 0) * 12 * (1 - disc));
     const cur = t => ent && ent.current_tier === t;
+    let promoState = promo();
     const render = () => {
       const annual = billing === 'annual';
+      const pcode = promoState && promoState.code;
+      const pOk = promoState && !promoState.pending && promoState.checked_for === 'growth_plan:' + billing;
+      const growthLine = pOk && promoState.product === 'growth_plan' ? (promoState.free_months ? `$0 for your first ${promoState.free_months === 1 ? 'month' : promoState.free_months + ' months'}, then $${annual ? yr(growth) : growth.monthlyPrice}${annual ? '/yr' : '/mo'}` : `$${(promoState.amount_cents / 100).toFixed(promoState.amount_cents % 100 ? 2 : 0)} ${annual ? 'your first year' : 'your first month'}, then $${annual ? yr(growth) : growth.monthlyPrice}`) : null;
       const proOpen = sget('sc_pro_open', false);
       $view.innerHTML = h`<div class="wrap"><div class="pricing">
         ${limitMsg ? raw(h`<div class="notice" style="margin-bottom:18px">${limitMsg}</div>`) : ''}
@@ -822,7 +848,7 @@
           <div class="tier dark ${cur('growth_plan') ? 'cur' : ''}">
             <div class="th"><span class="n">${growth.name || 'Growth Plan'}</span><span class="tag act">${cur('growth_plan') ? 'YOUR PLAN' : 'MOST POPULAR'}</span></div>
             <div class="price"><span class="p">$${annual ? yr(growth) : growth.monthlyPrice}</span><span class="per">${annual ? '/ year' : '/ month'}</span></div>
-            <div class="note">${annual ? 'Two and a bit months free' : `Or $${yr(growth)} a year — ${Math.round(disc * 100)}% off`}</div>
+            <div class="note">${growthLine ? raw(h`<span class="promoline">${promoState.code}: ${growthLine}</span>`) : annual ? 'Two and a bit months free' : `Or $${yr(growth)} a year — ${Math.round(disc * 100)}% off`}</div>
             <div class="feats">${raw((growth.features || []).map(f => h`<div>${f}</div>`).join(''))}</div>
             <button type="button" class="btn" data-subscribe="growth_plan" ${cur('growth_plan') ? 'disabled' : ''}>${cur('growth_plan') ? 'Current plan' : 'Unlock the plan'}</button>
             <div class="fine center">Cancel anytime. Keep the report either way.${SHIPPED ? raw(' · <a href="#/report/sample">See a full report</a>') : ''}</div>
@@ -839,6 +865,9 @@
             </div>`).join('')) : ''}
           </div>
         </div>
+        <div class="promobox" id="promoBox">${pcode && !promoState.pending && promoState.checked_for === 'growth_plan:' + billing
+          ? raw(h`<span>Code <b>${pcode}</b> applied — ${promoState.description}.</span> <a href="#" data-promo="clear">Remove</a>`)
+          : raw(h`<a href="#" data-promo="open">${pcode ? `Apply code ${pcode}` : 'Have a code?'}</a><form id="promoForm" ${pcode ? '' : 'hidden'}><input type="text" name="code" placeholder="CODE" autocomplete="off" autocapitalize="characters" value="${pcode || ''}"><button class="btn dark sm" type="submit">Apply</button><span class="fine" id="promoMsg"></span></form>`)}</div>
         <div class="pfoot"><div>All tiers keep your report history. Cancel in two clicks.</div><div>${pricing.refund || 'Not useful in the first 7 days? Reply to any email and we refund it.'}${supportEmail() ? raw(h` Or write to <a href="mailto:${supportEmail()}">${supportEmail()}</a>.`) : ''}</div><div class="fine">Business accounts are priced separately — $39 and $99. <a href="#/business">For businesses →</a></div></div>
       </div></div>${raw(footer())}`;
       $view.querySelectorAll('[data-billing]').forEach(b => b.addEventListener('click', () => { billing = b.dataset.billing; sset('sc_billing', billing); render(); }));
@@ -847,13 +876,26 @@
         if (!token()) { sset('sc_next', location.hash); sset('sc_intent_tier', b.dataset.subscribe); go('#/signup'); return; }
         b.disabled = true; const label = b.textContent; b.textContent = 'Starting…';
         try {
-          await api('/billing/subscribe', { method: 'POST', body: JSON.stringify({ tier: b.dataset.subscribe, billingCycle: billing }) });
-          sessionStorage.removeItem('sc_intent_tier'); sessionStorage.removeItem('sc_limit_msg');
+          const body = { tier: b.dataset.subscribe, billingCycle: billing };
+          if (b.dataset.subscribe === 'growth_plan' && promoState && promoState.code) body.promo_code = promoState.code;
+          const sub = await api('/billing/subscribe', { method: 'POST', body: JSON.stringify(body) });
+          sessionStorage.removeItem('sc_intent_tier'); sessionStorage.removeItem('sc_limit_msg'); clearPromo();
+          if (sub.promo) toast(`${sub.promo.code} applied — ${sub.promo.description}.`);
           const last = sget('sc_form', {});
           if (last.handle && last.platform && last.category) { toast(`You're on. Writing the full plan for @${last.handle}…`); await submitEvaluation(last, null); return; }
           toast("You're on. Score an account to get the full plan."); go('#/');
         } catch (e) { if (e.status === 401) return; toast(e.message || 'Subscription failed.'); b.disabled = false; b.textContent = label; }
       }));
+      // promo box
+      $view.querySelector('[data-promo=open]')?.addEventListener('click', e => { e.preventDefault(); const f = $view.querySelector('#promoForm'); f.hidden = false; f.code.focus(); if (f.code.value) f.requestSubmit(); });
+      $view.querySelector('[data-promo=clear]')?.addEventListener('click', e => { e.preventDefault(); clearPromo(); promoState = null; render(); });
+      $view.querySelector('#promoForm')?.addEventListener('submit', async e => {
+        e.preventDefault(); const f = e.currentTarget; const msg = f.querySelector('#promoMsg'); const code = f.code.value.trim().toUpperCase(); if (!code) return;
+        msg.textContent = 'Checking…';
+        try { const r = await checkPromo(code, 'growth_plan', billing); if (r.valid) { promoState = promo(); render(); } else { msg.textContent = r.reason; if (r.reason && /60-day/.test(r.reason)) { sset('sc_promo', { code, pending: true }); } } }
+        catch (e2) { msg.textContent = e2.message; }
+      });
+      if (promoState && promoState.pending && !$view.querySelector('#promoMsg')?.textContent) { const f = $view.querySelector('#promoForm'); if (f) { f.hidden = false; f.requestSubmit(); } }
       if (intent === 'growth_plan_pro' && !proOpen) { sset('sc_pro_open', true); render(); }
     };
     render();
@@ -1135,6 +1177,22 @@
         <div id="adminAccount"></div>
       </section>
 
+      <section class="card"><h2>Promo codes</h2>
+        <div id="promoList" class="alist"></div>
+        <form class="promocreate" id="promoCreate">
+          <input name="code" placeholder="CODE" required autocapitalize="characters">
+          <select name="kind"><option value="free_months">Free month(s)</option><option value="percent">% off</option><option value="amount">$ off</option><option value="free_unlock">Free 60-day plan</option></select>
+          <input name="value" type="number" min="0" placeholder="value (months · % · dollars)">
+          <select name="applies_to"><option value="any">Any</option><option value="growth_plan">Growth Plan</option><option value="plan_unlock">60-day plan</option></select>
+          <input name="max_redemptions" type="number" min="1" placeholder="max uses">
+          <input name="expires_at" type="date">
+          <input name="note" placeholder="where it's posted (note)">
+          <button class="btn dark sm" type="submit">Create code</button>
+          <span class="fine" id="promoCreateMsg"></span>
+        </form>
+        <div class="fine">Share as a link: <code>${location.origin}/?promo=CODE</code> — it applies itself.</div>
+      </section>
+
       <section class="card"><h2>Recent reports <span class="fine">last ${reports.reports.length}</span></h2>
         <div class="alist">${raw(reports.reports.map(reportRow).join('') || '<div class="fine">None yet.</div>')}</div>
       </section>
@@ -1143,6 +1201,27 @@
         <div class="alist">${raw(failed.jobs.map(j => h`<div class="arow fail"><span>${fmtDate(j.created_at)}</span><span class="h">@${j.handle || '—'}</span><span class="t">${platName(j.platform)} · ${tierName(j.tier)} · ${j.stage || ''}</span><span class="e">${j.email || ''}</span><span class="err">${j.error || ''}</span></div>`).join('') || '<div class="fine">No failures.</div>')}</div>
       </section>
     </div></div>${raw(footer())}`;
+
+    // promo list + create
+    const kindLabel = p => p.kind === 'free_months' ? `${p.value} month${p.value === 1 ? '' : 's'} free` : p.kind === 'percent' ? `${p.value}% off` : p.kind === 'amount' ? `$${(p.value / 100).toFixed(p.value % 100 ? 2 : 0)} off` : 'free 60-day plan';
+    const applyLabel = a => ({ any: 'any', growth_plan: 'Growth Plan', plan_unlock: '60-day' }[a] || a);
+    const renderPromos = async () => {
+      const el = $view.querySelector('#promoList');
+      try {
+        const { promos } = await api('/admin/promos');
+        el.innerHTML = promos.length ? promos.map(p => h`<div class="arow promo ${p.active ? '' : 'off'}"><span class="h">${p.code}</span><span class="t">${kindLabel(p)} · ${applyLabel(p.applies_to)}${p.expires_at ? ' · until ' + fmtDate(p.expires_at) : ''}${p.note ? ' · ' + p.note : ''}</span><span class="e">${p.redemptions}${p.max_redemptions != null ? ' / ' + p.max_redemptions : ''} used</span><span class="n"><button class="btn ghost sm" data-promo-toggle="${p.code}" data-active="${p.active ? '1' : '0'}">${p.active ? 'Pause' : 'Resume'}</button></span></div>`).join('') : '<div class="fine">No codes yet.</div>';
+        el.querySelectorAll('[data-promo-toggle]').forEach(b => b.addEventListener('click', async () => { b.disabled = true; try { await api('/admin/promos/' + b.dataset.promoToggle, { method: 'PATCH', body: JSON.stringify({ active: b.dataset.active !== '1' }) }); renderPromos(); } catch (e) { toast(e.message); b.disabled = false; } }));
+      } catch (e) { el.innerHTML = h`<div class="form-error">${e.message}</div>`; }
+    };
+    renderPromos();
+    $view.querySelector('#promoCreate').addEventListener('submit', async e => {
+      e.preventDefault(); const f = e.currentTarget; const msg = f.querySelector('#promoCreateMsg');
+      const kind = f.kind.value; let value = Number(f.value.value) || 0; if (kind === 'amount') value = Math.round(value * 100);
+      const body = { code: f.code.value, kind, value, applies_to: f.applies_to.value, max_redemptions: f.max_redemptions.value || null, expires_at: f.expires_at.value ? new Date(f.expires_at.value + 'T23:59:59').getTime() : null, note: f.note.value };
+      msg.textContent = 'Creating…';
+      try { await api('/admin/promos', { method: 'POST', body: JSON.stringify(body) }); msg.textContent = ''; f.reset(); renderPromos(); toast(`${body.code.toUpperCase()} created.`); }
+      catch (e2) { msg.textContent = e2.message; }
+    });
 
     const box = $view.querySelector('#adminAccount');
     const showAccount = a => {

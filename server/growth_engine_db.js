@@ -178,6 +178,35 @@ function initSchema() {
     )
   `);
 
+
+  // Promo codes + redemptions (see growth_engine_promos.js for the rules)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS growth_engine_promo_codes (
+      code TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      value INTEGER NOT NULL DEFAULT 0,
+      applies_to TEXT NOT NULL DEFAULT 'any',
+      max_redemptions INTEGER,
+      redemptions INTEGER NOT NULL DEFAULT 0,
+      expires_at INTEGER,
+      active INTEGER NOT NULL DEFAULT 1,
+      note TEXT,
+      stripe_coupon_id TEXT,
+      created_at INTEGER NOT NULL
+    )
+  `);
+  db.run(`
+    CREATE TABLE IF NOT EXISTS growth_engine_promo_redemptions (
+      id TEXT PRIMARY KEY,
+      code TEXT NOT NULL,
+      account_id TEXT NOT NULL,
+      product TEXT NOT NULL,
+      amount_off INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      UNIQUE (code, account_id)
+    )
+  `);
+
   // Tier history table: audit log of tier changes
   db.run(`
     CREATE TABLE IF NOT EXISTS tier_history (
@@ -733,6 +762,47 @@ async function adminFindAccount(query) {
   return { user: { user_id: user.userId, email: user.email, created_at: user.createdAt, email_paused: !!user.emailPaused }, entitlement: { tier: ent.currentTier, cancel_at: ent.cancelAt || null, period_end: ent.billingPeriodEnd || null }, reports, plan_contexts: contexts, usage_today: Object.fromEntries(usage.map((x) => [x.kind, Number(x.count)])) };
 }
 
+
+// ===================== PROMO CODES =====================
+const promoRow = (r) => r ? { ...r, max_redemptions: r.max_redemptions == null ? null : Number(r.max_redemptions), redemptions: Number(r.redemptions || 0), expires_at: r.expires_at == null ? null : Number(r.expires_at), active: !!r.active, value: Number(r.value || 0), created_at: Number(r.created_at) } : null;
+async function createPromo(p) {
+  if (!db) throw new Error("Database not initialized");
+  db.run(`INSERT INTO growth_engine_promo_codes (code, kind, value, applies_to, max_redemptions, redemptions, expires_at, active, note, stripe_coupon_id, created_at) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
+    [p.code, p.kind, p.value, p.applies_to, p.max_redemptions, p.expires_at, p.active ? 1 : 0, p.note || null, p.stripe_coupon_id || null, Date.now()]);
+  saveDb();
+  return getPromo(p.code);
+}
+async function getPromo(code) {
+  if (!db) throw new Error("Database not initialized");
+  return promoRow(rowsOf(`SELECT * FROM growth_engine_promo_codes WHERE code = ?`, [String(code || "").toUpperCase()])[0]);
+}
+async function listPromos() {
+  if (!db) throw new Error("Database not initialized");
+  return rowsOf(`SELECT * FROM growth_engine_promo_codes ORDER BY created_at DESC`).map(promoRow);
+}
+async function setPromoActive(code, active) {
+  if (!db) throw new Error("Database not initialized");
+  db.run(`UPDATE growth_engine_promo_codes SET active = ? WHERE code = ?`, [active ? 1 : 0, String(code).toUpperCase()]);
+  saveDb();
+  return getPromo(code);
+}
+async function hasRedeemed(code, accountId) {
+  if (!db) throw new Error("Database not initialized");
+  return rowsOf(`SELECT 1 AS x FROM growth_engine_promo_redemptions WHERE code = ? AND account_id = ?`, [String(code).toUpperCase(), accountId]).length > 0;
+}
+async function redeemPromo(code, accountId, product, amountOff) {
+  if (!db) throw new Error("Database not initialized");
+  const c = String(code).toUpperCase();
+  db.run(`INSERT INTO growth_engine_promo_redemptions (id, code, account_id, product, amount_off, created_at) VALUES (?, ?, ?, ?, ?, ?)`, ["pr_" + uid(), c, accountId, product, Number(amountOff) || 0, Date.now()]);
+  db.run(`UPDATE growth_engine_promo_codes SET redemptions = redemptions + 1 WHERE code = ?`, [c]);
+  saveDb();
+  return getPromo(c);
+}
+async function listRedemptions(code, limit = 100) {
+  if (!db) throw new Error("Database not initialized");
+  return rowsOf(`SELECT r.*, u.email FROM growth_engine_promo_redemptions r LEFT JOIN users u ON u.user_id = r.account_id WHERE r.code = ? ORDER BY r.created_at DESC LIMIT ?`, [String(code).toUpperCase(), limit]).map((r) => ({ ...r, amount_off: Number(r.amount_off), created_at: Number(r.created_at) }));
+}
+
 // ===================== ENTITLEMENT OPERATIONS =====================
 
 async function getOrCreateEntitlement(accountId) {
@@ -1010,6 +1080,7 @@ module.exports = {
   adminRecentReports,
   adminFailedJobs,
   adminFindAccount,
+  createPromo, getPromo, listPromos, setPromoActive, hasRedeemed, redeemPromo, listRedemptions,
   setCancelAt,
   setBillingPeriod,
   createPasswordReset,

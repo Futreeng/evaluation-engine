@@ -28,7 +28,10 @@ Railway is still 502. `main` boots clean locally and the Postgres module passes 
 14. **Smoke test** — `node server/scripts/smoke.js` against a running server: 20 checks (signup → free score → unlock → check-in → subscribe → cancel → resume → pause → reset → delete), ~3 min, 20/20 green. Free score is one per handle, so run the server with `FREE_SNAPSHOTS_PER_EMAIL=unlimited` and the script with `SMOKE_FREE_UNLIMITED=1`. **Run it before merging anything that touches routes, billing, the queue or the DB modules.**
 15. **Seed script** — `server/scripts/seed_baselines.js --file seeds.json [--dry]` fetches + scores without the LLM. Instagram ≈ $0.003/handle, TikTok ≈ $0.06. Not run yet (Haron's call on spend).
 
-New DB tables/columns (both backends create them on boot): `growth_engine_plan_context`, `growth_engine_password_resets`, `entitlements.cancel_at`, `users.email_paused`. `server/.env.example` has every variable with a comment.
+16. **Admin** — `ADMIN_EMAILS` gives signed-in accounts an Admin link and `/admin/*`; `#/admin` shows today's usage vs caps, spend, people/subscribers/cancels, account lookup (resend / comp 30 days / delete), recent reports, failed jobs, promo codes.
+17. **Promo codes** — `growth_engine_promo_codes` + redemptions. Kinds: free months, % off, $ off, free 60-day plan; max uses, one per account, expiry, on/off. Entered on pricing or the intake, or via `/?promo=CODE` links. `FOUNDERS_PROMO_CODE` is handed out by the founders band. Admin UI + `scripts/promo.js`. With real Stripe, set `stripe_coupon_id` on a code and pass it as the coupon in `_createStripeSubscription` (the `promo` arg is already plumbed) so tax/invoices stay right.
+
+New DB tables/columns (both backends create them on boot): `growth_engine_plan_context`, `growth_engine_password_resets`, `growth_engine_promo_codes`, `growth_engine_promo_redemptions`, `entitlements.cancel_at`, `users.email_paused`. `server/.env.example` has every variable with a comment.
 
 ## Your part
 
@@ -36,7 +39,7 @@ New DB tables/columns (both backends create them on boot): `growth_engine_plan_c
 2. **Stripe for real** — `growth_engine_billing.js` is mock unless `STRIPE_API_KEY` is set. `_createStripeSubscription` throws "not implemented"; `purchaseOneTime` already uses a PaymentIntent. The webhook (`POST /billing/webhook`) is a stub — payment failed → `setCancelAt(accountId, now)` is all it needs to downgrade. Stripe Tax is worth turning on. Annual is shown on the pricing page but `subscribe` only takes monthly — wire it or hide the toggle.
 3. **Resend** — key + a verified sending domain (`MAIL_FROM`), `APP_URL` for links. Until then no email leaves the box, including password reset.
 4. **Meta OAuth "connect your account"** — your Graph API fetcher only reads owner-connected accounts; the scorer doesn't consume that data yet, parked until the connect flow exists.
-5. `SUPPORT_EMAIL` and `ADMIN_TOKEN` values.
+5. `SUPPORT_EMAIL`, `ADMIN_EMAILS` (you + Haron), `ADMIN_TOKEN`, `FOUNDERS_PROMO_CODE` values; create the founders code with `node scripts/promo.js create FOUNDER50 --kind free_months --value 1 --max 50`.
 
 ## Cheap wins, anyone
 

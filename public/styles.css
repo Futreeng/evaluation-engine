@@ -654,3 +654,18 @@ p { margin: 0; }
 .acct .acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
 .btn.sm { padding: 8px 14px; font-size: 13px; }
 @media (max-width: 720px) { .arow, .arow.fail { grid-template-columns: 1fr 44px; } .arow span:not(.h):not(.n) { display: none; } }
+
+/* ---- promo codes ---- */
+.promobar { margin: 0 0 18px; padding: 12px 18px; border-radius: 14px; background: var(--gold); color: var(--gold-t); font-size: 14px; }
+.promobar a { color: var(--gold-t); font-weight: 600; }
+.promobox { margin: 18px 0 6px; font-size: 14px; color: var(--body); display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+.promobox a { color: var(--act); font-weight: 600; text-decoration: none; }
+.promobox form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.promobox input { padding: 9px 12px; border-radius: 10px; border: 1.5px solid var(--line2); background: var(--card); font: inherit; font-size: 14px; text-transform: uppercase; letter-spacing: .06em; width: 150px; }
+.promobox.inline { margin: 14px 0 0; padding: 10px 14px; background: var(--gold); color: var(--gold-t); border-radius: 12px; }
+.promoline { color: var(--c2); font-weight: 600; }
+.waitdone .code { font-family: var(--display); letter-spacing: .06em; }
+.promocreate { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; align-items: center; }
+.promocreate input, .promocreate select { padding: 9px 12px; border-radius: 10px; border: 1.5px solid var(--line2); background: var(--card); font: inherit; font-size: 13px; }
+.promocreate input[name=code] { width: 130px; text-transform: uppercase; } .promocreate input[name=value], .promocreate input[name=max_redemptions] { width: 110px; }
+.arow.promo { grid-template-columns: 130px 2fr 1fr 90px; } .arow.promo.off { opacity: .55; } .arow.promo .n { text-align: right; }

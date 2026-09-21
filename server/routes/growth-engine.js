@@ -7,6 +7,23 @@ const JobQueue = require("../growth_engine_job_queue");
 const { compareCompetitors, MAX_COMPETITORS } = require("../growth_engine_competitors");
 const { signup, login, verifyJWT, requestPasswordReset, resetPassword } = require("../auth");
 const mailer = require("../mailer");
+const promos = require("../growth_engine_promos");
+const { TIER_PRICING, ONE_TIME_PRICING } = require("../growth_engine_billing");
+
+// Resolve a promo code for a product into a quote, or an error string.
+// product: growth_plan | plan_unlock. accountId optional (anonymous preview).
+async function resolvePromo(code, product, billingCycle, accountId) {
+  const c = promos.normalizeCode(code);
+  if (!c) return { error: "Enter a code." };
+  const promo = await geDb.getPromo(c);
+  const usable = promos.checkUsable(promo, product, { redeemedByAccount: accountId ? await geDb.hasRedeemed(c, accountId) : false });
+  if (!usable.ok) return { error: usable.reason };
+  const base = product === "growth_plan" ? (billingCycle === "annual" ? Math.floor(TIER_PRICING.growth_plan * 12 * 0.75) : TIER_PRICING.growth_plan) : ONE_TIME_PRICING.plan_unlock;
+  const qte = promos.quote(promo, product, base, billingCycle);
+  if (!qte) return { error: "That code doesn't apply here." };
+  if (!qte.applicable) return { error: qte.description };
+  return { promo, code: c, product, base_cents: base, amount_cents: qte.amountCents, free_months: qte.freeMonths, description: qte.description, stripeCouponId: promo.stripe_coupon_id || null };
+}
 const rateLimit = require("express-rate-limit");
 // Sign-in, sign-up and reset: 20 attempts per IP per 15 minutes. The router
 // already sits under the general 120/min limiter; this is the brute-force one.
@@ -496,8 +513,15 @@ router.post("/reports/:reportId/unlock", authMiddleware, async (req, res) => {
     if (report.accountId !== req.user.id && report.accountId !== "demo-account") return sendError(res, 403, "NOT_YOUR_REPORT", "This report belongs to another account");
     if (report.tier && report.tier !== "social_snapshot") return res.json({ already_unlocked: true, report_id: report.reportId });
 
-    const payment = await billingManager.purchaseOneTime(req.user.id, "plan_unlock");
+    let promo = null;
+    if (req.body?.promo_code) {
+      const r = await resolvePromo(req.body.promo_code, "plan_unlock", "monthly", req.user.id);
+      if (r.error) return sendError(res, 400, "PROMO_INVALID", r.error);
+      promo = { code: r.code, amountCents: r.amount_cents, description: r.description };
+    }
+    const payment = await billingManager.purchaseOneTime(req.user.id, "plan_unlock", null, promo);
     if (payment.status !== "succeeded" && !payment.mock) return res.status(402).json({ error: "Payment did not complete", code: "PAYMENT_INCOMPLETE", status: 402, payment });
+    if (promo) { try { await geDb.redeemPromo(promo.code, req.user.id, "plan_unlock", ONE_TIME_PRICING.plan_unlock - promo.amountCents); } catch (e) { console.warn("[Promo] redemption record failed:", e.message); } }
 
     const b = report.business || {};
     const plan_context = await resolvePlanContext(req, req.user.id, b.handle, b.platform);
@@ -564,7 +588,13 @@ router.post("/waitlist", async (req, res) => {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return sendError(res, 400, "INVALID_EMAIL", "Email is required");
     if (!/^[a-z]{1,30}$/.test(platform)) return sendError(res, 400, "INVALID_PLATFORM", "Platform is required");
     await geDb.addWaitlist(email, platform);
-    res.json({ ok: true, platform });
+    // Founders band: hand out the founders code while it lasts.
+    let code = null;
+    if (platform === "founders" && process.env.FOUNDERS_PROMO_CODE) {
+      const p = await geDb.getPromo(process.env.FOUNDERS_PROMO_CODE).catch(() => null);
+      if (p && promos.checkUsable(p, "growth_plan").ok) code = { code: p.code, description: promos.quote(p, "growth_plan", TIER_PRICING.growth_plan, "monthly")?.description || "" };
+    }
+    res.json({ ok: true, platform, promo: code });
   } catch (err) {
     sendError(res, 500, "WAITLIST_ERROR", err.message);
   }
@@ -619,17 +649,29 @@ router.get("/billing/pricing", async (req, res) => {
 });
 
 // Subscribe to tier
+// Preview a code (pricing page, intake). Signed-in users also get the
+// "already used" check.
+router.post("/billing/promo/check", optionalAuth, async (req, res) => {
+  const product = req.body?.product === "plan_unlock" ? "plan_unlock" : "growth_plan";
+  const cycle = req.body?.billingCycle === "annual" ? "annual" : "monthly";
+  const r = await resolvePromo(req.body?.code, product, cycle, req.user?.id).catch((e) => ({ error: e.message }));
+  if (r.error) return res.status(200).json({ valid: false, reason: r.error });
+  res.json({ valid: true, code: r.code, product, description: r.description, base_cents: r.base_cents, amount_cents: r.amount_cents, free_months: r.free_months });
+});
+
 router.post("/billing/subscribe", authMiddleware, validateSubscriptionRequest, async (req, res) => {
   try {
     const { tier, billingCycle } = req.body;
     const accountId = req.user.id;
+    let promo = null;
+    if (req.body.promo_code) {
+      const r = await resolvePromo(req.body.promo_code, tier === "growth_plan" ? "growth_plan" : "other", billingCycle || "monthly", accountId);
+      if (r.error) return sendError(res, 400, "PROMO_INVALID", r.error);
+      promo = { code: r.code, amountCents: r.amount_cents, freeMonths: r.free_months, description: r.description, stripeCouponId: r.stripeCouponId };
+    }
 
-    const result = await billingManager.createSubscription(
-      accountId,
-      tier,
-      null,
-      billingCycle || "monthly"
-    );
+    const result = await billingManager.createSubscription(accountId, tier, null, billingCycle || "monthly", promo);
+    if (promo) { try { await geDb.redeemPromo(promo.code, accountId, "growth_plan", (TIER_PRICING[tier] || 0) - promo.amountCents); } catch (e) { console.warn("[Promo] redemption record failed:", e.message); } }
 
     res.json(result);
   } catch (err) {
@@ -731,6 +773,24 @@ router.post("/admin/account/:userId/comp", requireAdmin, async (req, res) => {
 router.delete("/admin/account/:userId", requireAdmin, async (req, res) => {
   try { const user = await geDb.getUserById(req.params.userId); if (!user) return sendError(res, 404, "NOT_FOUND", "No such account"); console.log(`[Admin] ${req.admin.via} deleted ${user.email}`); res.json(await geDb.deleteAccount(user.userId)); }
   catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
+});
+router.get("/admin/promos", requireAdmin, async (req, res) => {
+  try { res.json({ promos: await geDb.listPromos() }); } catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
+});
+router.post("/admin/promos", requireAdmin, async (req, res) => {
+  try {
+    const shape = promos.validateShape(req.body || {});
+    if (await geDb.getPromo(shape.code)) return sendError(res, 409, "EXISTS", `${shape.code} already exists`);
+    console.log(`[Admin] ${req.admin.via} created promo ${shape.code} (${shape.kind} ${shape.value})`);
+    res.json({ promo: await geDb.createPromo(shape) });
+  } catch (err) { sendError(res, 400, "INVALID_PROMO", err.message); }
+});
+router.patch("/admin/promos/:code", requireAdmin, async (req, res) => {
+  try { const p = await geDb.setPromoActive(req.params.code, !!req.body?.active); if (!p) return sendError(res, 404, "NOT_FOUND", "No such code"); res.json({ promo: p }); }
+  catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
+});
+router.get("/admin/promos/:code/redemptions", requireAdmin, async (req, res) => {
+  try { res.json({ redemptions: await geDb.listRedemptions(req.params.code) }); } catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
 });
 router.get("/admin/queue-stats", requireAdmin, async (req, res) => {
   try {

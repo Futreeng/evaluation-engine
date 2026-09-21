@@ -97,6 +97,17 @@ const assert = require("assert");
   assert.ok(Array.isArray(await db.adminFailedJobs(5)));
   assert.equal(await db.adminFindAccount("nobody@example.test"), null);
 
+  // promo codes: create, redeem once per account, count, list
+  await db.createPromo({ code: "TEST10", kind: "percent", value: 10, applies_to: "any", max_redemptions: 2, expires_at: null, active: true, note: "t" });
+  assert.equal((await db.getPromo("test10")).kind, "percent");
+  assert.equal(await db.hasRedeemed("TEST10", "acct_a"), false);
+  assert.equal((await db.redeemPromo("TEST10", "acct_a", "growth_plan", 120)).redemptions, 1);
+  assert.equal(await db.hasRedeemed("TEST10", "acct_a"), true);
+  await assert.rejects(() => db.redeemPromo("TEST10", "acct_a", "growth_plan", 120));
+  assert.equal((await db.listRedemptions("TEST10")).length, 1);
+  assert.equal((await db.setPromoActive("TEST10", false)).active, false);
+  assert.equal((await db.listPromos()).length, 1);
+
   console.log("postgres module: all assertions passed");
   process.exit(0);
 })().catch((e) => { console.error("FAILED:", e.message); process.exit(1); });

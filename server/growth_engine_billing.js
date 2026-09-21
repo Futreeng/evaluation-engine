@@ -54,16 +54,24 @@ class BillingManager {
    * One-time purchase against a report (no entitlement change).
    * Mock mode records a charge; production goes through Stripe PaymentIntents.
    */
-  async purchaseOneTime(accountId, product, stripeCustomerId = null) {
-    const cents = ONE_TIME_PRICING[product];
-    if (!cents) throw new Error(`Unknown product: ${product}`);
+  async purchaseOneTime(accountId, product, stripeCustomerId = null, promo = null) {
+    const list = ONE_TIME_PRICING[product];
+    if (!list) throw new Error(`Unknown product: ${product}`);
+    // promo = { code, amountCents, description } already validated by the route
+    const cents = promo ? promo.amountCents : list;
+    const fmt = `$${(cents / 100).toFixed(2)}`;
+    if (cents === 0) {
+      const paymentId = "pay_free_" + require("crypto").randomBytes(8).toString("hex");
+      console.log(`[Billing] ${product} free via ${promo?.code} for ${accountId}`);
+      return { paymentId, product, amountInCents: 0, amountFormatted: "$0.00", status: "succeeded", free: true, promo: promo?.code || null };
+    }
     if (this.isProduction && this.stripe) {
-      const intent = await this.stripe.paymentIntents.create({ amount: cents, currency: "usd", customer: stripeCustomerId || undefined, metadata: { accountId, product } });
-      return { paymentId: intent.id, product, amountInCents: cents, amountFormatted: `$${(cents / 100).toFixed(2)}`, status: intent.status };
+      const intent = await this.stripe.paymentIntents.create({ amount: cents, currency: "usd", customer: stripeCustomerId || undefined, metadata: { accountId, product, promo: promo?.code || "" } });
+      return { paymentId: intent.id, product, amountInCents: cents, amountFormatted: fmt, status: intent.status, promo: promo?.code || null };
     }
     const paymentId = "pay_mock_" + require("crypto").randomBytes(8).toString("hex");
-    console.log(`[Billing] Mock one-time charge ${paymentId}: ${product} $${(cents / 100).toFixed(2)} for ${accountId}`);
-    return { paymentId, product, amountInCents: cents, amountFormatted: `$${(cents / 100).toFixed(2)}`, status: "succeeded", mock: true };
+    console.log(`[Billing] Mock one-time charge ${paymentId}: ${product} ${fmt}${promo ? ` (${promo.code})` : ""} for ${accountId}`);
+    return { paymentId, product, amountInCents: cents, amountFormatted: fmt, status: "succeeded", mock: true, promo: promo?.code || null };
   }
 
   /**
@@ -71,7 +79,7 @@ class BillingManager {
    * Mock mode: Simulates payment processing (for development)
    * Production: Uses real Stripe API
    */
-  async createSubscription(accountId, tier, stripeCustomerId, billingCycle = "monthly") {
+  async createSubscription(accountId, tier, stripeCustomerId, billingCycle = "monthly", promo = null) {
     if (tier === "social_snapshot") {
       // Free tier: just create entitlement
       return await geDb.upgradeTier(accountId, tier);
@@ -88,13 +96,22 @@ class BillingManager {
       amount = Math.floor(priceInCents * 12 * (1 - ANNUAL_DISCOUNT));
     }
 
+    // Promo already validated by the route: { code, amountCents, freeMonths, description }
+    const charged = promo ? promo.amountCents : amount;
+
     if (this.isProduction && this.stripe) {
-      // Production: use real Stripe
-      return await this._createStripeSubscription(accountId, tier, stripeCustomerId, amount, billingCycle);
+      // Production: use real Stripe (pass promo.stripeCouponId as the coupon)
+      return await this._createStripeSubscription(accountId, tier, stripeCustomerId, charged, billingCycle, promo);
     }
 
     // Mock mode: Simulate payment processing
-    return await this._createMockSubscription(accountId, tier, amount, billingCycle);
+    const r = await this._createMockSubscription(accountId, tier, charged, billingCycle);
+    if (promo) {
+      r.promo = { code: promo.code, description: promo.description, listAmountInCents: amount };
+      // Free months: the paid-through date is pushed out by the free period.
+      if (promo.freeMonths) { const end = Date.now() + (promo.freeMonths + 1) * 30 * 24 * 60 * 60 * 1000; await geDb.setBillingPeriod(accountId, Date.now(), end); r.currentPeriodEnd = end; }
+    }
+    return r;
   }
 
   /**
@@ -155,7 +172,7 @@ class BillingManager {
    * Real Stripe integration (production)
    * TODO: Implement when Stripe keys are configured
    */
-  async _createStripeSubscription(accountId, tier, customerId, amountInCents, billingCycle) {
+  async _createStripeSubscription(accountId, tier, customerId, amountInCents, billingCycle, promo = null) {
     throw new Error("[Stripe] Real Stripe integration not yet implemented. Use mock mode for development.");
   }
 

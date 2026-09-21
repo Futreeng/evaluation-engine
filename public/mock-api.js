@@ -219,7 +219,7 @@
     if (method === 'GET' && path === '/reports') return json(200, { reports: [...reports.values()] });
     if (method === 'GET' && path === '/entitlements') return json(200, entitlement);
     if (method === 'GET' && path === '/health') return json(200, { status: 'ok', mock: true });
-    if (method === 'POST' && path === '/waitlist') return json(200, { ok: true, platform: body.platform });
+    if (method === 'POST' && path === '/waitlist') return json(200, { ok: true, platform: body.platform, promo: body.platform === 'founders' ? { code: 'FOUNDER50', description: 'First month free, then $12/mo' } : null });
     if (method === 'DELETE' && path === '/account') { entitlement = { account_id: 'acct_mock', current_tier: 'social_snapshot' }; return json(200, { deleted: true, reports: reports.size }); }
     if (method === 'POST' && (m = path.match(/^\/reports\/([^/]+)\/unlock$/))) { const r = reports.get(m[1]); if (!r) return json(404, { error: 'Report not found' }); const id = 'job_' + Math.random().toString(36).slice(2, 10); jobs.set(id, { id, handle: r.business.handle, platform: r.business.platform, category: r.business.category, email: 'x', started: Date.now() - QUEUED_MS, fail: false, paid: true, oneTime: true, ref: 'MOCK', plan_context: body.plan_context || savedContext }); return json(200, { job_id: id, status: 'queued', tier: 'growth_plan', one_time: true, payment: { id: 'pay_mock', amount: '$15.00' } }); }
     if (method === 'PUT' && path === '/account/plan-context') { savedContext = body.plan_context || null; return json(200, { plan_context: savedContext }); }
@@ -231,7 +231,8 @@
       const tier = [...PRICING.tiers, ...PRICING.business].find(t => t.tier === body.tier);
       if (!tier) return json(400, { error: 'Unknown tier' });
       entitlement = { ...entitlement, current_tier: tier.tier, billing_cycle: body.billingCycle || 'monthly' };
-      return json(200, { ok: true, entitlement });
+      const promo = body.promo_code ? { code: String(body.promo_code).toUpperCase(), description: String(body.promo_code).toUpperCase() === 'FOUNDER50' ? 'First month free, then $12/mo' : '20% off your first month' } : null;
+      return json(200, { ok: true, entitlement, tier: tier.tier, promo });
     }
     if (method === 'POST' && path === '/billing/check-access') {
       const order = ['social_snapshot', 'growth_plan', 'growth_plan_pro', 'business_growth', 'business_evaluator', 'agency'];
@@ -239,6 +240,8 @@
       return ok ? json(200, { access: true }) : json(402, { error: 'Upgrade required', required_tier: body.requiredTier });
     }
     // Auth — same shape as routes/growth-engine.js
+    if (method === 'POST' && path === '/billing/promo/check') { const c = String(body.code || '').toUpperCase(); const product = body.product === 'plan_unlock' ? 'plan_unlock' : 'growth_plan'; const cycle = body.billingCycle === 'annual' ? 'annual' : 'monthly'; const base = product === 'growth_plan' ? (cycle === 'annual' ? 10800 : 1200) : 1500; if (c === 'FOUNDER50') { if (product !== 'growth_plan') return json(200, { valid: false, reason: 'That code is for the Growth Plan subscription.' }); if (cycle !== 'monthly') return json(200, { valid: false, reason: 'Free-month codes apply to monthly billing — switch to monthly to use it.' }); return json(200, { valid: true, code: c, product, description: 'First month free, then $12/mo', base_cents: base, amount_cents: 0, free_months: 1 }); } if (c === 'CREATOR20') return json(200, { valid: true, code: c, product, description: '20% off' + (product === 'growth_plan' ? ' your first month' : ''), base_cents: base, amount_cents: Math.round(base * 0.8), free_months: 0 }); if (c === 'PODCAST') { if (product !== 'plan_unlock') return json(200, { valid: false, reason: 'That code is for the 60-day plan.' }); return json(200, { valid: true, code: c, product, description: '60-day plan, free', base_cents: base, amount_cents: 0, free_months: 0 }); } return json(200, { valid: false, reason: "That code doesn't exist." }); }
+    if (method === 'GET' && path === '/admin/promos') return json(200, { promos: [{ code: 'FOUNDER50', kind: 'free_months', value: 1, applies_to: 'growth_plan', max_redemptions: 50, redemptions: 12, expires_at: null, active: true, note: 'founders band' }, { code: 'CREATOR20', kind: 'percent', value: 20, applies_to: 'any', max_redemptions: null, redemptions: 3, expires_at: null, active: true, note: '' }] });
     if (method === 'GET' && path === '/account/subscription-status') { const free = entitlement.current_tier === 'social_snapshot'; return json(200, { current_tier: entitlement.current_tier, tier_name: free ? 'Free Snapshot' : 'Growth Plan', monthly_price: free ? 0 : 12, billing_period_end: free ? null : (entitlement.period_end || (entitlement.period_end = Date.now() + 30 * 86400000)), cancel_at: entitlement.cancel_at || null, status: free ? 'free' : entitlement.cancel_at ? 'cancel_pending' : 'active' }); }
     if (method === 'POST' && path === '/billing/cancel') { entitlement.cancel_at = entitlement.period_end || Date.now() + 30 * 86400000; return json(200, { status: 'cancel_pending', endsAt: entitlement.cancel_at }); }
     if (method === 'POST' && path === '/billing/resume') { delete entitlement.cancel_at; return json(200, { status: 'active' }); }
