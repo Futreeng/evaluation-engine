@@ -96,6 +96,7 @@
         ]
       },
       business: { handle, platform, category, category_name: catName, followers: 12640167 },
+      best_times: { tz: 'America/New_York', confident: true, sample: 27, metric: 'likes and comments', windows: [{ day: 'Thu', start_hour: 18, end_hour: 21, label: 'Thu 6pm–9pm', n: 3, vs_avg: 2.22, explanation: 'Your Thu 6pm–9pm posts average 2.22× your usual likes and comments (3 posts).' }, { day: 'Fri', start_hour: 18, end_hour: 21, label: 'Fri 6pm–9pm', n: 4, vs_avg: 1.78, explanation: 'Your Fri 6pm–9pm posts average 1.78× your usual likes and comments (4 posts).' }], best_days: [{ day: 'Fri', n: 5, vs_avg: 2.04 }, { day: 'Thu', n: 5, vs_avg: 1.99 }], note: 'From your last 27 posts, in America/New York. Windows need at least 2 posts and 1.15× your median to count.' },
       post_insights: {
         sample: 12, avg_engagement: 96,
         note: 'Your top three are all coach-on-camera reels posted before 8am on weekdays. The bottom three are class-schedule graphics posted on Fridays with no caption beyond the times.',

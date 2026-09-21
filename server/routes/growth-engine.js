@@ -429,7 +429,8 @@ router.post("/evaluate/social-snapshot", evaluateLimiter, optionalAuth, validate
     // runs carry the full set (sent now, or saved earlier).
     const plan_context = await resolvePlanContext(req, accountId, handle, platform);
     const isBusiness = req.body.is_business === true || req.body.is_business === "yes";
-    const input = { handle, platform, category, email, competitors, plan_context, is_business: isBusiness };
+    const tz = typeof req.body.tz === "string" && require("../growth_engine_besttime").validTz(req.body.tz) ? req.body.tz : null;
+    const input = { handle, platform, category, email, competitors, plan_context, is_business: isBusiness, tz };
     if (req.user?.id && (isBusiness || category)) geDb.setUserProfile(req.user.id, { isBusiness, niche: category }).catch(() => { });
     if (req.body.rerun_of && typeof req.body.rerun_of === "string") input.rerun_of = req.body.rerun_of.slice(0, 60);
 
@@ -576,7 +577,7 @@ router.post("/reports/:reportId/unlock", authMiddleware, async (req, res) => {
 
     const b = report.business || {};
     const plan_context = await resolvePlanContext(req, req.user.id, b.handle, b.platform);
-    const input = { handle: b.handle, platform: b.platform, category: b.category, email: req.user.email || null, one_time_unlock: true, unlock_of: report.reportId, payment_id: payment.paymentId, plan_context };
+    const input = { handle: b.handle, platform: b.platform, category: b.category, email: req.user.email || null, one_time_unlock: true, unlock_of: report.reportId, payment_id: payment.paymentId, plan_context, tz: report.reportBody?.tz || null };
     const { jobId } = await geDb.createJob(req.user.id, "growth_plan", input);
     jobQueue.processJob(jobId, req.user.id, "growth_plan", input).catch((err) => console.error(`[Unlock] job ${jobId} failed:`, err.message));
     events.track("unlock", { ...events.attribution(req), reportId: report.reportId, props: { amount_cents: payment.amountInCents, promo: promo?.code || null, variant: vpu.variant } });
@@ -616,7 +617,7 @@ router.post("/reports/:reportId/checkin", authMiddleware, async (req, res) => {
     if (used >= limit) return res.status(429).json({ error: `You've run ${used} evaluations today; the plan will pick up your answers at the next weekly refresh.`, code: "RUN_LIMIT_REACHED", status: 429, checkins });
     await geDb.bumpUsage(req.user.id, "eval");
     const b = body.business || {};
-    const input = { handle: b.handle, platform: b.platform, category: b.category, email: req.user.email || null, plan_context: ctx, rerun_of: report.reportId, checkins };
+    const input = { handle: b.handle, platform: b.platform, category: b.category, email: req.user.email || null, plan_context: ctx, rerun_of: report.reportId, checkins, tz: body.tz || null };
     const { jobId } = await geDb.createJob(req.user.id, "growth_plan", input);
     jobQueue.processJob(jobId, req.user.id, "growth_plan", input).catch((err) => console.error(`[Checkin] job ${jobId} failed:`, err.message));
     res.json({ ok: true, checkins, job_id: jobId, status: "queued", tier: "growth_plan" });

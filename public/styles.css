@@ -680,3 +680,11 @@ p { margin: 0; }
 .arow.head .h, .arow.head .n { font: inherit; color: inherit; }
 .arow .n.neg { color: var(--c1t); }
 .optq.bizq { margin-top: 10px; }
+
+/* ---- best times to post ---- */
+.windows { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.window { padding: 14px 16px; background: var(--ground); border-radius: var(--r-in); border-left: 4px solid var(--c1); }
+.window.bd2 { border-left-color: var(--c2); } .window.bd3 { border-left-color: var(--c3); } .window.bd4 { border-left-color: var(--c4); }
+.window .d { font-family: var(--display); font-size: 18px; font-weight: 700; }
+.window .x { font-size: 13px; font-weight: 600; color: var(--c2); margin-top: 2px; } .window .x.muted { color: var(--muted); font-weight: 500; }
+.window p { margin-top: 6px; font-size: 13px; line-height: 1.5; color: var(--body); }

@@ -315,6 +315,7 @@
     if (btn) { btn.disabled = true; btn.dataset.label = btn.innerHTML; btn.textContent = 'Starting…'; }
     try {
       const body = { handle: payload.handle, platform: payload.platform, category: payload.category, email: payload.email };
+      try { body.tz = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { }
       if (payload.competitors && payload.competitors.length) body.competitors = payload.competitors;
       const ctx = payload.plan_context || sget('sc_plan_context', null);
       if (ctx) body.plan_context = ctx;
@@ -720,6 +721,15 @@
                 <div class="k"><div class="x ${k === 'top' ? 'g-strong' : 'g-weak'}">${p.vs_avg}×</div><div class="t">${k === 'top' ? 'TOP' : 'LOW'} · ${String(p.format).toUpperCase()}</div><div class="d">${p.weekday ? p.weekday + ' ' : ''}${p.date ? fmtShort(p.date) : ''}</div></div>
                 <div class="c"><p>“${p.caption || 'no caption'}”</p><div class="n">${fmtN(p.likes)} likes · ${fmtN(p.comments)} comments${p.views ? ` · ${fmtN(p.views)} views` : ''}${p.url ? raw(h` · <a href="${p.url}" target="_blank" rel="noopener">open</a>`) : ''}</div></div></div>`).join(''))}</div>
               ${pi.note ? raw(h`<p class="postnote">${pi.note}</p>`) : ''}
+            </div>
+          </details>`) : ''}
+
+          ${report.best_times ? raw(h`<details class="card acc" open>
+            <summary>Best times to post${report.best_times.confident ? '' : raw(h`<span class="tag fair" style="margin-left:10px">STARTING POINT</span>`)}</summary>
+            <div class="body">
+              <div class="windows">${raw((report.best_times.windows || []).map((w, i) => h`<div class="window bd${(i % 4) + 1}"><div class="d">${w.label}</div>${w.vs_avg ? raw(h`<div class="x">${w.vs_avg}× your usual</div>`) : raw('<div class="x muted">common window</div>')}<p>${w.explanation}</p></div>`).join(''))}</div>
+              ${(report.best_times.best_days || []).length ? raw(h`<div class="fine">Strongest days overall: ${report.best_times.best_days.map(d => `${d.day} (${d.vs_avg}× over ${d.n} posts)`).join(' · ')}.</div>`) : ''}
+              <div class="fine">${report.best_times.note}</div>
             </div>
           </details>`) : ''}
 

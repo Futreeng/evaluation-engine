@@ -4,6 +4,7 @@ const { analyzeInstagramAccount } = require("./instagram_fetcher");
 const { analyzeInstagramAccountViaApify } = require("./instagram_apify_fetcher");
 const { TIER_PRICING, ONE_TIME_PRICING } = require("./growth_engine_billing");
 const costs = require("./growth_engine_costs");
+const { bestTimes } = require("./growth_engine_besttime");
 // Label of the LLM call in flight, for cost rows (set by callWithQuadFallback).
 let currentLlmLabel = "";
 const { analyzeTikTokAccountViaApify } = require("./tiktok_apify_fetcher");
@@ -688,6 +689,8 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
     posts_last_14d: postsLast14d,
     posts: postRecords,
     posts_sampled: postRecords.length,
+    tz: inputParams.tz || null,
+    best_times: postRecords.length ? bestTimes(postRecords, { tz: inputParams.tz || "UTC", platform }) : null,
     data_window: postRecords.length ? `Based on your last ${postRecords.length} posts. We can't see saves, reach or story views.` : null,
     plan_context: inputParams.plan_context || null,
     data_confidence: structured ? "full" : "narrative_only",
