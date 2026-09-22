@@ -608,6 +608,8 @@ async function listPaidReportsBetween(fromTs, toTs) {
     generatedAt: row[columns.indexOf("generated_at")],
     refreshDueAt: row[columns.indexOf("refresh_due_at")],
     reportBody: JSON.parse(row[columns.indexOf("report_body")]),
+    createdAt: row[columns.indexOf("created_at")],
+    updatedAt: row[columns.indexOf("updated_at")],
   }));
 }
 
@@ -847,6 +849,8 @@ async function listReportsByAccount(accountId) {
     generatedAt: row[columns.indexOf("generated_at")],
     refreshDueAt: row[columns.indexOf("refresh_due_at")],
     reportBody: JSON.parse(row[columns.indexOf("report_body")]),
+    createdAt: row[columns.indexOf("created_at")],
+    updatedAt: row[columns.indexOf("updated_at")],
   }));
 }
 
@@ -873,6 +877,8 @@ async function listReportsDueForRefresh(beforeTimestamp) {
     generatedAt: row[columns.indexOf("generated_at")],
     refreshDueAt: row[columns.indexOf("refresh_due_at")],
     reportBody: JSON.parse(row[columns.indexOf("report_body")]),
+    createdAt: row[columns.indexOf("created_at")],
+    updatedAt: row[columns.indexOf("updated_at")],
   }));
 }
 

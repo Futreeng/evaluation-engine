@@ -160,7 +160,7 @@
   // and #/report/sample so prospects can read a full paid report.
   const SHIPPED = window.SCALECRAFT_SAMPLE || null;
   const SAMPLE = SHIPPED ? {
-    handle: SHIPPED.business.handle, platform: SHIPPED.business.platform, date: SHIPPED.created_at, followers: SHIPPED.business.followers || 0, overall: SHIPPED.scores.overall,
+    handle: SHIPPED.business.handle, platform: SHIPPED.business.platform, date: SHIPPED.generated_at || SHIPPED.created_at, followers: SHIPPED.business.followers || 0, overall: SHIPPED.scores.overall,
     dims: (SHIPPED.scores.dimensions || []).map(d => ({ label: d.label, score: d.score, category_avg: d.category_avg })), summary: SHIPPED.scores.summary || '', link: '#/report/sample'
   } : {
     handle: 'yourhandle', platform: 'instagram', date: '2026-09-18T00:00:00Z', followers: 4820, overall: 53,
@@ -411,7 +411,7 @@
   // The landing hero shows the visitor's own latest report once they have one.
   function rememberSample(r) {
     if (!r.scores || r.scores.overall == null) return;
-    sset('sc_sample', { report_id: r.report_id, handle: r.business?.handle, platform: r.business?.platform, date: r.created_at, followers: r.business?.followers || r.followers || 0, overall: r.scores.overall, dims: (r.scores.dimensions || []).map(d => ({ label: d.label, score: d.score, category_avg: d.category_avg })), summary: r.scores.summary || '' });
+    sset('sc_sample', { report_id: r.report_id, handle: r.business?.handle, platform: r.business?.platform, date: r.generated_at || r.created_at, followers: r.business?.followers || r.followers || 0, overall: r.scores.overall, dims: (r.scores.dimensions || []).map(d => ({ label: d.label, score: d.score, category_avg: d.category_avg })), summary: r.scores.summary || '' });
   }
 
   // ------------------------------------------------------------ report normalisation

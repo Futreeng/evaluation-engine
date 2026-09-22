@@ -541,14 +541,7 @@ router.get("/reports/:reportId", optionalAuth, async (req, res) => {
       return sendError(res, req.user ? 403 : 401, req.user ? "NOT_YOUR_REPORT" : "MISSING_TOKEN", "Sign in to view this report");
     }
 
-    // Compatibility: add `overall` field for frontend testing
-    // Frontend looks for result.overall; we mirror reportBody.narrative here
-    const responseReport = {
-      ...report,
-      overall: report.reportBody?.narrative || "Report generated successfully"
-    };
-
-    res.json(responseReport);
+    res.json(report);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

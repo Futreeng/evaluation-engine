@@ -457,6 +457,7 @@ function reportRow(row) {
         business: { handle: row.handle, platform: row.platform, category: row.category },
         generatedAt: Number(row.generated_at || row.created_at), refreshDueAt: row.refresh_due_at ? Number(row.refresh_due_at) : null,
         reportBody: parseJson(row.report_body),
+        createdAt: Number(row.created_at), updatedAt: Number(row.updated_at || row.created_at),
       }
     : null;
 }

@@ -38,6 +38,8 @@ New DB tables/columns (both backends create them on boot): `growth_engine_plan_c
 ## Your part
 
 1. **Merge `feat/sample-report`** → Render redeploys → add the env vars above → smoke test against Render.
+   - Go-live check on 2026-09-21 (`SMOKE_BASE=https://scalecraft.onrender.com node scripts/smoke.js`): 13/20. Health, pricing, signup, free score, plan context, email pause, password reset, admin gating, delete all pass. Every failure is one cause — Render's `STRIPE_API_KEY` is the `sk_test_..._KEY` placeholder, so unlock and subscribe 500 and everything downstream (cancel, resume, history) never runs. PR #5 carries the guard that treats a placeholder as "no Stripe" (mock billing); merge it or unset the var and re-run.
+   - `node scripts/shape_diff.js` compares the mock API against a running server route by route; keep it at "expected differences only" whenever a response shape changes.
 2. **Stripe for real** — `growth_engine_billing.js` is mock unless `STRIPE_API_KEY` is set. `_createStripeSubscription` throws "not implemented"; `purchaseOneTime` already uses a PaymentIntent. The webhook (`POST /billing/webhook`) is a stub — payment failed → `setCancelAt(accountId, now)` is all it needs to downgrade. Stripe Tax is worth turning on. Annual is shown on the pricing page but `subscribe` only takes monthly — wire it or hide the toggle.
 3. **Resend** — key + a verified sending domain (`MAIL_FROM`), `APP_URL` for links. Until then no email leaves the box, including password reset.
 4. **Meta OAuth "connect your account"** — your Graph API fetcher only reads owner-connected accounts; the scorer doesn't consume that data yet, parked until the connect flow exists.
