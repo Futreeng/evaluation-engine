@@ -135,6 +135,8 @@ class JobQueue {
             sc.category_top_quartile = base.top_quartile;
             sc.category_sample_size = base.n;
             for (const d of sc.dimensions || []) if (base.dimensions[d.label] != null) d.category_avg = base.dimensions[d.label];
+            // Percentile rank inside the niche (spec 1.11), only when the niche is ready.
+            try { const pct = await geDb.nichePercentile(inputParams.category, inputParams.platform, sc.overall); if (pct) sc.category_percentile = pct; } catch { /* optional */ }
           } else if (base) {
             sc.category_sample_size = base.n;
             sc.category_baseline_pending = { n: base.n, min_n: base.min_n };

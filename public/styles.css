@@ -735,3 +735,12 @@ p { margin: 0; }
 .reflink { flex: 1 1 280px; } .reflink .l { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
 .reflink .lk { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; } .reflink code { font-size: 13px; padding: 8px 10px; background: var(--ground); border-radius: 10px; word-break: break-all; }
 .refcard .fine { margin-top: 10px; }
+
+/* ---- score history + percentile ---- */
+.scorebox .pct { margin-top: 10px; font-size: 13px; color: var(--body); padding: 8px 12px; background: var(--ground); border-radius: 10px; }
+.histchart { margin-top: 12px; }
+.histchart svg { width: 100%; height: auto; max-width: 320px; display: block; }
+.histchart .grid { stroke: var(--line); stroke-width: 1; }
+.histchart .line { fill: none; stroke: var(--act); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+.histchart .dot { fill: var(--card); stroke: var(--act); stroke-width: 2; } .histchart .dot.last { fill: var(--act); }
+.histchart .hl { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--muted); margin-top: 4px; max-width: 320px; }

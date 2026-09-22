@@ -795,6 +795,12 @@ async function adminReferrals(limit = 50) {
 
 // ===================== CATEGORY BASELINES =====================
 
+async function nichePercentile(category, platform, score) {
+  const r = platform ? (await q(`SELECT COUNT(*) AS n, SUM(CASE WHEN overall < $1 THEN 1 ELSE 0 END) AS below FROM growth_engine_baselines WHERE category = $2 AND platform = $3`, [score, category, platform])).rows[0]
+                     : (await q(`SELECT COUNT(*) AS n, SUM(CASE WHEN overall < $1 THEN 1 ELSE 0 END) AS below FROM growth_engine_baselines WHERE category = $2`, [score, category])).rows[0];
+  const n = Number(r?.n || 0); if (!n) return null;
+  return { n, beats_pct: Math.round((Number(r.below || 0) / n) * 100) };
+}
 async function listBaselines() {
   const r = await q(`SELECT category, platform, handle, overall, dimensions, created_at FROM growth_engine_baselines ORDER BY category, platform, handle`);
   return r.rows.map((x) => { const dims = parseJson(x.dimensions) || {}; return { category: x.category, platform: x.platform, handle: x.handle, overall: Number(x.overall), dimensions: Object.entries(dims).map(([label, score]) => ({ label, score })), created_at: Number(x.created_at) }; });
@@ -915,6 +921,7 @@ module.exports = {
   getCategoryBaseline,
   getBaselineSummary,
   listBaselines,
+  nichePercentile,
   createBaseline,
   getBaselineStats,
 };

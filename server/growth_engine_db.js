@@ -461,6 +461,15 @@ async function listBaselines() {
   if (!r.length) return [];
   return r[0].values.map(([category, platform, handle, overall, dimensions, created_at]) => { let dims = {}; try { dims = JSON.parse(dimensions); } catch { /* skip */ } return { category, platform, handle, overall: Number(overall), dimensions: Object.entries(dims).map(([label, score]) => ({ label, score })), created_at: Number(created_at) }; });
 }
+// Where a score sits inside its niche: share of scored accounts it beats
+// (spec 1.11). Only meaningful once the niche has BASELINE_MIN_N rows.
+async function nichePercentile(category, platform, score) {
+  if (!db) throw new Error("Database not initialized");
+  const r = platform ? one(`SELECT COUNT(*) AS n, SUM(CASE WHEN overall < ? THEN 1 ELSE 0 END) AS below FROM growth_engine_baselines WHERE category = ? AND platform = ?`, [score, category, platform])
+                     : one(`SELECT COUNT(*) AS n, SUM(CASE WHEN overall < ? THEN 1 ELSE 0 END) AS below FROM growth_engine_baselines WHERE category = ?`, [score, category]);
+  const n = Number(r.n || 0); if (!n) return null;
+  return { n, beats_pct: Math.round((Number(r.below || 0) / n) * 100) };
+}
 async function getBaselineSummary() {
   if (!db) throw new Error("Database not initialized");
   const result = db.exec(`SELECT category, platform, COUNT(*) FROM growth_engine_baselines GROUP BY category, platform`);
@@ -1420,6 +1429,7 @@ module.exports = {
   listScoreHistory,
   getBaselineSummary,
   listBaselines,
+  nichePercentile,
   initDb,
   // Jobs
   createJob,

@@ -703,6 +703,8 @@
                   ${hist && hist.delta_overall != null ? raw(h`<span class="delta ${hist.delta_overall > 0 ? 'up' : hist.delta_overall < 0 ? 'down' : 'flat'}">${hist.delta_overall === 0 ? `${overall} → ${overall} · unchanged since ${fmtShort(hist.previous.generated_at)}` : `${hist.delta_overall > 0 ? '+' : ''}${hist.delta_overall} since ${fmtShort(hist.previous.generated_at)}`}</span>`) : ''}
                 </div></div>
               <p class="why">${s.summary || ''}</p>
+              ${s.category_percentile ? raw(h`<div class="pct">Scores higher than <b>${s.category_percentile.beats_pct}%</b> of ${niche} accounts we've scored (${fmtN(s.category_percentile.n)}).</div>`) : ''}
+              ${raw(historyChartHTML(hist))}
             </div>
             ${thisWeek ? raw(h`<div class="weekcard">
               <div class="eb"><span>This week</span><span>${thisWeek.days} · ${thisWeek.label}</span></div>
@@ -865,6 +867,21 @@
       btn.disabled = false; btn.textContent = 'Re-run';
     });
     if (!paid) api('/billing/pricing', {}, { allow401: true }).then(p => { if (p.support_email) sset('sc_support', p.support_email); rememberPricing(p); const t = (p.tiers || []).find(x => x.tier === 'growth_plan'); if (t && t.monthlyPrice != null) { const el = $view.querySelector('.upsell p'); if (el) el.textContent = el.textContent.replace(/\$\d+\/mo or \$\d+\/yr/, `$${t.monthlyPrice}/mo or $${t.annualPrice ?? Math.round(t.monthlyPrice * 9)}/yr`); } }).catch(() => { });
+  }
+  // Score history chart (spec 1.11): inline SVG from history.series, shown once there are 2+ runs.
+  function historyChartHTML(hist) {
+    const pts = (hist && hist.series || []).filter(p => Number.isFinite(p.overall)).slice(-12);
+    if (pts.length < 2) return '';
+    const W = 320, H = 96, P = 8;
+    const xs = i => P + (i / (pts.length - 1)) * (W - P * 2);
+    const ys = v => P + (1 - clamp(v, 0, 100) / 100) * (H - P * 2);
+    const d = pts.map((p, i) => `${i ? 'L' : 'M'}${xs(i).toFixed(1)},${ys(p.overall).toFixed(1)}`).join(' ');
+    const first = pts[0], last = pts[pts.length - 1];
+    return h`<div class="histchart"><svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Score history: ${first.overall} to ${last.overall} over ${pts.length} runs">
+      ${raw([25, 50, 75].map(g => `<line x1="${P}" x2="${W - P}" y1="${ys(g).toFixed(1)}" y2="${ys(g).toFixed(1)}" class="grid"/>`).join(''))}
+      <path d="${d}" class="line"/>
+      ${raw(pts.map((p, i) => `<circle cx="${xs(i).toFixed(1)}" cy="${ys(p.overall).toFixed(1)}" r="${i === pts.length - 1 ? 4 : 2.5}" class="${i === pts.length - 1 ? 'dot last' : 'dot'}"/>`).join(''))}
+    </svg><div class="hl"><span>${fmtShort(first.generated_at)} · ${first.overall}</span><span>${pts.length} run${pts.length === 1 ? '' : 's'}</span><span>${fmtShort(last.generated_at)} · ${last.overall}</span></div></div>`;
   }
   // Evidence tiles under a dimension explanation (spec 1.4): 1–3 posts, our
   // own thumbnail or a neutral tile, each linking to the post. Never shown on

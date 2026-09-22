@@ -146,6 +146,10 @@ const assert = require("assert");
   const st = await db.referralStats(ra.userId); assert.equal(st.signed_up, 1); assert.equal(st.paid, 1); assert.equal(st.paid_cents, 1200);
   assert.equal((await db.adminReferrals())[0].paid, 1);
 
+  // niche percentile (1.11): 21 retail rows 40..60 seeded above (acct0 overridden to 99)
+  const pc = await db.nichePercentile("retail", "instagram", 50);
+  assert.equal(pc.n, 21); assert.ok(pc.beats_pct >= 40 && pc.beats_pct <= 50, "pct " + pc.beats_pct);
+
   console.log("postgres module: all assertions passed");
   process.exit(0);
 })().catch((e) => { console.error("FAILED:", e.message); process.exit(1); });
