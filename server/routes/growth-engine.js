@@ -893,6 +893,18 @@ router.get("/baselines/:category", async (req, res) => {
 });
 
 // Get pricing
+// Weekly trend brief (spec 3.4): anonymised aggregate for a niche, public.
+router.get("/briefs/:category", async (req, res) => {
+  try {
+    const category = String(req.params.category || "").slice(0, 60), platform = String(req.query.platform || "instagram").slice(0, 20);
+    const briefs = require("../growth_engine_briefs");
+    // Rebuild on demand only with the admin token (the cache is per ISO week otherwise).
+    const force = req.query.force === "1" && !!process.env.ADMIN_TOKEN && req.get("x-admin-token") === process.env.ADMIN_TOKEN;
+    res.set("cache-control", "public, max-age=3600");
+    res.json(await briefs.getBrief(category, platform, { force }));
+  } catch (err) { sendError(res, 500, "BRIEF_ERROR", err.message); }
+});
+
 // Score bands + milestone thresholds (spec 2.2, 2.5) — config, so the app
 // never hardcodes them. Public: the pricing and sample pages show ranks too.
 router.get("/levels", (_req, res) => {

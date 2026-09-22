@@ -753,6 +753,7 @@
         ${showGoalAsk ? raw(h`<div class="card goalcard ask" id="goalAsk"><div class="eb">ONE QUESTION</div><h3>What do you want from this?</h3><p>The plan, your Monday move and the posts we write all lean toward it. Change it any time on your reports page.</p>${raw(goalPickerHTML(null, null, followers, { first: true }))}</div>`) : ''}
         ${goalNow && !showGoalAsk && !isSample ? raw((() => { const gp = goalProgress(goalNow, report.goal_target || sget('sc_goal', null)?.goal_target || null, report); return gp ? h`<div class="goalbar"><div class="t"><span class="l">${goalLabel(goalNow)}</span><span class="v">${gp.label}</span></div><div class="bar"><div class="fill" style="width:${gp.pct}%"></div></div><div class="fine">${gp.sub}</div></div>` : ''; })()) : ''}
         <div class="roastwrap" id="roastWrap" hidden></div>
+        <div class="brief" id="briefWrap" hidden></div>
         <div class="report">
           <div class="toprow">
             <div class="card scorebox">
@@ -888,6 +889,15 @@
     $view.querySelector('[data-action=share]').addEventListener('click', () => { if (!isSample) track('share_clicked', { overall }, report.report_id); openShareSheet(report); });
     $view.querySelectorAll('[data-moment-share]').forEach(b => b.addEventListener('click', () => { const m = (report.moments || []).find(x => x.key === b.dataset.momentShare); if (m) openShareSheet(report, m); }));
     $view.querySelectorAll('[data-moment-dismiss]').forEach(b => b.addEventListener('click', () => { try { localStorage.setItem('sc_moment_' + report.report_id + '_' + b.dataset.momentDismiss, '1'); } catch { } b.closest('.moment')?.remove(); }));
+    // Weekly trend brief (spec 3.4): loads after the report; hidden until the niche is ready.
+    { const bw = $view.querySelector('#briefWrap'); if (bw && biz.category && !isSample) api('/briefs/' + encodeURIComponent(biz.category) + '?platform=' + encodeURIComponent(biz.platform || 'instagram'), {}, { allow401: true }).then(b => {
+      if (!b || !b.ready) { if (b && b.n != null && paid) { bw.hidden = false; bw.innerHTML = h`<div class="card briefcard soon"><div class="eb">WHAT'S WORKING IN ${niche.toUpperCase()}</div><p class="fine">Published once ${b.min_n} ${niche} accounts are scored — ${b.n} so far. It's built from our own data, aggregated and anonymised.</p></div>`; } return; }
+      const fm = (b.formats || []).slice(0, 4);
+      bw.hidden = false; bw.innerHTML = h`<div class="card briefcard"><div class="eb">WHAT'S WORKING IN ${niche.toUpperCase()} · THIS WEEK</div>
+        <ul class="lines">${raw(b.lines.map(l => h`<li>${l}</li>`).join(''))}</ul>
+        ${fm.length ? raw(h`<div class="fmts">${raw(fm.map(f => h`<div class="fm"><div class="t"><span>${f.key}</span><span>${f.share_top}% of top posts · ${f.share_all}% of all</span></div><div class="bar"><div class="all" style="width:${f.share_all}%"></div><div class="top" style="width:${f.share_top}%"></div></div></div>`).join(''))}</div>`) : ''}
+        <div class="fine">From ${fmtN(b.n)} ${niche} accounts and ${fmtN(b.posts)} posts in the last ${b.window_days} days, aggregated and anonymised — no one's account is shown. "Top" = beat its own account's average by 1.5×.</div></div>`;
+    }).catch(() => { }); }
     const goalAsk = $view.querySelector('#goalAsk');
     if (goalAsk) bindGoalPicker(goalAsk, async (goal, target) => {
       try {

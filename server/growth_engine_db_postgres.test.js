@@ -152,6 +152,9 @@ const assert = require("assert");
 
   assert.ok(Array.isArray(await db.listReportsWithEmailSince(0)));
   { const g = await db.setGoal(u.userId, "followers", 5000); assert.equal(g.goal, "followers"); assert.equal(g.goalTarget, 5000); }
+  await db.upsertNicheBrief({ category: "retail", platform: "instagram", week: "2026-W39", n: 12, body: { ready: true, lines: ["x"] } });
+  assert.equal((await db.getNicheBrief("retail", "instagram", "2026-W39")).lines[0], "x");
+  assert.ok(Array.isArray(await db.listReportsByCategorySince("retail", "instagram", 0)));
   await db.insertRoastRejection({ reportId: "r1", accountId: "a1", heat: "medium", reason: "blocklist", flagged: "[2]", text: "[]" });
   assert.equal((await db.listRoastRejections(5))[0].reason, "blocklist");
 

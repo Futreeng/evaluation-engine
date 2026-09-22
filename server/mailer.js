@@ -79,12 +79,13 @@ function checkin({ to, userId, handle, reportId, phase, phaseLabel, firstMove, d
 }
 
 // Weekly refresh where the score moved, optionally with a nudge.
-function scoreChanged({ to, userId, handle, reportId, oldScore, newScore, dimension, delta, movesDone, nudge }) {
+function scoreChanged({ to, userId, handle, reportId, oldScore, newScore, dimension, delta, movesDone, nudge, brief = null }) {
   const url = reportUrl(reportId);
   const up = newScore >= oldScore;
   const inner = h2(up ? `Your score went up.` : `Your score slipped.`) + scoreRow(oldScore, newScore)
     + p(`${esc(dimension)} moved ${delta > 0 ? "+" : ""}${esc(delta)}${movesDone ? ` after ${esc(movesDone)} move${movesDone === 1 ? "" : "s"} you marked done` : ""}. The moves and calendar for @${esc(handle)} have been rewritten against this week's posts.`)
     + (nudge ? `<div style="margin-top:20px;padding:16px 18px;background:#FBEED2;border-radius:14px;font-size:14px;line-height:1.55;color:#6B5310"><b>${esc(nudge.title)}</b><br>${esc(nudge.text)}</div>` + ghost(`${url}?nudge=${encodeURIComponent(nudge.key)}`, nudge.cta) : "")
+    + (brief && brief.ready && brief.lines?.length ? `<div style="margin-top:22px;padding-top:16px;border-top:1px solid #EADFCB"><div style="font-size:11px;letter-spacing:.1em;font-weight:700;color:#D2603A">WHAT'S WORKING IN ${esc(String(brief.category || "").replace(/_/g, " ").toUpperCase())} THIS WEEK</div><ul style="margin:8px 0 0;padding-left:18px;font-size:14px;line-height:1.55;color:#5B4C3B">${brief.lines.slice(0, 3).map((l) => `<li style="margin:0 0 6px">${esc(l)}</li>`).join("")}</ul><div style="font-size:12px;color:#7A6A57;margin-top:6px">From ${esc(brief.n)} ${esc(String(brief.category || "").replace(/_/g, " "))} accounts we've scored, aggregated and anonymised.</div></div>` : "")
     + button(url, "See what changed");
   return send({ to, userId, subject: `${handle}: ${oldScore} → ${newScore}`, html: layout("Score changed", inner, { userId }), tag: "score_changed" });
 }

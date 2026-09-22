@@ -190,6 +190,19 @@ function initSchema() {
     )
   `);
 
+  // Weekly niche briefs (spec 3.4): one aggregate per niche+platform+week.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS growth_engine_niche_briefs (
+      id TEXT PRIMARY KEY,
+      category TEXT NOT NULL,
+      platform TEXT NOT NULL,
+      week TEXT NOT NULL,
+      n INTEGER NOT NULL,
+      body TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    )
+  `);
+
   // Roasts that failed a guardrail (spec 2.1) — kept for review.
   db.run(`
     CREATE TABLE IF NOT EXISTS growth_engine_roast_rejections (
@@ -884,6 +897,29 @@ async function listReportsWithEmailSince(fromTs) {
     generatedAt: row[columns.indexOf("generated_at")], reportBody: JSON.parse(row[columns.indexOf("report_body")]),
   }));
 }
+// Reports in one niche (any account, any tier) since a time — the trend brief aggregates these.
+async function listReportsByCategorySince(category, platform, fromTs) {
+  if (!db) throw new Error("Database not initialized");
+  const result = db.exec(`SELECT * FROM growth_engine_reports WHERE business_category = ? AND business_platform = ? AND generated_at >= ? ORDER BY generated_at DESC`, [category, platform, fromTs]);
+  if (!result || result.length === 0) return [];
+  const columns = result[0].columns;
+  return result[0].values.map((row) => ({
+    reportId: row[columns.indexOf("report_id")], accountId: row[columns.indexOf("account_id")], tier: row[columns.indexOf("tier")],
+    business: { handle: row[columns.indexOf("business_handle")], platform: row[columns.indexOf("business_platform")], category: row[columns.indexOf("business_category")] },
+    generatedAt: row[columns.indexOf("generated_at")], reportBody: JSON.parse(row[columns.indexOf("report_body")]),
+  }));
+}
+async function getNicheBrief(category, platform, week) {
+  if (!db) throw new Error("Database not initialized");
+  const r = one(`SELECT body FROM growth_engine_niche_briefs WHERE category = ? AND platform = ? AND week = ?`, [category, platform, week]);
+  if (!r) return null; try { return JSON.parse(r.body); } catch { return null; }
+}
+async function upsertNicheBrief({ category, platform, week, n, body }) {
+  if (!db) throw new Error("Database not initialized");
+  db.run(`DELETE FROM growth_engine_niche_briefs WHERE category = ? AND platform = ? AND week = ?`, [category, platform, week]);
+  db.run(`INSERT INTO growth_engine_niche_briefs (id, category, platform, week, n, body, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, ["nb_" + uid(), category, platform, week, n || 0, JSON.stringify(body), Date.now()]);
+  saveDb();
+}
 async function listReportsDueForRefresh(beforeTimestamp) {
   if (!db) throw new Error("Database not initialized");
 
@@ -1531,6 +1567,9 @@ module.exports = {
   listRoastRejections,
   setGoal,
   listReportsWithEmailSince,
+  listReportsByCategorySince,
+  getNicheBrief,
+  upsertNicheBrief,
   setUserProfile,
   listBusinessAccounts,
 };

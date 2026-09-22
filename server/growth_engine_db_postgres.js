@@ -158,6 +158,10 @@ async function initSchema() {
         provider TEXT, provider_id TEXT, error TEXT, created_at BIGINT NOT NULL
       )`);
     await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_niche_briefs (
+        id TEXT PRIMARY KEY, category TEXT NOT NULL, platform TEXT NOT NULL, week TEXT NOT NULL, n INTEGER NOT NULL, body TEXT NOT NULL, created_at BIGINT NOT NULL
+      )`);
+    await client.query(`
       CREATE TABLE IF NOT EXISTS growth_engine_roast_rejections (
         id TEXT PRIMARY KEY, report_id TEXT, account_id TEXT, heat TEXT, reason TEXT NOT NULL, flagged TEXT, text TEXT, created_at BIGINT NOT NULL
       )`);
@@ -497,6 +501,18 @@ async function updateReportRefreshDue(reportId, refreshDueAt) {
 async function listReportsWithEmailSince(fromTs) {
   const r = await q(`SELECT * FROM growth_engine_reports WHERE generated_at >= $1 AND report_body LIKE '%"email":"%' ORDER BY generated_at DESC`, [fromTs]);
   return r.rows.map(reportRow);
+}
+async function listReportsByCategorySince(category, platform, fromTs) {
+  const r = await q(`SELECT * FROM growth_engine_reports WHERE category = $1 AND platform = $2 AND generated_at >= $3 ORDER BY generated_at DESC`, [category, platform, fromTs]);
+  return r.rows.map(reportRow);
+}
+async function getNicheBrief(category, platform, week) {
+  const r = await q(`SELECT body FROM growth_engine_niche_briefs WHERE category = $1 AND platform = $2 AND week = $3`, [category, platform, week]);
+  return r.rows[0] ? parseJson(r.rows[0].body) : null;
+}
+async function upsertNicheBrief({ category, platform, week, n, body }) {
+  await q(`DELETE FROM growth_engine_niche_briefs WHERE category = $1 AND platform = $2 AND week = $3`, [category, platform, week]);
+  await q(`INSERT INTO growth_engine_niche_briefs (id, category, platform, week, n, body, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7)`, ["nb_" + uid(), category, platform, week, n || 0, JSON.stringify(body), Date.now()]);
 }
 async function listReportsDueForRefresh(beforeTimestamp) {
   const r = await q(`SELECT * FROM growth_engine_reports WHERE refresh_due_at IS NOT NULL AND refresh_due_at <= $1 ORDER BY refresh_due_at ASC`, [beforeTimestamp]);
@@ -889,6 +905,9 @@ module.exports = {
   listRoastRejections,
   setGoal,
   listReportsWithEmailSince,
+  listReportsByCategorySince,
+  getNicheBrief,
+  upsertNicheBrief,
   setUserProfile,
   listBusinessAccounts,
   // Jobs
