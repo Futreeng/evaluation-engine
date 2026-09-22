@@ -3,6 +3,11 @@ const db = require("./db");
 const { analyzeInstagramAccount } = require("./instagram_fetcher");
 const { analyzeInstagramAccountViaApify } = require("./instagram_apify_fetcher");
 const { TIER_PRICING, ONE_TIME_PRICING } = require("./growth_engine_billing");
+const costs = require("./growth_engine_costs");
+const { bestTimes } = require("./growth_engine_besttime");
+const evidence = require("./growth_engine_evidence");
+// Label of the LLM call in flight, for cost rows (set by callWithQuadFallback).
+let currentLlmLabel = "";
 const { analyzeTikTokAccountViaApify } = require("./tiktok_apify_fetcher");
 const { scoreProfile, rankPosts } = require("./growth_engine_scoring");
 
@@ -103,7 +108,7 @@ function planContextBlock(ctx, days = 90) {
   const lines = [];
   if (ctx.horizon && L.horizon[ctx.horizon]) lines.push(`- Next ${days} days: ${L.horizon[ctx.horizon]}.`);
   if (ctx.hours && L.hours[ctx.hours]) lines.push(`- Time for content: ${L.hours[ctx.hours]}.`);
-  if (ctx.goal && L.goal[ctx.goal]) lines.push(`- What they want from the next ${days} days: ${L.goal[ctx.goal]}.`);
+  if (ctx.goal && L.goal[ctx.goal]) lines.push(`- What they want from the next ${days} days: ${L.goal[ctx.goal]}${ctx.goal === "followers" && ctx.goal_target ? ` (target: ${ctx.goal_target} followers)` : ""}.`);
   if (ctx.link) lines.push(`- Their link (use this exact URL in any bio/link move, never a placeholder): ${ctx.link}`);
   if (ctx.contact) lines.push(`- The email brands should use (use it exactly in any bio/contact move, never a placeholder): ${ctx.contact}`);
   if (ctx.style && L.style[ctx.style]) lines.push(`- How they like to make content: ${L.style[ctx.style]}.`);
@@ -165,6 +170,24 @@ Phase plan (weeks 1-4 serve phase 1, 5-8 phase 2{{PHASE3_NOTE}}): {{PHASES_JSON}
 Produce ONLY a JSON array of {{WEEKS}} weeks, no prose, no markdown fences:
 [{"week":1,"slots":[{"day":"Mon","format":"reel","source":"new","angle":"what the post is about, under 10 words","prompt":"a shooting/caption brief the owner can follow, under 25 words"},{"day":"Wed",...},{"day":"Sat",...}]}, ... through week {{WEEKS}}]
 One slot per posting day per week. Formats: reel, carousel, static, story. "source" is where the material comes from: "new" (needs a new shoot), "archive" (re-cut, repurposed or throwback from existing posts) or "no_camera" (talk-to-camera at home, text, screenshots, planning). Vary subjects across weeks; reuse the account's proven formats. Valid JSON only.`;
+
+// Post writing (spec 1.12): the next N posts, written from the account's own
+// best posts and the current plan phase, each on a day/time from its best
+// windows. One call for the set; regeneration asks for one post at a time.
+const NEXT_POSTS_PROMPT = `You are the Post Writer for Scalecraft. A creator has paid for their Growth Plan. Write their next {{COUNT}} posts, ready to shoot and post. Every post must come from THIS account's own material and voice: reuse the hooks, subjects, locations, caption style and formats that already perform for them (see best posts), and serve the current plan phase. No generic advice, no invented facts, no numbers that aren't in the data. Scripts are plain wrapped text — no markdown, no bullet points, no code formatting.
+
+Handle: {{HANDLE}} ({{PLATFORM}})
+Category: {{CATEGORY}}
+Best and worst recent posts: {{POST_INSIGHTS}}
+Their bio: {{BIO}}
+Current plan phase: {{PHASE}}
+Upcoming calendar slots (follow their formats and angles where sensible): {{SLOTS}}
+Posting windows that perform for this account (use these day/time pairs, cycling through them in order): {{WINDOWS}}
+{{PLAN_CONTEXT}}
+{{AVOID}}
+Produce ONLY a JSON array of {{COUNT}} posts, no prose, no markdown fences:
+[{"n":1,"day":"Thu","time":"7pm","format":"reel","hook":"the first line on screen or the first sentence spoken, under 12 words","caption":"the full caption in their voice, 2–5 short lines, hashtags only if they already use them","script":"for a reel/video: a 4–8 line spoken script or shot list as plain text with line breaks; for a carousel: one line per slide; for a photo: what to shoot and the caption angle","why":"one sentence tying this post to a specific past post or number","source":"new|archive|no_camera"}]
+Valid JSON only.`;
 
 // Category benchmarks. These are working assumptions, not measured
 // averages — replace with real baselines once enough profiles are scored.
@@ -240,7 +263,8 @@ function formatInstagramDataForAnalysis(instagramData) {
     biography: instagramData.biography || null,
     website: instagramData.website || "empty (no link in bio)",
     metrics: instagramData.analysis,
-    recent_activity: instagramData.recent_posts.slice(0, 12).map((p) => ({
+    posts_sampled: instagramData.recent_posts.length,
+    recent_activity: instagramData.recent_posts.map((p) => ({
       date: p.timestamp.split("T")[0],
       engagement: (p.like_count || 0) + (p.comments_count || 0),
       likes: p.like_count || 0,
@@ -252,6 +276,16 @@ function formatInstagramDataForAnalysis(instagramData) {
       duration_s: p.duration || undefined,
       location: p.location || undefined,
       caption_preview: p.caption ? p.caption.substring(0, 100) : "",
+    })),
+    // Per-post record kept on the report (spec 1.3): what 1.4 evidence and
+    // 1.10 best-time read from. Thumbnail URLs here are the scraper's signed
+    // ones — never rendered; 1.4 replaces them with our own copies.
+    posts: instagramData.recent_posts.map((p) => ({
+      id: String(p.id || p.short_code || ""), posted_at: p.timestamp,
+      type: p.is_reel ? (instagramData.platform === "tiktok" ? "video" : "reel") : String(p.media_type || "").toLowerCase() === "carousel" ? "carousel" : String(p.media_type || "").toLowerCase() === "video" ? "video" : instagramData.platform === "tiktok" ? "slideshow" : "image",
+      caption: (p.caption || "").slice(0, 300), likes: p.like_count || 0, comments: p.comments_count || 0,
+      views: p.video_view_count || null, saves: p.save_count ?? null, shares: p.share_count ?? null, duration_s: p.duration || null,
+      permalink: p.permalink || null, source_thumbnail_url: p.thumbnail_url || null, is_pinned: !!p.is_pinned,
     })),
   };
 }
@@ -299,6 +333,7 @@ async function callClaudeNonStreaming(claudeKey, claudeWorkspaceId, system, user
   }
 
   const data = await response.json();
+  costs.llm({ provider: "claude", model: "claude-opus-4-1", label: currentLlmLabel, usage: { in: data.usage?.input_tokens, out: data.usage?.output_tokens } });
   return data.content[0].text;
 }
 
@@ -346,6 +381,7 @@ async function callGeminiNonStreaming(geminiKey, systemInstruction, userMessage)
         geminiBreaker.fails = 0;
         const data = await response.json();
         const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("") || "";
+        costs.llm({ provider: "gemini", model, label: currentLlmLabel, usage: { in: data.usageMetadata?.promptTokenCount, out: (data.usageMetadata?.candidatesTokenCount || 0) + (data.usageMetadata?.thoughtsTokenCount || 0) } });
         if (text.trim()) return text;
         lastErr = new Error(`Gemini returned an empty completion (${model})`);
         console.warn("[Growth Engine]", lastErr.message, JSON.stringify(data.candidates?.[0]?.finishReason || data.promptFeedback || "").slice(0, 80));
@@ -389,6 +425,7 @@ async function callGroqNonStreaming(groqKey, systemInstruction, userMessage) {
       if (response.ok) {
         const data = await response.json();
         const content = data.choices?.[0]?.message?.content;
+        costs.llm({ provider: "groq", model, label: currentLlmLabel, usage: { in: data.usage?.prompt_tokens, out: data.usage?.completion_tokens } });
         if (content && content.trim()) return content;
         // Empty completion (budget spent on hidden reasoning) — try the next model.
         lastErr = new Error(`Groq returned an empty completion (${model})`);
@@ -467,6 +504,7 @@ async function callOpenAINonStreaming(openaiKey, system, userMessage) {
   }
 
   const data = await response.json();
+  costs.llm({ provider: "openai", model: "gpt-4o-mini", label: currentLlmLabel, usage: { in: data.usage?.prompt_tokens, out: data.usage?.completion_tokens } });
   return data.choices[0].message.content;
 }
 
@@ -493,6 +531,7 @@ async function callWithFallback(primaryCall, fallbackCall, label) {
 
 // 4-way fallback: try all four LLMs in sequence
 async function callWithQuadFallback(primaryCall, secondaryCall, tertiaryCall, quaternaryCall, label) {
+  currentLlmLabel = label;
   try {
     console.log(`[Growth Engine] ${label}: trying primary LLM (Claude)...`);
     return await primaryCall();
@@ -558,14 +597,24 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
   let postInsights = null;
   let followers = null;
   let postsLast14d = null;
+  let postRecords = [];
+  let profileBio = null;
   try {
     await onStage("finding", 1);
     const realData = await getRealPostData(handle, platform, category);
     await onStage("reading", 2);
+    postRecords = Array.isArray(realData.posts) ? realData.posts : [];
+    profileBio = realData.biography || null;
     followers = Number.isFinite(realData.follower_count) ? realData.follower_count : null;
     const acts = realData.recent_activity || realData.recent_posts || [];
     postsLast14d = acts.filter((p) => { const t = +new Date(p.date || p.timestamp); return Number.isFinite(t) && Date.now() - t <= 14 * 86400000; }).length;
-    postSummary = JSON.stringify(realData); // compact: every token counts against free-tier TPM caps
+    // What the model sees: metrics + one compact row per post. No URLs,
+    // thumbnails or full captions — 30 posts must still fit Groq's 8k TPM.
+    postSummary = JSON.stringify({
+      ...realData, posts: undefined,
+      recent_activity: (realData.recent_activity || []).map((p) => { const o = { d: p.date, t: p.media_type, l: p.likes, c: p.comments }; if (p.video_views) o.v = p.video_views; if (p.saves) o.s = p.saves; if (p.shares) o.sh = p.shares; if (p.caption_preview) o.cap = p.caption_preview.slice(0, 60); return o; }),
+      recent_activity_key: "d=date t=type l=likes c=comments v=views s=saves sh=shares cap=caption start",
+    });
     computed = scoreProfile(realData, category); // null for fetchers without the metric shape (Twitter)
     postInsights = rankPosts(realData.recent_activity || realData.recent_posts);
   } catch (err) {
@@ -653,11 +702,18 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
       platform,
       category,
       business_name: null,
+      is_business_account: !!inputParams.is_business,
       followers,
     },
     generated_at: Date.now(),
     refresh_due_at: null,
     posts_last_14d: postsLast14d,
+    posts: postRecords,
+    posts_sampled: postRecords.length,
+    bio: profileBio,
+    tz: inputParams.tz || null,
+    best_times: postRecords.length ? bestTimes(postRecords, { tz: inputParams.tz || "UTC", platform }) : null,
+    data_window: postRecords.length ? `Based on your last ${postRecords.length} posts. We can't see saves, reach or story views.` : null,
     plan_context: inputParams.plan_context || null,
     data_confidence: structured ? "full" : "narrative_only",
     narrative,
@@ -691,12 +747,29 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
       return hit ? hit.explanation : "";
     };
     const overallLine = auditorExpl["overallscore"] || null;
+    // Every number in an explanation must have been in the model's input
+    // (spec 1.4). Anything else is replaced by the scorer's own sentence.
+    // The allowed set is exactly what the model was shown: the compact data
+    // summary, the benchmarks and the computed sub-scores — plus the
+    // per-post numbers and the dates.
+    const allowed = computed ? evidence.allowedNumbers({ shown: postSummary, benchmarks, dims: computed.dimensions, posts: postRecords.map((p) => ({ likes: p.likes, comments: p.comments, views: p.views, d: p.posted_at ? new Date(p.posted_at).getDate() : null })), followers, sampled: postRecords.length, window: Number(process.env.CADENCE_WINDOW_DAYS || 90), targets: require("./growth_engine_scoring").targetFor?.(category, platform) || null }) : null;
+    const rejected = [];
+    const checkedExpl = (d) => {
+      const text = findExpl(d.label) || "";
+      if (!text) return { text: d.evidence, source: "scorer" };
+      const v = allowed ? evidence.validateExplanation(text, allowed) : { ok: true };
+      if (v.ok) return { text, source: "model" };
+      rejected.push({ dimension: d.label, cited: v.bad, text });
+      console.warn(`[Growth Engine] explanation for ${d.label} cited ${v.bad.join(", ")} — not in the data; replaced`);
+      return { text: d.evidence.charAt(0).toUpperCase() + d.evidence.slice(1) + ".", source: "validator" };
+    };
     reportBody.scores = computed
       ? {
           overall: computed.overall,
           category_avg: null, // filled from measured baselines by the job queue
           summary: typeof structured?.summary === "string" ? structured.summary : overallLine,
-          dimensions: computed.dimensions.map((d) => ({ label: d.label, score: d.score, explanation: findExpl(d.label) || d.evidence, evidence: d.evidence, parts: d.parts })),
+          dimensions: computed.dimensions.map((d) => { const ex = checkedExpl(d); return { label: d.label, score: d.score, explanation: ex.text, explanation_source: ex.source, evidence: d.evidence, parts: d.parts, evidence_posts: evidence.pickEvidence(d.label, postRecords) }; }),
+          explanation_rejections: rejected,
           method: computed.method,
           niche_known: computed.niche_known,
           creator: computed.creator,
@@ -726,8 +799,9 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
       cta_label: "Unlock your full Growth Plan",
       target_tier: "growth_plan",
       unlock_count: phases.reduce((n, p) => n + (Number(p?.locked?.count) || 4), 0) || 12,
-      monthly_price: TIER_PRICING.growth_plan / 100,
-      one_time_price: ONE_TIME_PRICING.plan_unlock / 100,
+      monthly_price: require("./growth_engine_plans").priceFor("growth_plan", "monthly") / 100,
+      // The one-time plan is only offered while it's on sale (P.8 earmarks it); the app reads live pricing anyway.
+      ...(require("./growth_engine_plans").ONE_TIME_UNLOCK_ENABLED ? { one_time_price: ONE_TIME_PRICING.plan_unlock / 100 } : {}),
     };
   }
 
@@ -739,7 +813,7 @@ async function evaluateTier0(accountId, inputParams, onStage) {
   return reportBody;
 }
 
-async function evaluateTier1(accountId, inputParams, onStage = () => {}) {
+async function evaluateTier1(accountId, inputParams, onStage = () => {}, { tier: runTier = "growth_plan" } = {}) {
   // Tier 1: Growth Plan — the free snapshot plus every locked item, from the same data.
   const { reportBody, structured, postSummary, benchmarks, keys } = await runSnapshot(accountId, inputParams, onStage);
   await onStage("writing", 4);
@@ -819,7 +893,27 @@ async function evaluateTier1(accountId, inputParams, onStage = () => {}) {
     PHASE3_NOTE: PHASES_BOUGHT === 3 ? ", 9-12 phase 3" : "",
     WEEKS: WEEKS_BOUGHT,
   }), "Plan Writer: calendar", 6144);
-  const plan = { ...moves, calendar: Array.isArray(calendarRaw) ? calendarRaw : (calendarRaw && Array.isArray(calendarRaw.calendar) ? calendarRaw.calendar : []) };
+  let calendarArr = Array.isArray(calendarRaw) ? calendarRaw : (calendarRaw && Array.isArray(calendarRaw.calendar) ? calendarRaw.calendar : []);
+  // Models sometimes stop early and the loose parser keeps the weeks that
+  // parsed. Ask once more for just the missing weeks rather than shipping
+  // a 3-week "12-week calendar".
+  if (calendarArr.length && calendarArr.length < WEEKS_BOUGHT) {
+    const have = calendarArr.length;
+    console.warn(`[Growth Engine] calendar came back with ${have}/${WEEKS_BOUGHT} weeks — asking for the rest`);
+    const more = await askJson(interpolateTemplate(PLAN_CALENDAR_PROMPT, {
+      ...baseVars,
+      POSTING_DAYS: (moves.posting_days || []).join(", ") || "Mon, Wed, Fri",
+      POSTING_TIME: moves.posting_time || "morning",
+      PHASES_JSON: JSON.stringify((reportBody.growth_path?.phases ?? []).slice(0, PHASES_BOUGHT).map((p, i) => ({ range: p.range, label: p.label, first_move: p.visible_action, moves: (moves.phases?.[i]?.moves || []).map((m) => m.title) }))),
+      PHASE3_NOTE: PHASES_BOUGHT === 3 ? ", 9-12 phase 3" : "",
+      WEEKS: WEEKS_BOUGHT,
+    }).replace(`Produce ONLY a JSON array of ${WEEKS_BOUGHT} weeks`, `Weeks 1-${have} are already written. Produce ONLY a JSON array of the remaining weeks ${have + 1} through ${WEEKS_BOUGHT} (${WEEKS_BOUGHT - have} weeks, "week" numbered ${have + 1}..${WEEKS_BOUGHT})`), "Plan Writer: calendar (rest)", 6144);
+    const rest = Array.isArray(more) ? more : (more && Array.isArray(more.calendar) ? more.calendar : []);
+    const seen = new Set(calendarArr.map((w) => Number(w.week)));
+    for (const w of rest) { const n = Number(w.week); if (n > have && n <= WEEKS_BOUGHT && !seen.has(n)) { calendarArr.push(w); seen.add(n); } }
+    calendarArr.sort((a, b) => Number(a.week) - Number(b.week));
+  }
+  const plan = { ...moves, calendar: calendarArr };
   if (process.env.GE_DEBUG_PLAN) console.log("[Growth Engine] plan moves raw:", JSON.stringify(moves).slice(0, 600));
 
   const days = Array.isArray(plan.posting_days) ? plan.posting_days.map(String) : [];
@@ -845,8 +939,10 @@ async function evaluateTier1(accountId, inputParams, onStage = () => {}) {
   }
   planPhases = planPhases.map((ph) => ({ ...ph, range: normRange(ph.range), moves: Array.isArray(ph.moves) ? ph.moves : [] }));
 
-  reportBody.tier = "growth_plan";
-  reportBody.refresh_due_at = inputParams.one_time_unlock ? null : Date.now() + (reportBody.plan_incomplete ? 1 : 7) * 24 * 60 * 60 * 1000;
+  reportBody.tier = runTier;
+  // Rescore cadence by tier (P.1: Pro every 3 days) — plan config, not a constant.
+  const rescoreDays = require("./growth_engine_plans").limitFor(runTier, "rescore_days") || 7;
+  reportBody.refresh_due_at = inputParams.one_time_unlock ? null : Date.now() + (reportBody.plan_incomplete ? 1 : rescoreDays) * 24 * 60 * 60 * 1000;
   if (!reportBody.growth_path) reportBody.growth_path = { phases: [] };
   reportBody.growth_path.phases = reportBody.growth_path.phases.map((p, i) => {
     if (i >= PHASES_BOUGHT) {
@@ -871,6 +967,11 @@ async function evaluateTier1(accountId, inputParams, onStage = () => {}) {
   reportBody.calendar = { posting_days: days, posting_time: plan.posting_time ? String(plan.posting_time) : null, weeks };
   reportBody.plan_days = PHASES_BOUGHT * 30;
   reportBody.plan_context = planContext;
+  // Your next posts (spec 1.12): written now so the report arrives complete.
+  reportBody.plan_started_at = reportBody.plan_started_at || Date.now();
+  // Written posts per tier (P.4): 6 on Growth, 12 on Pro; counted toward the weekly allowance.
+  reportBody.next_posts = await writeNextPosts(accountId, reportBody, { count: require("./growth_engine_plans").limitFor(runTier, "written_posts_per_week") || Number(process.env.NEXT_POSTS_COUNT || 6) });
+  if (reportBody.next_posts?.length && accountId && accountId !== "demo-account") { try { await require("./growth_engine_db_select").bumpUsage(accountId, "written_posts", reportBody.next_posts.length); } catch { /* fine */ } }
   reportBody.upsell = { cta_label: "Upgrade to Business Evaluator", target_tier: "business_evaluator", unlock_count: 0 };
   return reportBody;
 }
@@ -929,6 +1030,7 @@ async function evaluateTier2(accountId, inputParams) {
       platform,
       category,
       business_name: null,
+      is_business_account: !!inputParams.is_business,
     },
     generated_at: Date.now(),
     refresh_due_at: Date.now() + 14 * 24 * 60 * 60 * 1000, // 14 days for bi-weekly refresh
@@ -973,7 +1075,69 @@ async function evaluateTier2(accountId, inputParams) {
   return reportBody;
 }
 
+// Generic "ask for JSON" with the account's keys, for features outside the
+// evaluation pipeline (post regeneration). Retries once on unparseable output.
+async function llmJson(accountId, sys, prompt, label, budget = 4096) {
+  const { claudeKey, claudeWorkspaceId, geminiKey, groqKey } = getDecryptedKeys(accountId);
+  const openaiKey = process.env.OPENAI_API_KEY;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const raw = await withOutputTokens(budget, () => callWithQuadFallback(
+      () => callClaudeNonStreaming(claudeKey, claudeWorkspaceId, sys, prompt),
+      () => callGeminiNonStreaming(geminiKey, sys, prompt),
+      () => callGroqNonStreaming(groqKey, sys, prompt),
+      () => callOpenAINonStreaming(openaiKey, sys, prompt),
+      attempt ? `${label} (retry)` : label
+    ));
+    const parsed = parseJsonLoose(raw);
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
+const POST_SOURCES = new Set(["new", "archive", "no_camera"]);
+function normalizePost(p, i) {
+  return { n: i + 1, day: String(p.day || ""), time: String(p.time || ""), format: String(p.format || "reel").toLowerCase(), hook: String(p.hook || "").trim(), caption: String(p.caption || "").trim(), script: String(p.script || "").replace(/\r/g, "").trim(), why: String(p.why || "").trim(), source: POST_SOURCES.has(String(p.source || "").toLowerCase()) ? String(p.source).toLowerCase() : "new", written_at: Date.now() };
+}
+// Build the prompt from a finished report body. `regenerate` = index to rewrite one post (others listed as AVOID).
+function nextPostsPrompt(reportBody, { count, regenerate = null } = {}) {
+  const b = reportBody; const ctx = b.plan_context || null;
+  const phaseIdx = Math.min((b.growth_path?.phases || []).length - 1, Math.max(0, Math.floor(((Date.now() - (b.plan_started_at || Date.now())) / 86400000) / 30)));
+  const phase = (b.growth_path?.phases || [])[phaseIdx];
+  const windows = (b.best_times?.windows || []).map((w) => `${w.day} ${String(w.label).split(" ").slice(1).join(" ")}`);
+  const wk = (b.calendar?.weeks || []).filter((w) => w.phase === phaseIdx + 1).slice(0, 2).flatMap((w) => w.slots || []).map((s) => `${s.day} ${s.format}: ${s.angle}`);
+  const pi = b.post_insights || {};
+  const others = regenerate != null ? (b.next_posts || []).filter((_, i) => i !== regenerate).map((p) => p.hook).filter(Boolean) : [];
+  return interpolateTemplate(NEXT_POSTS_PROMPT, {
+    COUNT: count, HANDLE: b.business?.handle || "", PLATFORM: b.business?.platform || "instagram", CATEGORY: b.business?.category || "",
+    POST_INSIGHTS: JSON.stringify({ best_format: pi.patterns?.best_format, best_day: pi.patterns?.best_day, top: (pi.top || []).map((p) => ({ date: String(p.date).slice(0, 10), format: p.format, vs_avg: p.vs_avg, caption: p.caption })), bottom: (pi.bottom || []).map((p) => ({ date: String(p.date).slice(0, 10), format: p.format, vs_avg: p.vs_avg, caption: p.caption })) }),
+    BIO: (b.bio || b.profile?.biography || "").slice(0, 300) || "not available",
+    PHASE: phase ? `${phase.label} (days ${phase.range}) — first move: ${phase.visible_action}` : "phase 1",
+    SLOTS: wk.length ? wk.join(" | ") : "none yet",
+    WINDOWS: windows.length ? windows.join(", ") : "Tue 7pm, Thu 7pm, Sat 10am (starting points)",
+    PLAN_CONTEXT: planContextBlock(ctx, b.plan_days || 90),
+    AVOID: others.length ? `Already written (do not repeat these hooks or subjects): ${others.join(" | ")}` : "",
+  });
+}
+// The full set, for a paid report. Never throws; missing → null.
+async function writeNextPosts(accountId, reportBody, { count = Number(process.env.NEXT_POSTS_COUNT || 6) } = {}) {
+  try {
+    const out = await llmJson(accountId, "You write posts a creator can shoot and publish today, in their own voice. Output JSON only.", nextPostsPrompt(reportBody, { count }), "Post Writer", 6144);
+    const arr = Array.isArray(out) ? out : Array.isArray(out?.posts) ? out.posts : null;
+    if (!arr || !arr.length) return null;
+    return arr.slice(0, count).map(normalizePost);
+  } catch (err) { console.warn("[Growth Engine] Post Writer failed:", err.message); return null; }
+}
+async function rewriteOnePost(accountId, reportBody, index) {
+  const out = await llmJson(accountId, "You write posts a creator can shoot and publish today, in their own voice. Output JSON only.", nextPostsPrompt(reportBody, { count: 1, regenerate: index }), "Post Writer: one", 2048);
+  const arr = Array.isArray(out) ? out : Array.isArray(out?.posts) ? out.posts : null;
+  if (!arr || !arr[0]) throw new Error("The writer came back empty — try again in a moment.");
+  return normalizePost(arr[0], index);
+}
+
 module.exports = {
+  llmJson,
+  writeNextPosts,
+  rewriteOnePost,
   evaluateTier0,
   evaluateTier1,
   evaluateTier2,

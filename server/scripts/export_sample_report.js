@@ -32,6 +32,22 @@ async function main() {
   if (body.plan_context) delete body.plan_context.updated_at;
   if (body.competitors && body.competitors.you) body.competitors.you = { handle: body.business.handle, overall: body.scores?.overall };
   body.sample = true;
+  // Thumbnails: copy the evidence images into public/sample-thumbs so the
+  // public sample doesn't depend on our thumbnail storage; other posts lose
+  // their image link (the neutral tile shows).
+  const thumbs = require("../growth_engine_thumbs");
+  const outDir = path.join(__dirname, "..", "..", "public", "sample-thumbs");
+  fs.rmSync(outDir, { recursive: true, force: true }); fs.mkdirSync(outDir, { recursive: true });
+  const keep = new Set(); for (const d of body.scores?.dimensions || []) for (const e of d.evidence_posts || []) keep.add(String(e.post_id));
+  const relocate = (url, id) => {
+    if (!url || !keep.has(String(id))) return null;
+    const m = /\/thumbs\/(.+)$/.exec(url); if (!m) return url; // already remote (s3): keep
+    const src = path.join(thumbs.localDir, m[1]); if (!fs.existsSync(src)) return null;
+    const name = String(id).replace(/[^a-zA-Z0-9_-]/g, "") + ".webp"; fs.copyFileSync(src, path.join(outDir, name)); return "sample-thumbs/" + name;
+  };
+  for (const p of body.posts || []) p.thumbnail_url = relocate(p.thumbnail_url, p.id);
+  for (const d of body.scores?.dimensions || []) for (const e of d.evidence_posts || []) e.thumbnail_url = relocate(e.thumbnail_url, e.post_id);
+  delete body.thumb_prefix;
   const strip = (arr) => Array.isArray(arr) ? arr.map((x) => String(x).replace(/^\s*(?:step\s*)?\d+[.)]\s*/i, "").trim()) : arr;
   (body.growth_path?.phases || []).forEach((p) => { if (p.opener) p.opener.how = strip(p.opener.how); (p.moves || []).forEach((m) => { m.how = strip(m.how); }); });
   // Moves read 02–13 in order (01 is each phase's opener).

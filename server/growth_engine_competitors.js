@@ -56,11 +56,12 @@ function whatTheyDoDifferently(theirs, mine) {
   return out.sort((a, b) => b.weight - a.weight).slice(0, 4).map((d) => d.text);
 }
 
-async function compareCompetitors({ handle, platform, category, handles }) {
+async function compareCompetitors({ handle, platform, category, handles, max }) {
+  const opts = { max };
   if (platform !== "instagram" && platform !== "ig") throw new Error("Competitor comparison is Instagram-only for now");
   const wanted = [...new Set((handles || []).map((h) => String(h).replace(/^@/, "").trim().toLowerCase()).filter(Boolean))]
     .filter((h) => h !== String(handle).toLowerCase())
-    .slice(0, MAX_COMPETITORS);
+    .slice(0, Math.max(1, Math.min(10, Number(opts.max) || MAX_COMPETITORS)));
   if (!wanted.length) throw new Error("Give at least one competitor handle");
 
   const mineData = await analyzeInstagramAccountViaApify(handle);

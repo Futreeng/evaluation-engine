@@ -3,8 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Scalecraft</title>
-<meta name="description" content="Score your social account out of 100, see exactly why, and get the 30-60-90 day plan to grow it.">
+<title>Scalecraft — Stop posting into the void</title>
+<meta name="description" content="Growth is a system, not luck. Score your social account out of 100, see exactly why, and get the 90-day plan written from your own posts.">
+<meta property="og:title" content="Stop posting into the void.">
+<meta property="og:description" content="Growth is a system, not luck. Your account scored out of 100, explained, with the next 90 days written for you.">
+<meta property="og:type" content="website">
 <meta name="theme-color" content="#FFF6E9">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -12,12 +15,14 @@
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+<a class="skip" href="#view">Skip to content</a>
 <div class="shell">
   <header id="header"></header>
-  <main id="view" class="page"></main>
+  <main id="view" class="page" tabindex="-1"></main>
+  <div id="toastLive" class="sr-only" aria-live="polite" aria-atomic="true"></div>
 </div>
-<script src="config.js?v=4"></script>
-<script src="sample-report.js?v=4"></script>
-<script src="app.js?v=4"></script>
+<script src="config.js?v=6"></script>
+<script src="sample-report.js?v=6"></script>
+<script src="app.js?v=6"></script>
 </body>
 </html>

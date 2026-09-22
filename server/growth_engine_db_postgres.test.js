@@ -108,6 +108,67 @@ const assert = require("assert");
   assert.equal((await db.setPromoActive("TEST10", false)).active, false);
   assert.equal((await db.listPromos()).length, 1);
 
+  // events + funnel
+  await db.insertEvent({ name: "evaluate_started", accountId: null, anon: "a1", ref: "REF1", reportId: null, props: null, ip: null });
+  await db.insertEvent({ name: "evaluate_started", accountId: null, anon: "a1", ref: "REF1", reportId: null, props: null, ip: null });
+  await db.insertEvent({ name: "signup", accountId: "acct_z", anon: "a1", ref: "REF1", reportId: null, props: null, ip: null });
+  const fn = await db.eventFunnel(0, ["evaluate_started", "signup"]);
+  assert.equal(fn.steps.evaluate_started.actors, 1); assert.equal(fn.steps.evaluate_started.total, 2); assert.equal(fn.by_ref.REF1.signup, 1);
+  assert.equal((await db.paidRetention()).cohort, 0);
+
+  // costs
+  await db.insertCost({ accountId: "acct_z", jobId: "j1", reportId: "r1", feature: "free_report", kind: "scrape", provider: "apify", model: "apify:instagram-profile", label: "@x", quantity: 1, detail: null, cents: 0.3 });
+  await db.insertCost({ accountId: "acct_z", jobId: "j1", reportId: "r1", feature: "free_report", kind: "llm", provider: "gemini", model: "gemini-2.5-flash", label: "Merge", quantity: 3000, detail: { in: 2000, out: 1000 }, cents: 0.031 });
+  const cs = await db.adminCosts(0);
+  assert.ok(Math.abs(cs.total_cents - 0.331) < 1e-6, "total " + cs.total_cents);
+  assert.equal(cs.users[0].account_id, "acct_z"); assert.equal(cs.by_kind.length, 2);
+
+  // outcomes (1.15)
+  await db.logMove({ accountId: "acct_z", reportId: "r1", handle: "h", platform: "instagram", category: "travel", moveKey: "p1m2", done: true, overall: 60, dims: { "Profile Clarity": 25 }, planDay: 3 });
+  await db.recordMoveOutcomes({ accountId: "acct_z", handle: "h", platform: "instagram", category: "travel", moveKeys: ["p1m2", "p1m3"], before: { overall: 60, dims: {} }, after: { overall: 68, dims: {} }, days: 7, fromReport: "r1", toReport: "r2" });
+  const mo = await db.moveOutcomeSummary({ category: "travel" });
+  assert.equal(mo.length, 2); assert.equal(mo[0].avg_delta, 8); assert.equal(mo[0].avg_together, 2);
+
+  // email prefs + log (1.6)
+  const pu = await db.createUser("prefs@example.com", "hash", null);
+  await db.setEmailPrefs(pu.userId, { weekly_score: false, monday_move: true, milestones: true, product_news: false });
+  assert.equal((await db.getUserById(pu.userId)).emailPrefs.weekly_score, false);
+  await db.insertEmailLog({ userId: "acct_a", to: "a@example.com", type: "weekly_score", subject: "s", status: "sent", provider: "log", providerId: "x" });
+  assert.equal((await db.listEmailLog(10)).length, 1);
+
+  // referrals (1.8)
+  const ra = await db.createUser("ref-a@example.com", "h"), rb = await db.createUser("ref-b@example.com", "h");
+  const code = await db.ensureRefCode(ra.userId); assert.equal(code.length, 8); assert.equal(await db.ensureRefCode(ra.userId), code);
+  assert.equal((await db.getUserByRefCode(code)).userId, ra.userId);
+  assert.equal(await db.recordReferralSignup({ refCode: code, referrerId: ra.userId, referredId: rb.userId }), true);
+  assert.equal(await db.recordReferralSignup({ refCode: code, referrerId: ra.userId, referredId: rb.userId }), null); // once
+  await db.recordReferralPayment({ referredId: rb.userId, cents: 1200, product: "growth_plan" });
+  const st = await db.referralStats(ra.userId); assert.equal(st.signed_up, 1); assert.equal(st.paid, 1); assert.equal(st.paid_cents, 1200);
+  assert.equal((await db.adminReferrals())[0].paid, 1);
+
+  // niche percentile (1.11): 21 retail rows 40..60 seeded above (acct0 overridden to 99)
+  const pc = await db.nichePercentile("retail", "instagram", 50);
+  assert.equal(pc.n, 21); assert.ok(pc.beats_pct >= 40 && pc.beats_pct <= 50, "pct " + pc.beats_pct);
+
+  assert.ok(Array.isArray(await db.listReportsWithEmailSince(0)));
+  { const g = await db.setGoal(u.userId, "followers", 5000); assert.equal(g.goal, "followers"); assert.equal(g.goalTarget, 5000); }
+  await db.upsertNicheBrief({ category: "retail", platform: "instagram", week: "2026-W39", n: 12, body: { ready: true, lines: ["x"] } });
+  assert.equal((await db.getNicheBrief("retail", "instagram", "2026-W39")).lines[0], "x");
+  assert.ok(Array.isArray(await db.listReportsByCategorySince("retail", "instagram", 0)));
+  { const pe = await db.setPause(u.userId, Date.now() + 30 * 86400000); assert.ok(pe.pausedUntil > Date.now()); const un = await db.setPause(u.userId, null); assert.equal(un.pausedUntil, null); assert.ok(un.pauseEndedAt); }
+  await db.insertCancelReason({ accountId: u.userId, tier: "growth_plan", action: "cancel", reasonCode: "price", reasonText: "too much" });
+  assert.equal((await db.listCancelReasons(5))[0].reason_code, "price");
+  assert.ok(Array.isArray(await db.listLapsedEntitlements(0, Date.now())));
+  assert.ok(Array.isArray(await db.listReportsSince(0)));
+  await db.setUserUtm(u.userId, { source: "joe-site", campaign: "launch" });
+  { const src = await db.sourceSummary(); assert.ok(src.some((x) => x.utm?.source === "joe-site")); }
+  { const e1 = await db.setSubscriptionPrice(u.userId, { priceCents: 1200, cycle: "monthly", founder: true }); assert.equal(e1.priceCents, 1200); assert.equal(e1.founder, true); assert.equal(await db.countFounders(), 1);
+    await db.bumpUsage(u.userId, "post_regen", 3); assert.equal(await db.getUsageSince(u.userId, "post_regen", Date.now() - 7 * 86400000), 3);
+    await db.setPendingTier(u.userId, "maintenance", Date.now() - 1000); const e2 = await db.getEffectiveEntitlement(u.userId); assert.equal(e2.currentTier, "maintenance"); assert.equal(e2.pendingTier, null);
+    assert.ok(Array.isArray(await db.paidPlatformsFor(u.userId))); assert.ok(Array.isArray(await db.limitHitSummary(0))); }
+  await db.insertRoastRejection({ reportId: "r1", accountId: "a1", heat: "medium", reason: "blocklist", flagged: "[2]", text: "[]" });
+  assert.equal((await db.listRoastRejections(5))[0].reason, "blocklist");
+
   console.log("postgres module: all assertions passed");
   process.exit(0);
 })().catch((e) => { console.error("FAILED:", e.message); process.exit(1); });

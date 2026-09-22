@@ -165,8 +165,81 @@ function initSchema() {
 
   // Cancel-at-period-end: tier stays until this timestamp, then reads as free.
   try { db.run(`ALTER TABLE entitlements ADD COLUMN cancel_at INTEGER`); } catch { /* exists */ }
+  // Pause instead of cancel (spec 4.1) + when a cancellation actually took effect (4.4 win-back).
+  try { db.run(`ALTER TABLE entitlements ADD COLUMN paused_until INTEGER`); } catch { /* exists */ }
+  try { db.run(`ALTER TABLE entitlements ADD COLUMN pause_started_at INTEGER`); } catch { /* exists */ }
+  try { db.run(`ALTER TABLE entitlements ADD COLUMN pause_ended_at INTEGER`); } catch { /* exists */ }
+  try { db.run(`ALTER TABLE entitlements ADD COLUMN lapsed_at INTEGER`); } catch { /* exists */ }
+  // Pricing add-on: the price a subscriber locked in (P.2/P.3), founder flag, and a downgrade waiting for period end (P.5).
+  try { db.run(`ALTER TABLE entitlements ADD COLUMN price_cents INTEGER`); } catch { /* exists */ }
+  try { db.run(`ALTER TABLE entitlements ADD COLUMN billing_cycle TEXT`); } catch { /* exists */ }
+  try { db.run(`ALTER TABLE entitlements ADD COLUMN founder INTEGER DEFAULT 0`); } catch { /* exists */ }
+  try { db.run(`ALTER TABLE entitlements ADD COLUMN pending_tier TEXT`); } catch { /* exists */ }
+  try { db.run(`ALTER TABLE entitlements ADD COLUMN pending_tier_at INTEGER`); } catch { /* exists */ }
+  // Exit answers from the cancel screen (spec 4.3).
+  db.run(`
+    CREATE TABLE IF NOT EXISTS growth_engine_cancel_reasons (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      tier TEXT,
+      action TEXT NOT NULL,
+      reason_code TEXT,
+      reason_text TEXT,
+      created_at INTEGER NOT NULL
+    )
+  `);
   // "Pause these emails": check-ins, score changes and plan-ended stop; reset + report-ready still send.
   try { db.run(`ALTER TABLE users ADD COLUMN email_paused INTEGER DEFAULT 0`); } catch { /* exists */ }
+  // Phase-2 signals (spec 1.9): business flag + confirmed niche on the account
+  try { db.run(`ALTER TABLE users ADD COLUMN is_business INTEGER DEFAULT 0`); } catch { /* exists */ }
+  try { db.run(`ALTER TABLE users ADD COLUMN niche TEXT`); } catch { /* exists */ }
+  // Goal onboarding (spec 3.3): what they want, and a follower target when that's the goal.
+  try { db.run(`ALTER TABLE users ADD COLUMN goal TEXT`); } catch { /* exists */ }
+  try { db.run(`ALTER TABLE users ADD COLUMN goal_target INTEGER`); } catch { /* exists */ }
+  try { db.run(`ALTER TABLE users ADD COLUMN utm TEXT`); } catch { /* exists */ }
+  try { db.run(`ALTER TABLE users ADD COLUMN price_variant TEXT`); } catch { /* exists */ }
+  try { db.run(`ALTER TABLE users ADD COLUMN email_prefs TEXT`); } catch { /* exists */ }
+  db.run(`
+    CREATE TABLE IF NOT EXISTS growth_engine_email_log (
+      id TEXT PRIMARY KEY,
+      user_id TEXT,
+      to_email TEXT NOT NULL,
+      type TEXT NOT NULL,
+      subject TEXT,
+      status TEXT NOT NULL,
+      provider TEXT,
+      provider_id TEXT,
+      error TEXT,
+      created_at INTEGER NOT NULL
+    )
+  `);
+
+  // Weekly niche briefs (spec 3.4): one aggregate per niche+platform+week.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS growth_engine_niche_briefs (
+      id TEXT PRIMARY KEY,
+      category TEXT NOT NULL,
+      platform TEXT NOT NULL,
+      week TEXT NOT NULL,
+      n INTEGER NOT NULL,
+      body TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    )
+  `);
+
+  // Roasts that failed a guardrail (spec 2.1) — kept for review.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS growth_engine_roast_rejections (
+      id TEXT PRIMARY KEY,
+      report_id TEXT,
+      account_id TEXT,
+      heat TEXT,
+      reason TEXT NOT NULL,
+      flagged TEXT,
+      text TEXT,
+      created_at INTEGER NOT NULL
+    )
+  `);
 
   // Password reset tokens: sha256 of the emailed token, single use, 1h.
   db.run(`
@@ -206,6 +279,124 @@ function initSchema() {
       UNIQUE (code, account_id)
     )
   `);
+
+
+  // Funnel events (spec 1.13)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS growth_engine_events (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      account_id TEXT,
+      anon TEXT,
+      ref TEXT,
+      report_id TEXT,
+      props TEXT,
+      ip TEXT,
+      created_at INTEGER NOT NULL
+    )
+  `);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_events_name_time ON growth_engine_events (name, created_at)`);
+
+
+  // Costs (spec 1.2): one row per scrape or LLM call, attributed to account/job/report
+  db.run(`
+    CREATE TABLE IF NOT EXISTS growth_engine_costs (
+      id TEXT PRIMARY KEY,
+      account_id TEXT,
+      job_id TEXT,
+      report_id TEXT,
+      feature TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      provider TEXT,
+      model TEXT,
+      label TEXT,
+      quantity REAL NOT NULL DEFAULT 0,
+      detail TEXT,
+      cents REAL NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    )
+  `);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_costs_time ON growth_engine_costs (created_at)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_costs_account ON growth_engine_costs (account_id)`);
+
+
+  // Outcomes data (spec 1.15): every move toggle, and the score change
+  // measured at the next rescore for each move done in between.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS growth_engine_move_log (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      report_id TEXT NOT NULL,
+      handle TEXT,
+      platform TEXT,
+      category TEXT,
+      move_key TEXT NOT NULL,
+      done INTEGER NOT NULL,
+      overall_at INTEGER,
+      dims_at TEXT,
+      plan_day INTEGER,
+      created_at INTEGER NOT NULL
+    )
+  `);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_move_log_report ON growth_engine_move_log (report_id)`);
+  db.run(`
+    CREATE TABLE IF NOT EXISTS growth_engine_move_outcomes (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      handle TEXT,
+      platform TEXT,
+      category TEXT,
+      move_key TEXT NOT NULL,
+      moves_done_together INTEGER NOT NULL,
+      score_before INTEGER,
+      score_after INTEGER,
+      dims_before TEXT,
+      dims_after TEXT,
+      days INTEGER,
+      from_report TEXT,
+      to_report TEXT,
+      created_at INTEGER NOT NULL
+    )
+  `);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_move_outcomes_key ON growth_engine_move_outcomes (category, platform, move_key)`);
+
+
+  // Share cards (spec 1.7): a public card snapshot, never the report
+  db.run(`
+    CREATE TABLE IF NOT EXISTS growth_engine_shares (
+      share_id TEXT PRIMARY KEY,
+      account_id TEXT,
+      report_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      data TEXT NOT NULL,
+      ref TEXT,
+      views INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    )
+  `);
+
+
+  // Referrals (spec 1.8): every share link carries the sharer's ref code;
+  // attribution at signup and at first payment. Payout fields exist for
+  // later; nothing pays out yet.
+  try { db.run(`ALTER TABLE users ADD COLUMN ref_code TEXT`); } catch { /* exists */ }
+  db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_ref_code ON users (ref_code)`);
+  db.run(`
+    CREATE TABLE IF NOT EXISTS growth_engine_referrals (
+      id TEXT PRIMARY KEY,
+      ref_code TEXT NOT NULL,
+      referrer_id TEXT NOT NULL,
+      referred_id TEXT NOT NULL UNIQUE,
+      signed_up_at INTEGER NOT NULL,
+      first_paid_at INTEGER,
+      first_paid_cents INTEGER,
+      first_paid_product TEXT,
+      payout_status TEXT NOT NULL DEFAULT 'none',
+      payout_cents INTEGER,
+      created_at INTEGER NOT NULL
+    )
+  `);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_referrals_referrer ON growth_engine_referrals (referrer_id)`);
 
   // Tier history table: audit log of tier changes
   db.run(`
@@ -324,6 +515,15 @@ async function listBaselines() {
   if (!r.length) return [];
   return r[0].values.map(([category, platform, handle, overall, dimensions, created_at]) => { let dims = {}; try { dims = JSON.parse(dimensions); } catch { /* skip */ } return { category, platform, handle, overall: Number(overall), dimensions: Object.entries(dims).map(([label, score]) => ({ label, score })), created_at: Number(created_at) }; });
 }
+// Where a score sits inside its niche: share of scored accounts it beats
+// (spec 1.11). Only meaningful once the niche has BASELINE_MIN_N rows.
+async function nichePercentile(category, platform, score) {
+  if (!db) throw new Error("Database not initialized");
+  const r = platform ? one(`SELECT COUNT(*) AS n, SUM(CASE WHEN overall < ? THEN 1 ELSE 0 END) AS below FROM growth_engine_baselines WHERE category = ? AND platform = ?`, [score, category, platform])
+                     : one(`SELECT COUNT(*) AS n, SUM(CASE WHEN overall < ? THEN 1 ELSE 0 END) AS below FROM growth_engine_baselines WHERE category = ?`, [score, category]);
+  const n = Number(r.n || 0); if (!n) return null;
+  return { n, beats_pct: Math.round((Number(r.below || 0) / n) * 100) };
+}
 async function getBaselineSummary() {
   if (!db) throw new Error("Database not initialized");
   const result = db.exec(`SELECT category, platform, COUNT(*) FROM growth_engine_baselines GROUP BY category, platform`);
@@ -438,6 +638,12 @@ async function setPlanContext(accountId, handle, platform, context) {
   return { ...ctx, updated_at: Date.now() };
 }
 
+// Free reports older than a cutoff whose thumbnails haven't been removed yet (spec 1.4 cleanup).
+async function listReportsForThumbCleanup(beforeTs, limit = 50) {
+  if (!db) throw new Error("Database not initialized");
+  return rowsOf(`SELECT report_id, report_body FROM growth_engine_reports WHERE tier = 'social_snapshot' AND generated_at < ? AND report_body LIKE '%"thumb_prefix":%' AND report_body NOT LIKE '%"thumbs_removed":true%' LIMIT ?`, [beforeTs, limit])
+    .map((r) => { let b = {}; try { b = JSON.parse(r.report_body); } catch { /* skip */ } return { reportId: r.report_id, thumbPrefix: b.thumb_prefix || null }; });
+}
 // Paid reports generated inside a window — the scheduled-email sweeper uses
 // this to find plans at day 28 / 58 / 60.
 async function listPaidReportsBetween(fromTs, toTs) {
@@ -456,6 +662,8 @@ async function listPaidReportsBetween(fromTs, toTs) {
     generatedAt: row[columns.indexOf("generated_at")],
     refreshDueAt: row[columns.indexOf("refresh_due_at")],
     reportBody: JSON.parse(row[columns.indexOf("report_body")]),
+    createdAt: row[columns.indexOf("created_at")],
+    updatedAt: row[columns.indexOf("updated_at")],
   }));
 }
 
@@ -491,6 +699,15 @@ async function countFreeSnapshotsByEmail(email) {
     [needle]
   );
   return result.length ? Number(result[0].values[0][0]) : 0;
+}
+
+// Latest completed free report for an email (any handle) — what the 402 points at.
+async function latestFreeSnapshotForEmail(email) {
+  if (!db) throw new Error("Database not initialized");
+  const needle = `%"email":${JSON.stringify(String(email).trim().toLowerCase())}%`;
+  const r = rowsOf(`SELECT result_payload, created_at FROM growth_engine_jobs WHERE tier = 'social_snapshot' AND status = 'complete' AND lower(input_params) LIKE ? ORDER BY created_at DESC LIMIT 1`, [needle]);
+  if (!r.length) return null;
+  try { const p = JSON.parse(r[0].result_payload); return { reportId: p.report_id || null, generatedAt: Number(r[0].created_at) }; } catch { return null; }
 }
 
 async function getJob(jobId) {
@@ -562,6 +779,9 @@ async function createReport(accountId, tier, businessInfo, reportBody) {
 
   const reportId = "rpt_" + uid();
   const now = Date.now();
+  // The stored body must carry the row's id — the evaluator's provisional
+  // report_id would otherwise be what clients send back to us.
+  if (reportBody && typeof reportBody === "object") reportBody.report_id = reportId;
 
   db.run(
     `INSERT INTO growth_engine_reports
@@ -683,9 +903,70 @@ async function listReportsByAccount(accountId) {
     generatedAt: row[columns.indexOf("generated_at")],
     refreshDueAt: row[columns.indexOf("refresh_due_at")],
     reportBody: JSON.parse(row[columns.indexOf("report_body")]),
+    createdAt: row[columns.indexOf("created_at")],
+    updatedAt: row[columns.indexOf("updated_at")],
   }));
 }
 
+// Reports whose body carries an email (free and paid), newest first — the
+// Monday move picks the latest per email+handle from these.
+async function listReportsWithEmailSince(fromTs) {
+  if (!db) throw new Error("Database not initialized");
+  const result = db.exec(`SELECT * FROM growth_engine_reports WHERE generated_at >= ? AND report_body LIKE '%"email":"%' ORDER BY generated_at DESC`, [fromTs]);
+  if (!result || result.length === 0) return [];
+  const columns = result[0].columns;
+  return result[0].values.map((row) => ({
+    reportId: row[columns.indexOf("report_id")], accountId: row[columns.indexOf("account_id")], tier: row[columns.indexOf("tier")],
+    business: { handle: row[columns.indexOf("business_handle")], platform: row[columns.indexOf("business_platform")], category: row[columns.indexOf("business_category")] },
+    generatedAt: row[columns.indexOf("generated_at")], reportBody: JSON.parse(row[columns.indexOf("report_body")]),
+  }));
+}
+// Reports in one niche (any account, any tier) since a time — the trend brief aggregates these.
+async function listReportsByCategorySince(category, platform, fromTs) {
+  if (!db) throw new Error("Database not initialized");
+  const result = db.exec(`SELECT * FROM growth_engine_reports WHERE business_category = ? AND business_platform = ? AND generated_at >= ? ORDER BY generated_at DESC`, [category, platform, fromTs]);
+  if (!result || result.length === 0) return [];
+  const columns = result[0].columns;
+  return result[0].values.map((row) => ({
+    reportId: row[columns.indexOf("report_id")], accountId: row[columns.indexOf("account_id")], tier: row[columns.indexOf("tier")],
+    business: { handle: row[columns.indexOf("business_handle")], platform: row[columns.indexOf("business_platform")], category: row[columns.indexOf("business_category")] },
+    generatedAt: row[columns.indexOf("generated_at")], reportBody: JSON.parse(row[columns.indexOf("report_body")]),
+  }));
+}
+async function getNicheBrief(category, platform, week) {
+  if (!db) throw new Error("Database not initialized");
+  const r = one(`SELECT body FROM growth_engine_niche_briefs WHERE category = ? AND platform = ? AND week = ?`, [category, platform, week]);
+  if (!r) return null; try { return JSON.parse(r.body); } catch { return null; }
+}
+async function upsertNicheBrief({ category, platform, week, n, body }) {
+  if (!db) throw new Error("Database not initialized");
+  db.run(`DELETE FROM growth_engine_niche_briefs WHERE category = ? AND platform = ? AND week = ?`, [category, platform, week]);
+  db.run(`INSERT INTO growth_engine_niche_briefs (id, category, platform, week, n, body, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, ["nb_" + uid(), category, platform, week, n || 0, JSON.stringify(body), Date.now()]);
+  saveDb();
+}
+// Every report since a time (aggregate stats, spec 5.3/5.4) — bodies included, so keep the window sane.
+async function listReportsSince(fromTs) {
+  if (!db) throw new Error("Database not initialized");
+  const result = db.exec(`SELECT * FROM growth_engine_reports WHERE generated_at >= ? ORDER BY generated_at DESC`, [fromTs]);
+  if (!result || result.length === 0) return [];
+  const columns = result[0].columns;
+  return result[0].values.map((row) => ({
+    reportId: row[columns.indexOf("report_id")], accountId: row[columns.indexOf("account_id")], tier: row[columns.indexOf("tier")],
+    business: { handle: row[columns.indexOf("business_handle")], platform: row[columns.indexOf("business_platform")], category: row[columns.indexOf("business_category")] },
+    generatedAt: row[columns.indexOf("generated_at")], reportBody: JSON.parse(row[columns.indexOf("report_body")]),
+  }));
+}
+// Marketing attribution (spec 5.4): UTM/source captured on first visit, stamped at signup.
+async function setUserUtm(userId, utm) {
+  if (!db) throw new Error("Database not initialized");
+  db.run(`UPDATE users SET utm = ?, updated_at = ? WHERE user_id = ? AND (utm IS NULL OR utm = '')`, [utm ? JSON.stringify(utm).slice(0, 600) : null, Date.now(), userId]);
+  saveDb();
+}
+async function sourceSummary() {
+  if (!db) throw new Error("Database not initialized");
+  const rows = rowsOf(`SELECT u.utm, u.created_at, e.current_tier FROM users u LEFT JOIN entitlements e ON e.account_id = u.user_id WHERE u.utm IS NOT NULL AND u.utm != ''`, []);
+  return rows.map((r) => { let utm = null; try { utm = JSON.parse(r.utm); } catch { utm = null; } return { utm, created_at: Number(r.created_at), tier: r.current_tier || "social_snapshot" }; });
+}
 async function listReportsDueForRefresh(beforeTimestamp) {
   if (!db) throw new Error("Database not initialized");
 
@@ -709,6 +990,8 @@ async function listReportsDueForRefresh(beforeTimestamp) {
     generatedAt: row[columns.indexOf("generated_at")],
     refreshDueAt: row[columns.indexOf("refresh_due_at")],
     reportBody: JSON.parse(row[columns.indexOf("report_body")]),
+    createdAt: row[columns.indexOf("created_at")],
+    updatedAt: row[columns.indexOf("updated_at")],
   }));
 }
 
@@ -810,6 +1093,158 @@ async function listRedemptions(code, limit = 100) {
   return rowsOf(`SELECT r.*, u.email FROM growth_engine_promo_redemptions r LEFT JOIN users u ON u.user_id = r.account_id WHERE r.code = ? ORDER BY r.created_at DESC LIMIT ?`, [String(code).toUpperCase(), limit]).map((r) => ({ ...r, amount_off: Number(r.amount_off), created_at: Number(r.created_at) }));
 }
 
+
+// ===================== EVENTS =====================
+async function insertEvent(e) {
+  if (!db) throw new Error("Database not initialized");
+  db.run(`INSERT INTO growth_engine_events (id, name, account_id, anon, ref, report_id, props, ip, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ["ev_" + uid(), e.name, e.accountId, e.anon, e.ref, e.reportId, e.props, e.ip, Date.now()]);
+  saveDb();
+}
+// Distinct actors per event name in a window. An actor is the account when
+// known, else the anonymous browser id. Also conversion by ref code.
+async function eventFunnel(sinceTs, names) {
+  if (!db) throw new Error("Database not initialized");
+  const out = {};
+  for (const n of names) {
+    const r = one(`SELECT COUNT(DISTINCT COALESCE(account_id, anon, ip)) AS actors, COUNT(*) AS total FROM growth_engine_events WHERE name = ? AND created_at >= ?`, [n, sinceTs]);
+    out[n] = { actors: Number(r.actors || 0), total: Number(r.total || 0) };
+  }
+  const byRef = rowsOf(`SELECT ref, name, COUNT(DISTINCT COALESCE(account_id, anon, ip)) AS actors FROM growth_engine_events WHERE ref IS NOT NULL AND created_at >= ? AND name IN ('evaluate_started','signup','subscribe') GROUP BY ref, name`, [sinceTs]);
+  const refs = {};
+  for (const r of byRef) (refs[r.ref] ||= {})[r.name] = Number(r.actors);
+  return { steps: out, by_ref: refs };
+}
+// Conversion by price variant: distinct people who viewed pricing vs subscribed/unlocked, per variant.
+async function variantFunnel(sinceTs) {
+  if (!db) throw new Error("Database not initialized");
+  const rows = rowsOf(`SELECT json_extract(props, '$.variant') AS v, name, COUNT(DISTINCT COALESCE(account_id, anon, ip)) AS actors, SUM(CAST(COALESCE(json_extract(props, '$.amount_cents'), 0) AS REAL)) AS cents FROM growth_engine_events WHERE created_at >= ? AND name IN ('pricing_viewed','subscribe','unlock') AND json_extract(props, '$.variant') IS NOT NULL GROUP BY v, name`, [sinceTs]);
+  const out = {};
+  for (const r of rows) { (out[r.v] ||= { pricing_viewed: 0, subscribe: 0, unlock: 0, revenue_cents: 0 })[r.name] = Number(r.actors); if (r.name !== "pricing_viewed") out[r.v].revenue_cents += Number(r.cents) || 0; }
+  return out;
+}
+// Month-two retention: accounts that subscribed 30–60 days ago and are still
+// on a paid tier now (cancel_at in the future counts as still paying).
+async function paidRetention() {
+  if (!db) throw new Error("Database not initialized");
+  const now = Date.now(), d = 86400000;
+  const cohort = rowsOf(`SELECT DISTINCT account_id FROM growth_engine_events WHERE name = 'subscribe' AND created_at BETWEEN ? AND ?`, [now - 60 * d, now - 30 * d]).map((r) => r.account_id).filter(Boolean);
+  let retained = 0;
+  for (const id of cohort) { const e = one(`SELECT current_tier, cancel_at FROM entitlements WHERE account_id = ?`, [id]); if (e.current_tier && e.current_tier !== "social_snapshot" && (!e.cancel_at || Number(e.cancel_at) > now)) retained++; }
+  return { cohort: cohort.length, retained, rate: cohort.length ? retained / cohort.length : null };
+}
+
+
+// ===================== COSTS =====================
+async function insertCost(c) {
+  if (!db) throw new Error("Database not initialized");
+  db.run(`INSERT INTO growth_engine_costs (id, account_id, job_id, report_id, feature, kind, provider, model, label, quantity, detail, cents, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ["c_" + uid(), c.accountId, c.jobId, c.reportId, c.feature, c.kind, c.provider || null, c.model || null, c.label || null, Number(c.quantity) || 0, c.detail ? JSON.stringify(c.detail) : null, Number(c.cents) || 0, Date.now()]);
+  saveDb();
+}
+// Cost rows are written before the report exists; stamp them once it does.
+async function attachReportToCosts(jobId, reportId) {
+  if (!db) throw new Error("Database not initialized");
+  db.run(`UPDATE growth_engine_costs SET report_id = ? WHERE job_id = ? AND report_id IS NULL`, [reportId, jobId]);
+  saveDb();
+}
+// Totals by kind/provider/feature since a time, plus per-account cost next to
+// revenue (mock revenue = subscribe/unlock events' amount_cents; real Stripe
+// later replaces this with invoices).
+async function adminCosts(sinceTs, limit = 50) {
+  if (!db) throw new Error("Database not initialized");
+  const by = (col) => rowsOf(`SELECT ${col} AS k, SUM(cents) AS cents, COUNT(*) AS n, SUM(quantity) AS qty FROM growth_engine_costs WHERE created_at >= ? GROUP BY ${col} ORDER BY cents DESC`, [sinceTs]).map((r) => ({ key: r.k, cents: Number(r.cents), n: Number(r.n), quantity: Number(r.qty) }));
+  const total = Number(one(`SELECT SUM(cents) AS c FROM growth_engine_costs WHERE created_at >= ?`, [sinceTs]).c || 0);
+  const perReport = one(`SELECT AVG(c) AS avg FROM (SELECT SUM(cents) AS c FROM growth_engine_costs WHERE created_at >= ? AND report_id IS NOT NULL GROUP BY report_id)`, [sinceTs]);
+  const users = rowsOf(`SELECT c.account_id, u.email, SUM(c.cents) AS cents, COUNT(DISTINCT c.report_id) AS reports FROM growth_engine_costs c LEFT JOIN users u ON u.user_id = c.account_id WHERE c.created_at >= ? AND c.account_id IS NOT NULL GROUP BY c.account_id ORDER BY cents DESC LIMIT ?`, [sinceTs, limit]);
+  const revenue = rowsOf(`SELECT account_id, SUM(CAST(json_extract(props, '$.amount_cents') AS REAL)) AS cents FROM growth_engine_events WHERE name IN ('subscribe','unlock') AND account_id IS NOT NULL GROUP BY account_id`);
+  const rev = Object.fromEntries(revenue.map((r) => [r.account_id, Number(r.cents) || 0]));
+  return { total_cents: total, avg_cents_per_report: Number(perReport.avg || 0), by_kind: by("kind"), by_provider: by("provider"), by_feature: by("feature"), by_model: by("model"),
+    users: users.map((u) => ({ account_id: u.account_id, email: u.email, cost_cents: Number(u.cents), reports: Number(u.reports), revenue_cents: rev[u.account_id] || 0 })) };
+}
+
+
+// ===================== OUTCOMES (spec 1.15) =====================
+async function logMove({ accountId, reportId, handle, platform, category, moveKey, done, overall, dims, planDay }) {
+  if (!db) throw new Error("Database not initialized");
+  db.run(`INSERT INTO growth_engine_move_log (id, account_id, report_id, handle, platform, category, move_key, done, overall_at, dims_at, plan_day, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ["ml_" + uid(), accountId, reportId, handle || null, platform || null, category || null, moveKey, done ? 1 : 0, overall ?? null, dims ? JSON.stringify(dims) : null, planDay ?? null, Date.now()]);
+  saveDb();
+}
+async function recordMoveOutcomes({ accountId, handle, platform, category, moveKeys, before, after, days, fromReport, toReport }) {
+  if (!db) throw new Error("Database not initialized");
+  for (const k of moveKeys) {
+    db.run(`INSERT INTO growth_engine_move_outcomes (id, account_id, handle, platform, category, move_key, moves_done_together, score_before, score_after, dims_before, dims_after, days, from_report, to_report, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ["mo_" + uid(), accountId, handle || null, platform || null, category || null, k, moveKeys.length, before.overall ?? null, after.overall ?? null, JSON.stringify(before.dims || {}), JSON.stringify(after.dims || {}), days ?? null, fromReport || null, toReport || null, Date.now()]);
+  }
+  saveDb();
+}
+// Which moves raise scores where: avg delta per move key, by niche+platform.
+async function moveOutcomeSummary({ category = null, platform = null } = {}) {
+  if (!db) throw new Error("Database not initialized");
+  const where = []; const params = [];
+  if (category) { where.push("category = ?"); params.push(category); }
+  if (platform) { where.push("platform = ?"); params.push(platform); }
+  return rowsOf(`SELECT category, platform, move_key, COUNT(*) AS n, AVG(score_after - score_before) AS avg_delta, AVG(moves_done_together) AS avg_together FROM growth_engine_move_outcomes ${where.length ? "WHERE " + where.join(" AND ") : ""} GROUP BY category, platform, move_key ORDER BY n DESC, avg_delta DESC`, params)
+    .map((r) => ({ ...r, n: Number(r.n), avg_delta: Number(r.avg_delta), avg_together: Number(r.avg_together) }));
+}
+
+
+// ===================== SHARE CARDS (spec 1.7) =====================
+async function createShare({ accountId, reportId, kind, data, ref }) {
+  if (!db) throw new Error("Database not initialized");
+  const shareId = crypto.randomBytes(6).toString("base64url");
+  db.run(`INSERT INTO growth_engine_shares (share_id, account_id, report_id, kind, data, ref, views, created_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?)`, [shareId, accountId || null, reportId, kind, JSON.stringify(data), ref || null, Date.now()]);
+  saveDb();
+  return getShare(shareId);
+}
+async function getShare(shareId) {
+  if (!db) throw new Error("Database not initialized");
+  const r = rowsOf(`SELECT * FROM growth_engine_shares WHERE share_id = ?`, [shareId])[0];
+  if (!r) return null;
+  let data = {}; try { data = JSON.parse(r.data); } catch { /* skip */ }
+  return { shareId: r.share_id, accountId: r.account_id, reportId: r.report_id, kind: r.kind, data, ref: r.ref, views: Number(r.views), createdAt: Number(r.created_at) };
+}
+async function bumpShareViews(shareId) { if (!db) throw new Error("Database not initialized"); db.run(`UPDATE growth_engine_shares SET views = views + 1 WHERE share_id = ?`, [shareId]); saveDb(); }
+
+
+// ===================== REFERRALS (spec 1.8) =====================
+const REF_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
+function newRefCode() { const b = crypto.randomBytes(8); let s = ""; for (let i = 0; i < 8; i++) s += REF_ALPHABET[b[i] % REF_ALPHABET.length]; return s; }
+// Every account gets a code on first use.
+async function ensureRefCode(userId) {
+  if (!db) throw new Error("Database not initialized");
+  const u = await getUserById(userId); if (!u) return null;
+  if (u.refCode) return u.refCode;
+  for (let i = 0; i < 5; i++) { const code = newRefCode(); try { db.run(`UPDATE users SET ref_code = ? WHERE user_id = ? AND ref_code IS NULL`, [code, userId]); saveDb(); return (await getUserById(userId)).refCode; } catch { /* collision: retry */ } }
+  return null;
+}
+async function getUserByRefCode(code) {
+  if (!db) throw new Error("Database not initialized");
+  const r = rowsOf(`SELECT user_id FROM users WHERE ref_code = ?`, [String(code || "").toLowerCase()])[0];
+  return r ? getUserById(r.user_id) : null;
+}
+async function recordReferralSignup({ refCode, referrerId, referredId }) {
+  if (!db) throw new Error("Database not initialized");
+  if (!referrerId || !referredId || referrerId === referredId) return null;
+  try { db.run(`INSERT INTO growth_engine_referrals (id, ref_code, referrer_id, referred_id, signed_up_at, created_at) VALUES (?, ?, ?, ?, ?, ?)`, ["rf_" + uid(), refCode, referrerId, referredId, Date.now(), Date.now()]); saveDb(); return true; } catch { return null; }
+}
+async function recordReferralPayment({ referredId, cents, product }) {
+  if (!db) throw new Error("Database not initialized");
+  db.run(`UPDATE growth_engine_referrals SET first_paid_at = ?, first_paid_cents = ?, first_paid_product = ?, payout_status = CASE WHEN payout_status = 'none' THEN 'pending' ELSE payout_status END WHERE referred_id = ? AND first_paid_at IS NULL`, [Date.now(), Number(cents) || 0, product || null, referredId]);
+  saveDb();
+}
+async function referralStats(referrerId) {
+  if (!db) throw new Error("Database not initialized");
+  const r = one(`SELECT COUNT(*) AS signed_up, SUM(CASE WHEN first_paid_at IS NOT NULL THEN 1 ELSE 0 END) AS paid, SUM(COALESCE(first_paid_cents, 0)) AS cents FROM growth_engine_referrals WHERE referrer_id = ?`, [referrerId]);
+  return { signed_up: Number(r.signed_up || 0), paid: Number(r.paid || 0), paid_cents: Number(r.cents || 0) };
+}
+async function adminReferrals(limit = 50) {
+  if (!db) throw new Error("Database not initialized");
+  return rowsOf(`SELECT r.referrer_id, u.email, r.ref_code, COUNT(*) AS signed_up, SUM(CASE WHEN r.first_paid_at IS NOT NULL THEN 1 ELSE 0 END) AS paid, SUM(COALESCE(r.first_paid_cents, 0)) AS cents FROM growth_engine_referrals r LEFT JOIN users u ON u.user_id = r.referrer_id GROUP BY r.referrer_id ORDER BY paid DESC, signed_up DESC LIMIT ?`, [limit])
+    .map((x) => ({ referrer_id: x.referrer_id, email: x.email, ref_code: x.ref_code, signed_up: Number(x.signed_up), paid: Number(x.paid), paid_cents: Number(x.cents) }));
+}
+
 // ===================== ENTITLEMENT OPERATIONS =====================
 
 async function getOrCreateEntitlement(accountId) {
@@ -852,6 +1287,15 @@ async function getEntitlement(accountId) {
     billingPeriodStart: row[columns.indexOf("billing_period_start")],
     billingPeriodEnd: row[columns.indexOf("billing_period_end")],
     cancelAt: columns.includes("cancel_at") ? row[columns.indexOf("cancel_at")] || null : null,
+    pausedUntil: columns.includes("paused_until") ? row[columns.indexOf("paused_until")] || null : null,
+    pauseStartedAt: columns.includes("pause_started_at") ? row[columns.indexOf("pause_started_at")] || null : null,
+    pauseEndedAt: columns.includes("pause_ended_at") ? row[columns.indexOf("pause_ended_at")] || null : null,
+    lapsedAt: columns.includes("lapsed_at") ? row[columns.indexOf("lapsed_at")] || null : null,
+    priceCents: columns.includes("price_cents") && row[columns.indexOf("price_cents")] != null ? Number(row[columns.indexOf("price_cents")]) : null,
+    billingCycle: columns.includes("billing_cycle") ? row[columns.indexOf("billing_cycle")] || null : null,
+    founder: columns.includes("founder") ? !!row[columns.indexOf("founder")] : false,
+    pendingTier: columns.includes("pending_tier") ? row[columns.indexOf("pending_tier")] || null : null,
+    pendingTierAt: columns.includes("pending_tier_at") ? row[columns.indexOf("pending_tier_at")] || null : null,
     createdAt: row[columns.indexOf("created_at")],
     updatedAt: row[columns.indexOf("updated_at")],
   };
@@ -863,7 +1307,20 @@ async function getEffectiveEntitlement(accountId) {
   const ent = await getOrCreateEntitlement(accountId);
   if (ent.cancelAt && ent.cancelAt <= Date.now() && ent.currentTier !== "social_snapshot") {
     await upgradeTier(accountId, "social_snapshot");
-    db.run(`UPDATE entitlements SET cancel_at = NULL, updated_at = ? WHERE account_id = ?`, [Date.now(), accountId]);
+    db.run(`UPDATE entitlements SET cancel_at = NULL, lapsed_at = ?, founder = 0, price_cents = NULL, updated_at = ? WHERE account_id = ?`, [ent.cancelAt, Date.now(), accountId]);
+    saveDb();
+    return getEntitlement(accountId);
+  }
+  // A downgrade scheduled for period end (P.5): apply it, keep the founder flag only if still on Growth.
+  if (ent.pendingTier && ent.pendingTierAt && ent.pendingTierAt <= Date.now() && ent.currentTier !== ent.pendingTier) {
+    await upgradeTier(accountId, ent.pendingTier);
+    db.run(`UPDATE entitlements SET pending_tier = NULL, pending_tier_at = NULL, price_cents = NULL, updated_at = ? WHERE account_id = ?`, [Date.now(), accountId]);
+    saveDb();
+    return getEntitlement(accountId);
+  }
+  // A pause that ran out resumes on its own; the streak module reads pause_ended_at.
+  if (ent.pausedUntil && ent.pausedUntil <= Date.now()) {
+    db.run(`UPDATE entitlements SET paused_until = NULL, pause_ended_at = ?, updated_at = ? WHERE account_id = ?`, [ent.pausedUntil, Date.now(), accountId]);
     saveDb();
     return getEntitlement(accountId);
   }
@@ -875,6 +1332,62 @@ async function setCancelAt(accountId, cancelAt) {
   db.run(`UPDATE entitlements SET cancel_at = ?, updated_at = ? WHERE account_id = ?`, [cancelAt || null, Date.now(), accountId]);
   saveDb();
   return getEntitlement(accountId);
+}
+async function setSubscriptionPrice(accountId, { priceCents, cycle, founder }) {
+  if (!db) throw new Error("Database not initialized");
+  await getOrCreateEntitlement(accountId);
+  db.run(`UPDATE entitlements SET price_cents = ?, billing_cycle = ?, founder = CASE WHEN ? IS NULL THEN founder ELSE ? END, pending_tier = NULL, pending_tier_at = NULL, updated_at = ? WHERE account_id = ?`,
+    [priceCents ?? null, cycle || null, founder == null ? null : (founder ? 1 : 0), founder == null ? null : (founder ? 1 : 0), Date.now(), accountId]);
+  saveDb();
+  return getEntitlement(accountId);
+}
+async function setPendingTier(accountId, tier, at) {
+  if (!db) throw new Error("Database not initialized");
+  await getOrCreateEntitlement(accountId);
+  db.run(`UPDATE entitlements SET pending_tier = ?, pending_tier_at = ?, updated_at = ? WHERE account_id = ?`, [tier || null, at || null, Date.now(), accountId]);
+  saveDb();
+  return getEntitlement(accountId);
+}
+async function countFounders() {
+  if (!db) throw new Error("Database not initialized");
+  return Number(one(`SELECT COUNT(*) AS n FROM entitlements WHERE founder = 1`).n || 0);
+}
+// Usage summed over a window (weekly fair-use limits). Rows are per day (YYYY-MM-DD).
+async function getUsageSince(accountId, kind, sinceTs) {
+  if (!db) throw new Error("Database not initialized");
+  const day = new Date(sinceTs).toISOString().slice(0, 10);
+  return Number(one(`SELECT COALESCE(SUM(count), 0) AS n FROM growth_engine_usage WHERE account_id = ? AND kind = ? AND day >= ?`, [accountId, kind, day]).n || 0);
+}
+// Platforms an account holds paid reports on (Growth is one platform; Pro is all).
+async function paidPlatformsFor(accountId) {
+  if (!db) throw new Error("Database not initialized");
+  return rowsOf(`SELECT DISTINCT business_platform AS p FROM growth_engine_reports WHERE account_id = ? AND tier != 'social_snapshot' AND business_platform IS NOT NULL`, [accountId]).map((r) => r.p);
+}
+async function limitHitSummary(sinceTs) {
+  if (!db) throw new Error("Database not initialized");
+  return rowsOf(`SELECT json_extract(props, '$.key') AS key, json_extract(props, '$.tier') AS tier, COUNT(*) AS hits, COUNT(DISTINCT account_id) AS accounts FROM growth_engine_events WHERE name = 'limit_hit' AND created_at >= ? GROUP BY key, tier ORDER BY hits DESC`, [sinceTs]).map((r) => ({ ...r, hits: Number(r.hits), accounts: Number(r.accounts) }));
+}
+async function setPause(accountId, until) {
+  if (!db) throw new Error("Database not initialized");
+  await getOrCreateEntitlement(accountId);
+  if (until) db.run(`UPDATE entitlements SET paused_until = ?, pause_started_at = ?, pause_ended_at = NULL, cancel_at = NULL, updated_at = ? WHERE account_id = ?`, [until, Date.now(), Date.now(), accountId]);
+  else db.run(`UPDATE entitlements SET paused_until = NULL, pause_ended_at = ?, updated_at = ? WHERE account_id = ?`, [Date.now(), Date.now(), accountId]);
+  saveDb();
+  return getEntitlement(accountId);
+}
+async function insertCancelReason(r) {
+  if (!db) throw new Error("Database not initialized");
+  db.run(`INSERT INTO growth_engine_cancel_reasons (id, account_id, tier, action, reason_code, reason_text, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, ["cr_" + uid(), r.accountId, r.tier || null, r.action, r.reasonCode || null, r.reasonText ? String(r.reasonText).slice(0, 300) : null, Date.now()]);
+  saveDb();
+}
+async function listCancelReasons(limit = 200) {
+  if (!db) throw new Error("Database not initialized");
+  return rowsOf(`SELECT * FROM growth_engine_cancel_reasons ORDER BY created_at DESC LIMIT ?`, [limit]).map((r) => ({ ...r, created_at: Number(r.created_at) }));
+}
+// Accounts whose cancellation took effect in a window (win-back, spec 4.4).
+async function listLapsedEntitlements(fromTs, toTs) {
+  if (!db) throw new Error("Database not initialized");
+  return rowsOf(`SELECT * FROM entitlements WHERE lapsed_at IS NOT NULL AND lapsed_at >= ? AND lapsed_at <= ? AND current_tier = 'social_snapshot'`, [fromTs, toTs]).map((r) => ({ accountId: r.account_id, lapsedAt: Number(r.lapsed_at) }));
 }
 async function setBillingPeriod(accountId, start, end) {
   if (!db) throw new Error("Database not initialized");
@@ -995,6 +1508,13 @@ async function getUserByEmail(email) {
     createdAt: row[columns.indexOf("created_at")],
     updatedAt: row[columns.indexOf("updated_at")],
     emailPaused: columns.includes("email_paused") ? !!row[columns.indexOf("email_paused")] : false,
+    isBusiness: columns.includes("is_business") ? !!row[columns.indexOf("is_business")] : false,
+    priceVariant: columns.includes("price_variant") ? row[columns.indexOf("price_variant")] || null : null,
+    refCode: columns.includes("ref_code") ? row[columns.indexOf("ref_code")] || null : null,
+    emailPrefs: columns.includes("email_prefs") ? (() => { try { return JSON.parse(row[columns.indexOf("email_prefs")] || "null") || null; } catch { return null; } })() : null,
+    niche: columns.includes("niche") ? row[columns.indexOf("niche")] || null : null,
+    goal: columns.includes("goal") ? row[columns.indexOf("goal")] || null : null,
+    goalTarget: columns.includes("goal_target") ? (row[columns.indexOf("goal_target")] != null ? Number(row[columns.indexOf("goal_target")]) : null) : null,
   };
 }
 
@@ -1021,9 +1541,64 @@ async function getUserById(userId) {
     createdAt: row[columns.indexOf("created_at")],
     updatedAt: row[columns.indexOf("updated_at")],
     emailPaused: columns.includes("email_paused") ? !!row[columns.indexOf("email_paused")] : false,
+    isBusiness: columns.includes("is_business") ? !!row[columns.indexOf("is_business")] : false,
+    priceVariant: columns.includes("price_variant") ? row[columns.indexOf("price_variant")] || null : null,
+    refCode: columns.includes("ref_code") ? row[columns.indexOf("ref_code")] || null : null,
+    emailPrefs: columns.includes("email_prefs") ? (() => { try { return JSON.parse(row[columns.indexOf("email_prefs")] || "null") || null; } catch { return null; } })() : null,
+    niche: columns.includes("niche") ? row[columns.indexOf("niche")] || null : null,
+    goal: columns.includes("goal") ? row[columns.indexOf("goal")] || null : null,
+    goalTarget: columns.includes("goal_target") ? (row[columns.indexOf("goal_target")] != null ? Number(row[columns.indexOf("goal_target")]) : null) : null,
   };
 }
 
+async function setUserProfile(userId, { isBusiness, niche, priceVariant } = {}) {
+  if (!db) throw new Error("Database not initialized");
+  if (priceVariant !== undefined) db.run(`UPDATE users SET price_variant = ?, updated_at = ? WHERE user_id = ?`, [priceVariant || null, Date.now(), userId]);
+  if (isBusiness !== undefined) db.run(`UPDATE users SET is_business = ?, updated_at = ? WHERE user_id = ?`, [isBusiness ? 1 : 0, Date.now(), userId]);
+  if (niche !== undefined) db.run(`UPDATE users SET niche = ?, updated_at = ? WHERE user_id = ?`, [niche || null, Date.now(), userId]);
+  saveDb();
+  return getUserById(userId);
+}
+async function setGoal(userId, goal, target) {
+  if (!db) throw new Error("Database not initialized");
+  db.run(`UPDATE users SET goal = ?, goal_target = ?, updated_at = ? WHERE user_id = ?`, [goal || null, Number.isFinite(target) ? Math.round(target) : null, Date.now(), userId]);
+  saveDb();
+  return getUserById(userId);
+}
+// Phase-2 waitlist: every account or report flagged as a business.
+async function listBusinessAccounts() {
+  if (!db) throw new Error("Database not initialized");
+  const users = rowsOf(`SELECT user_id, email, niche, created_at FROM users WHERE is_business = 1 ORDER BY created_at DESC`);
+  const reports = rowsOf(`SELECT r.account_id, r.business_handle AS handle, r.business_platform AS platform, r.business_category AS category, r.generated_at, r.report_body, u.email AS user_email FROM growth_engine_reports r LEFT JOIN users u ON u.user_id = r.account_id WHERE r.report_body LIKE '%"is_business_account":true%' ORDER BY r.generated_at DESC`)
+    .map((r) => { let b = {}; try { b = JSON.parse(r.report_body); } catch { /* skip */ } return { account_id: r.account_id, email: b.email || r.user_email || null, handle: r.handle, platform: r.platform, category: r.category, overall: b.scores?.overall ?? null, generated_at: Number(r.generated_at) }; });
+  return { users: users.map((u) => ({ ...u, created_at: Number(u.created_at) })), reports };
+}
+async function setEmailPrefs(userId, prefs) {
+  if (!db) throw new Error("Database not initialized");
+  db.run(`UPDATE users SET email_prefs = ?, updated_at = ? WHERE user_id = ?`, [JSON.stringify(prefs || {}), Date.now(), userId]);
+  saveDb();
+  return getUserById(userId);
+}
+async function insertEmailLog(e) {
+  if (!db) throw new Error("Database not initialized");
+  db.run(`INSERT INTO growth_engine_email_log (id, user_id, to_email, type, subject, status, provider, provider_id, error, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ["em_" + uid(), e.userId || null, e.to, e.type, (e.subject || "").slice(0, 200), e.status, e.provider || null, e.providerId || null, e.error ? String(e.error).slice(0, 300) : null, Date.now()]);
+  saveDb();
+}
+async function insertRoastRejection(r) {
+  if (!db) throw new Error("Database not initialized");
+  db.run(`INSERT INTO growth_engine_roast_rejections (id, report_id, account_id, heat, reason, flagged, text, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ["rr_" + uid(), r.reportId || null, r.accountId || null, r.heat || null, r.reason, r.flagged || null, r.text || null, Date.now()]);
+  saveDb();
+}
+async function listRoastRejections(limit = 100) {
+  if (!db) throw new Error("Database not initialized");
+  return rowsOf(`SELECT * FROM growth_engine_roast_rejections ORDER BY created_at DESC LIMIT ?`, [limit]).map((r) => ({ ...r, created_at: Number(r.created_at) }));
+}
+async function listEmailLog(limit = 100) {
+  if (!db) throw new Error("Database not initialized");
+  return rowsOf(`SELECT * FROM growth_engine_email_log ORDER BY created_at DESC LIMIT ?`, [limit]).map((r) => ({ ...r, created_at: Number(r.created_at) }));
+}
 async function setEmailPaused(userId, paused) {
   if (!db) throw new Error("Database not initialized");
   db.run(`UPDATE users SET email_paused = ?, updated_at = ? WHERE user_id = ?`, [paused ? 1 : 0, Date.now(), userId]);
@@ -1050,6 +1625,7 @@ async function updateUserPassword(userId, passwordHash) {
 
 module.exports = {
   countFreeSnapshotsByEmail,
+  latestFreeSnapshotForEmail,
   findFreeSnapshotForHandle,
   adoptAnonymousReports,
   getCachedProfile,
@@ -1062,6 +1638,7 @@ module.exports = {
   getPlanContext,
   setPlanContext,
   listPaidReportsBetween,
+  listReportsForThumbCleanup,
   deleteAccount,
   recordBaseline,
   getCategoryBaseline,
@@ -1069,6 +1646,7 @@ module.exports = {
   listScoreHistory,
   getBaselineSummary,
   listBaselines,
+  nichePercentile,
   initDb,
   // Jobs
   createJob,
@@ -1088,6 +1666,11 @@ module.exports = {
   adminRecentReports,
   adminFailedJobs,
   adminFindAccount,
+  insertEvent, eventFunnel, paidRetention, variantFunnel,
+  insertCost, adminCosts, attachReportToCosts,
+  logMove, recordMoveOutcomes, moveOutcomeSummary,
+  createShare, getShare, bumpShareViews,
+  ensureRefCode, getUserByRefCode, recordReferralSignup, recordReferralPayment, referralStats, adminReferrals,
   createPromo, getPromo, listPromos, setPromoActive, hasRedeemed, redeemPromo, listRedemptions,
   setCancelAt,
   setBillingPeriod,
@@ -1102,4 +1685,29 @@ module.exports = {
   updateUserPassword,
   setEmailPaused,
   isEmailPaused,
+  setEmailPrefs,
+  insertEmailLog,
+  listEmailLog,
+  insertRoastRejection,
+  listRoastRejections,
+  setGoal,
+  setPause,
+  setSubscriptionPrice,
+  setPendingTier,
+  countFounders,
+  getUsageSince,
+  paidPlatformsFor,
+  limitHitSummary,
+  insertCancelReason,
+  listCancelReasons,
+  listLapsedEntitlements,
+  listReportsWithEmailSince,
+  listReportsByCategorySince,
+  listReportsSince,
+  setUserUtm,
+  sourceSummary,
+  getNicheBrief,
+  upsertNicheBrief,
+  setUserProfile,
+  listBusinessAccounts,
 };

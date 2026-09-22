@@ -136,7 +136,49 @@ async function initSchema() {
         created_at BIGINT NOT NULL
       )`);
     await client.query(`ALTER TABLE entitlements ADD COLUMN IF NOT EXISTS cancel_at BIGINT`);
+    await client.query(`ALTER TABLE entitlements ADD COLUMN IF NOT EXISTS paused_until BIGINT`);
+    await client.query(`ALTER TABLE entitlements ADD COLUMN IF NOT EXISTS pause_started_at BIGINT`);
+    await client.query(`ALTER TABLE entitlements ADD COLUMN IF NOT EXISTS pause_ended_at BIGINT`);
+    await client.query(`ALTER TABLE entitlements ADD COLUMN IF NOT EXISTS lapsed_at BIGINT`);
+    await client.query(`ALTER TABLE entitlements ADD COLUMN IF NOT EXISTS price_cents INTEGER`);
+    await client.query(`ALTER TABLE entitlements ADD COLUMN IF NOT EXISTS billing_cycle TEXT`);
+    await client.query(`ALTER TABLE entitlements ADD COLUMN IF NOT EXISTS founder BOOLEAN DEFAULT FALSE`);
+    await client.query(`ALTER TABLE entitlements ADD COLUMN IF NOT EXISTS pending_tier TEXT`);
+    await client.query(`ALTER TABLE entitlements ADD COLUMN IF NOT EXISTS pending_tier_at BIGINT`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_cancel_reasons (
+        id TEXT PRIMARY KEY, account_id TEXT NOT NULL, tier TEXT, action TEXT NOT NULL, reason_code TEXT, reason_text TEXT, created_at BIGINT NOT NULL
+      )`);
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_paused BOOLEAN DEFAULT FALSE`);
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_business BOOLEAN DEFAULT FALSE`);
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS goal TEXT`);
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS goal_target INTEGER`);
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS utm TEXT`);
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS niche TEXT`);
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS price_variant TEXT`);
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_prefs TEXT`);
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ref_code TEXT`);
+    await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_ref_code ON users (ref_code)`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_referrals (
+        id TEXT PRIMARY KEY, ref_code TEXT NOT NULL, referrer_id TEXT NOT NULL, referred_id TEXT NOT NULL UNIQUE, signed_up_at BIGINT NOT NULL,
+        first_paid_at BIGINT, first_paid_cents INTEGER, first_paid_product TEXT, payout_status TEXT NOT NULL DEFAULT 'none', payout_cents INTEGER, created_at BIGINT NOT NULL
+      )`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_referrals_referrer ON growth_engine_referrals (referrer_id)`);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_email_log (
+        id TEXT PRIMARY KEY, user_id TEXT, to_email TEXT NOT NULL, type TEXT NOT NULL, subject TEXT, status TEXT NOT NULL,
+        provider TEXT, provider_id TEXT, error TEXT, created_at BIGINT NOT NULL
+      )`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_niche_briefs (
+        id TEXT PRIMARY KEY, category TEXT NOT NULL, platform TEXT NOT NULL, week TEXT NOT NULL, n INTEGER NOT NULL, body TEXT NOT NULL, created_at BIGINT NOT NULL
+      )`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_roast_rejections (
+        id TEXT PRIMARY KEY, report_id TEXT, account_id TEXT, heat TEXT, reason TEXT NOT NULL, flagged TEXT, text TEXT, created_at BIGINT NOT NULL
+      )`);
     await client.query(`
       CREATE TABLE IF NOT EXISTS growth_engine_password_resets (
         token_hash TEXT PRIMARY KEY,
@@ -167,6 +209,55 @@ async function initSchema() {
         amount_off INTEGER NOT NULL DEFAULT 0,
         created_at BIGINT NOT NULL,
         UNIQUE (code, account_id)
+      )`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_events (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        account_id TEXT,
+        anon TEXT,
+        ref TEXT,
+        report_id TEXT,
+        props TEXT,
+        ip TEXT,
+        created_at BIGINT NOT NULL
+      )`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_events_name_time ON growth_engine_events (name, created_at)`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_costs (
+        id TEXT PRIMARY KEY,
+        account_id TEXT,
+        job_id TEXT,
+        report_id TEXT,
+        feature TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        provider TEXT,
+        model TEXT,
+        label TEXT,
+        quantity DOUBLE PRECISION NOT NULL DEFAULT 0,
+        detail TEXT,
+        cents DOUBLE PRECISION NOT NULL DEFAULT 0,
+        created_at BIGINT NOT NULL
+      )`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_costs_time ON growth_engine_costs (created_at)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_costs_account ON growth_engine_costs (account_id)`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_move_log (
+        id TEXT PRIMARY KEY, account_id TEXT NOT NULL, report_id TEXT NOT NULL, handle TEXT, platform TEXT, category TEXT,
+        move_key TEXT NOT NULL, done BOOLEAN NOT NULL, overall_at INTEGER, dims_at TEXT, plan_day INTEGER, created_at BIGINT NOT NULL
+      )`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_move_log_report ON growth_engine_move_log (report_id)`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_move_outcomes (
+        id TEXT PRIMARY KEY, account_id TEXT NOT NULL, handle TEXT, platform TEXT, category TEXT, move_key TEXT NOT NULL,
+        moves_done_together INTEGER NOT NULL, score_before INTEGER, score_after INTEGER, dims_before TEXT, dims_after TEXT,
+        days INTEGER, from_report TEXT, to_report TEXT, created_at BIGINT NOT NULL
+      )`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_move_outcomes_key ON growth_engine_move_outcomes (category, platform, move_key)`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_shares (
+        share_id TEXT PRIMARY KEY, account_id TEXT, report_id TEXT NOT NULL, kind TEXT NOT NULL, data TEXT NOT NULL, ref TEXT,
+        views INTEGER NOT NULL DEFAULT 0, created_at BIGINT NOT NULL
       )`);
     await client.query(`
       CREATE TABLE IF NOT EXISTS growth_engine_plan_context (
@@ -216,7 +307,7 @@ async function createUser(email, passwordHash, companyName = null) {
 
 function userRow(row) {
   return row
-    ? { userId: row.user_id, email: row.email, passwordHash: row.password_hash, companyName: row.company_name, createdAt: Number(row.created_at), updatedAt: Number(row.updated_at), emailPaused: !!row.email_paused }
+    ? { userId: row.user_id, email: row.email, passwordHash: row.password_hash, companyName: row.company_name, goal: row.goal || null, goalTarget: row.goal_target != null ? Number(row.goal_target) : null, createdAt: Number(row.created_at), updatedAt: Number(row.updated_at), emailPaused: !!row.email_paused, isBusiness: !!row.is_business, niche: row.niche || null, priceVariant: row.price_variant || null, refCode: row.ref_code || null, emailPrefs: (() => { try { return row.email_prefs ? (typeof row.email_prefs === "string" ? JSON.parse(row.email_prefs) : row.email_prefs) : null; } catch { return null; } })() }
     : null;
 }
 async function getUserByEmail(email) {
@@ -225,6 +316,33 @@ async function getUserByEmail(email) {
 async function getUserById(userId) {
   return userRow((await q(`SELECT * FROM users WHERE user_id = $1`, [userId])).rows[0]);
 }
+async function setUserProfile(userId, { isBusiness, niche, priceVariant } = {}) {
+  if (priceVariant !== undefined) await q(`UPDATE users SET price_variant = $1, updated_at = $2 WHERE user_id = $3`, [priceVariant || null, Date.now(), userId]);
+  if (isBusiness !== undefined) await q(`UPDATE users SET is_business = $1, updated_at = $2 WHERE user_id = $3`, [!!isBusiness, Date.now(), userId]);
+  if (niche !== undefined) await q(`UPDATE users SET niche = $1, updated_at = $2 WHERE user_id = $3`, [niche || null, Date.now(), userId]);
+  return getUserById(userId);
+}
+async function setGoal(userId, goal, target) {
+  await q(`UPDATE users SET goal = $1, goal_target = $2, updated_at = $3 WHERE user_id = $4`, [goal || null, Number.isFinite(target) ? Math.round(target) : null, Date.now(), userId]);
+  return getUserById(userId);
+}
+async function listBusinessAccounts() {
+  const users = (await q(`SELECT user_id, email, niche, created_at FROM users WHERE is_business = TRUE ORDER BY created_at DESC`)).rows.map((u) => ({ ...u, created_at: Number(u.created_at) }));
+  const reports = (await q(`SELECT r.account_id, r.handle, r.platform, r.category, r.generated_at, r.report_body, u.email AS user_email FROM growth_engine_reports r LEFT JOIN users u ON u.user_id = r.account_id WHERE r.report_body LIKE '%"is_business_account":true%' ORDER BY r.generated_at DESC NULLS LAST`)).rows
+    .map((r) => { const b = parseJson(r.report_body) || {}; return { account_id: r.account_id, email: b.email || r.user_email || null, handle: r.handle, platform: r.platform, category: r.category, overall: b.scores?.overall ?? null, generated_at: Number(r.generated_at) }; });
+  return { users, reports };
+}
+async function setEmailPrefs(userId, prefs) { await q(`UPDATE users SET email_prefs = $1, updated_at = $2 WHERE user_id = $3`, [JSON.stringify(prefs || {}), Date.now(), userId]); return getUserById(userId); }
+async function insertEmailLog(e) {
+  await q(`INSERT INTO growth_engine_email_log (id, user_id, to_email, type, subject, status, provider, provider_id, error, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+    ["em_" + uid(), e.userId || null, e.to, e.type, (e.subject || "").slice(0, 200), e.status, e.provider || null, e.providerId || null, e.error ? String(e.error).slice(0, 300) : null, Date.now()]);
+}
+async function insertRoastRejection(r) {
+  await q(`INSERT INTO growth_engine_roast_rejections (id, report_id, account_id, heat, reason, flagged, text, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    ["rr_" + uid(), r.reportId || null, r.accountId || null, r.heat || null, r.reason, r.flagged || null, r.text || null, Date.now()]);
+}
+async function listRoastRejections(limit = 100) { return (await q(`SELECT * FROM growth_engine_roast_rejections ORDER BY created_at DESC LIMIT $1`, [limit])).rows.map((r) => ({ ...r, created_at: Number(r.created_at) })); }
+async function listEmailLog(limit = 100) { return (await q(`SELECT * FROM growth_engine_email_log ORDER BY created_at DESC LIMIT $1`, [limit])).rows.map((r) => ({ ...r, created_at: Number(r.created_at) })); }
 async function setEmailPaused(userId, paused) {
   await q(`UPDATE users SET email_paused = $1, updated_at = $2 WHERE user_id = $3`, [!!paused, Date.now(), userId]);
   return getUserById(userId);
@@ -335,6 +453,11 @@ async function adoptAnonymousReports(accountId, email) {
 }
 
 // Free-tier quota: non-failed snapshot jobs for an email.
+async function latestFreeSnapshotForEmail(email) {
+  const r = await q(`SELECT result_payload, created_at FROM growth_engine_jobs WHERE tier = 'social_snapshot' AND status = 'complete' AND lower(input_params->>'email') = $1 ORDER BY created_at DESC LIMIT 1`, [String(email).trim().toLowerCase()]);
+  const row = r.rows[0]; if (!row) return null;
+  const p = parseJson(row.result_payload) || {}; return { reportId: p.report_id || null, generatedAt: Number(row.created_at) };
+}
 async function countFreeSnapshotsByEmail(email) {
   const r = await q(
     `SELECT COUNT(*) AS n FROM growth_engine_jobs
@@ -348,6 +471,7 @@ async function countFreeSnapshotsByEmail(email) {
 
 async function createReport(accountId, tier, businessInfo, reportBody) {
   const reportId = "rpt_" + uid();
+  if (reportBody && typeof reportBody === "object") reportBody.report_id = reportId;
   const now = Date.now();
   await q(
     `INSERT INTO growth_engine_reports
@@ -366,6 +490,7 @@ function reportRow(row) {
         business: { handle: row.handle, platform: row.platform, category: row.category },
         generatedAt: Number(row.generated_at || row.created_at), refreshDueAt: row.refresh_due_at ? Number(row.refresh_due_at) : null,
         reportBody: parseJson(row.report_body),
+        createdAt: Number(row.created_at), updatedAt: Number(row.updated_at || row.created_at),
       }
     : null;
 }
@@ -386,6 +511,33 @@ async function patchReportBody(reportId, patch) {
 async function updateReportRefreshDue(reportId, refreshDueAt) {
   await q(`UPDATE growth_engine_reports SET refresh_due_at = $1, updated_at = $2 WHERE report_id = $3`, [refreshDueAt, Date.now(), reportId]);
   return getReport(reportId);
+}
+async function listReportsWithEmailSince(fromTs) {
+  const r = await q(`SELECT * FROM growth_engine_reports WHERE generated_at >= $1 AND report_body LIKE '%"email":"%' ORDER BY generated_at DESC`, [fromTs]);
+  return r.rows.map(reportRow);
+}
+async function listReportsByCategorySince(category, platform, fromTs) {
+  const r = await q(`SELECT * FROM growth_engine_reports WHERE category = $1 AND platform = $2 AND generated_at >= $3 ORDER BY generated_at DESC`, [category, platform, fromTs]);
+  return r.rows.map(reportRow);
+}
+async function getNicheBrief(category, platform, week) {
+  const r = await q(`SELECT body FROM growth_engine_niche_briefs WHERE category = $1 AND platform = $2 AND week = $3`, [category, platform, week]);
+  return r.rows[0] ? parseJson(r.rows[0].body) : null;
+}
+async function upsertNicheBrief({ category, platform, week, n, body }) {
+  await q(`DELETE FROM growth_engine_niche_briefs WHERE category = $1 AND platform = $2 AND week = $3`, [category, platform, week]);
+  await q(`INSERT INTO growth_engine_niche_briefs (id, category, platform, week, n, body, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7)`, ["nb_" + uid(), category, platform, week, n || 0, JSON.stringify(body), Date.now()]);
+}
+async function listReportsSince(fromTs) {
+  const r = await q(`SELECT * FROM growth_engine_reports WHERE generated_at >= $1 ORDER BY generated_at DESC`, [fromTs]);
+  return r.rows.map(reportRow);
+}
+async function setUserUtm(userId, utm) {
+  await q(`UPDATE users SET utm = $1, updated_at = $2 WHERE user_id = $3 AND (utm IS NULL OR utm = '')`, [utm ? JSON.stringify(utm).slice(0, 600) : null, Date.now(), userId]);
+}
+async function sourceSummary() {
+  const r = await q(`SELECT u.utm, u.created_at, e.current_tier FROM users u LEFT JOIN entitlements e ON e.user_id = u.user_id WHERE u.utm IS NOT NULL AND u.utm <> ''`);
+  return r.rows.map((x) => ({ utm: parseJson(x.utm), created_at: Number(x.created_at), tier: x.current_tier || "social_snapshot" }));
 }
 async function listReportsDueForRefresh(beforeTimestamp) {
   const r = await q(`SELECT * FROM growth_engine_reports WHERE refresh_due_at IS NOT NULL AND refresh_due_at <= $1 ORDER BY refresh_due_at ASC`, [beforeTimestamp]);
@@ -420,6 +572,8 @@ function entRow(row) {
         billingPeriodEnd: row.billing_period_end ? Number(row.billing_period_end) : null, billing_period_end: row.billing_period_end ? Number(row.billing_period_end) : null,
         stripeSubscriptionId: row.stripe_subscription_id || null,
         cancelAt: row.cancel_at ? Number(row.cancel_at) : null, cancel_at: row.cancel_at ? Number(row.cancel_at) : null,
+        priceCents: row.price_cents != null ? Number(row.price_cents) : null, billingCycle: row.billing_cycle || null, founder: !!row.founder, pendingTier: row.pending_tier || null, pendingTierAt: row.pending_tier_at ? Number(row.pending_tier_at) : null,
+        pausedUntil: row.paused_until ? Number(row.paused_until) : null, pauseStartedAt: row.pause_started_at ? Number(row.pause_started_at) : null, pauseEndedAt: row.pause_ended_at ? Number(row.pause_ended_at) : null, lapsedAt: row.lapsed_at ? Number(row.lapsed_at) : null,
       }
     : null;
 }
@@ -427,10 +581,58 @@ async function getEffectiveEntitlement(accountId) {
   const ent = await getOrCreateEntitlement(accountId);
   if (ent.cancelAt && ent.cancelAt <= Date.now() && ent.currentTier !== "social_snapshot") {
     await upgradeTier(accountId, "social_snapshot");
-    await q(`UPDATE entitlements SET cancel_at = NULL, updated_at = $1 WHERE user_id = $2`, [Date.now(), accountId]);
+    await q(`UPDATE entitlements SET cancel_at = NULL, lapsed_at = $1, founder = FALSE, price_cents = NULL, updated_at = $2 WHERE user_id = $3`, [ent.cancelAt, Date.now(), accountId]);
+    return getEntitlement(accountId);
+  }
+  if (ent.pendingTier && ent.pendingTierAt && ent.pendingTierAt <= Date.now() && ent.currentTier !== ent.pendingTier) {
+    await upgradeTier(accountId, ent.pendingTier);
+    await q(`UPDATE entitlements SET pending_tier = NULL, pending_tier_at = NULL, price_cents = NULL, updated_at = $1 WHERE user_id = $2`, [Date.now(), accountId]);
+    return getEntitlement(accountId);
+  }
+  if (ent.pausedUntil && ent.pausedUntil <= Date.now()) {
+    await q(`UPDATE entitlements SET paused_until = NULL, pause_ended_at = $1, updated_at = $2 WHERE user_id = $3`, [ent.pausedUntil, Date.now(), accountId]);
     return getEntitlement(accountId);
   }
   return ent;
+}
+async function setSubscriptionPrice(accountId, { priceCents, cycle, founder }) {
+  await getOrCreateEntitlement(accountId);
+  if (founder == null) await q(`UPDATE entitlements SET price_cents = $1, billing_cycle = $2, pending_tier = NULL, pending_tier_at = NULL, updated_at = $3 WHERE user_id = $4`, [priceCents ?? null, cycle || null, Date.now(), accountId]);
+  else await q(`UPDATE entitlements SET price_cents = $1, billing_cycle = $2, founder = $3, pending_tier = NULL, pending_tier_at = NULL, updated_at = $4 WHERE user_id = $5`, [priceCents ?? null, cycle || null, !!founder, Date.now(), accountId]);
+  return getEntitlement(accountId);
+}
+async function setPendingTier(accountId, tier, at) {
+  await getOrCreateEntitlement(accountId);
+  await q(`UPDATE entitlements SET pending_tier = $1, pending_tier_at = $2, updated_at = $3 WHERE user_id = $4`, [tier || null, at || null, Date.now(), accountId]);
+  return getEntitlement(accountId);
+}
+async function countFounders() { return Number((await q(`SELECT COUNT(*) AS n FROM entitlements WHERE founder = TRUE`)).rows[0]?.n || 0); }
+async function getUsageSince(accountId, kind, sinceTs) {
+  const day = new Date(sinceTs).toISOString().slice(0, 10);
+  return Number((await q(`SELECT COALESCE(SUM(count), 0) AS n FROM growth_engine_usage WHERE account_id = $1 AND kind = $2 AND day >= $3`, [accountId, kind, day])).rows[0]?.n || 0);
+}
+async function paidPlatformsFor(accountId) {
+  return (await q(`SELECT DISTINCT platform AS p FROM growth_engine_reports WHERE account_id = $1 AND tier <> 'social_snapshot' AND platform IS NOT NULL`, [accountId])).rows.map((r) => r.p);
+}
+async function limitHitSummary(sinceTs) {
+  const r = await q(`SELECT account_id, props FROM growth_engine_events WHERE name = 'limit_hit' AND created_at >= $1`, [sinceTs]);
+  const by = {};
+  for (const x of r.rows) { const p = parseJson(x.props) || {}; const k = `${p.key || "?"}|${p.tier || "?"}`; by[k] = by[k] || { key: p.key || null, tier: p.tier || null, hits: 0, accounts: new Set() }; by[k].hits++; if (x.account_id) by[k].accounts.add(x.account_id); }
+  return Object.values(by).map((v) => ({ key: v.key, tier: v.tier, hits: v.hits, accounts: v.accounts.size })).sort((a, b) => b.hits - a.hits);
+}
+async function setPause(accountId, until) {
+  await getOrCreateEntitlement(accountId);
+  if (until) await q(`UPDATE entitlements SET paused_until = $1, pause_started_at = $2, pause_ended_at = NULL, cancel_at = NULL, updated_at = $2 WHERE user_id = $3`, [until, Date.now(), accountId]);
+  else await q(`UPDATE entitlements SET paused_until = NULL, pause_ended_at = $1, updated_at = $1 WHERE user_id = $2`, [Date.now(), accountId]);
+  return getEntitlement(accountId);
+}
+async function insertCancelReason(r) {
+  await q(`INSERT INTO growth_engine_cancel_reasons (id, account_id, tier, action, reason_code, reason_text, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7)`, ["cr_" + uid(), r.accountId, r.tier || null, r.action, r.reasonCode || null, r.reasonText ? String(r.reasonText).slice(0, 300) : null, Date.now()]);
+}
+async function listCancelReasons(limit = 200) { return (await q(`SELECT * FROM growth_engine_cancel_reasons ORDER BY created_at DESC LIMIT $1`, [limit])).rows.map((r) => ({ ...r, created_at: Number(r.created_at) })); }
+async function listLapsedEntitlements(fromTs, toTs) {
+  const r = await q(`SELECT user_id, lapsed_at FROM entitlements WHERE lapsed_at IS NOT NULL AND lapsed_at >= $1 AND lapsed_at <= $2 AND current_tier = 'social_snapshot'`, [fromTs, toTs]);
+  return r.rows.map((x) => ({ accountId: x.user_id, lapsedAt: Number(x.lapsed_at) }));
 }
 async function setCancelAt(accountId, cancelAt) {
   await getOrCreateEntitlement(accountId);
@@ -516,6 +718,10 @@ async function setPlanContext(accountId, handle, platform, context) {
     [`${accountId}|${platform}|${String(handle).toLowerCase()}`, accountId, String(handle).toLowerCase(), platform, JSON.stringify(ctx), now]);
   return { ...ctx, updated_at: now };
 }
+async function listReportsForThumbCleanup(beforeTs, limit = 50) {
+  const r = await q(`SELECT report_id, report_body FROM growth_engine_reports WHERE tier = 'social_snapshot' AND generated_at < $1 AND report_body LIKE '%"thumb_prefix":%' AND report_body NOT LIKE '%"thumbs_removed":true%' LIMIT $2`, [beforeTs, limit]);
+  return r.rows.map((x) => { const b = parseJson(x.report_body) || {}; return { reportId: x.report_id, thumbPrefix: b.thumb_prefix || null }; });
+}
 async function listPaidReportsBetween(fromTs, toTs) {
   const r = await q(`SELECT * FROM growth_engine_reports WHERE tier <> 'social_snapshot' AND generated_at >= $1 AND generated_at <= $2 ORDER BY generated_at ASC`, [fromTs, toTs]);
   return r.rows.map(reportRow);
@@ -587,8 +793,125 @@ async function listRedemptions(code, limit = 100) {
   return r.rows.map((x) => ({ ...x, amount_off: Number(x.amount_off), created_at: Number(x.created_at) }));
 }
 
+
+// ===================== EVENTS =====================
+async function insertEvent(e) {
+  await q(`INSERT INTO growth_engine_events (id, name, account_id, anon, ref, report_id, props, ip, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+    ["ev_" + uid(), e.name, e.accountId, e.anon, e.ref, e.reportId, e.props, e.ip, Date.now()]);
+}
+async function eventFunnel(sinceTs, names) {
+  const out = {};
+  for (const n of names) {
+    const r = (await q(`SELECT COUNT(DISTINCT COALESCE(account_id, anon, ip)) AS actors, COUNT(*) AS total FROM growth_engine_events WHERE name = $1 AND created_at >= $2`, [n, sinceTs])).rows[0];
+    out[n] = { actors: Number(r.actors || 0), total: Number(r.total || 0) };
+  }
+  const byRef = (await q(`SELECT ref, name, COUNT(DISTINCT COALESCE(account_id, anon, ip)) AS actors FROM growth_engine_events WHERE ref IS NOT NULL AND created_at >= $1 AND name IN ('evaluate_started','signup','subscribe') GROUP BY ref, name`, [sinceTs])).rows;
+  const refs = {};
+  for (const r of byRef) (refs[r.ref] ||= {})[r.name] = Number(r.actors);
+  return { steps: out, by_ref: refs };
+}
+async function variantFunnel(sinceTs) {
+  const r = await q(`SELECT props::json->>'variant' AS v, name, COUNT(DISTINCT COALESCE(account_id, anon, ip)) AS actors, SUM(COALESCE((props::json->>'amount_cents')::numeric, 0)) AS cents FROM growth_engine_events WHERE created_at >= $1 AND name IN ('pricing_viewed','subscribe','unlock') AND props IS NOT NULL AND props::json->>'variant' IS NOT NULL GROUP BY v, name`, [sinceTs]);
+  const out = {};
+  for (const x of r.rows) { (out[x.v] ||= { pricing_viewed: 0, subscribe: 0, unlock: 0, revenue_cents: 0 })[x.name] = Number(x.actors); if (x.name !== "pricing_viewed") out[x.v].revenue_cents += Number(x.cents) || 0; }
+  return out;
+}
+async function paidRetention() {
+  const now = Date.now(), d = 86400000;
+  const cohort = (await q(`SELECT DISTINCT account_id FROM growth_engine_events WHERE name = 'subscribe' AND created_at BETWEEN $1 AND $2 AND account_id IS NOT NULL`, [now - 60 * d, now - 30 * d])).rows.map((r) => r.account_id);
+  let retained = 0;
+  for (const id of cohort) { const e = (await q(`SELECT current_tier, cancel_at FROM entitlements WHERE user_id = $1`, [id])).rows[0] || {}; if (e.current_tier && e.current_tier !== "social_snapshot" && (!e.cancel_at || Number(e.cancel_at) > now)) retained++; }
+  return { cohort: cohort.length, retained, rate: cohort.length ? retained / cohort.length : null };
+}
+
+
+// ===================== COSTS =====================
+async function insertCost(c) {
+  await q(`INSERT INTO growth_engine_costs (id, account_id, job_id, report_id, feature, kind, provider, model, label, quantity, detail, cents, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+    ["c_" + uid(), c.accountId, c.jobId, c.reportId, c.feature, c.kind, c.provider || null, c.model || null, c.label || null, Number(c.quantity) || 0, c.detail ? JSON.stringify(c.detail) : null, Number(c.cents) || 0, Date.now()]);
+}
+async function attachReportToCosts(jobId, reportId) { await q(`UPDATE growth_engine_costs SET report_id = $1 WHERE job_id = $2 AND report_id IS NULL`, [reportId, jobId]); }
+async function adminCosts(sinceTs, limit = 50) {
+  const by = async (col) => (await q(`SELECT ${col} AS k, SUM(cents) AS cents, COUNT(*) AS n, SUM(quantity) AS qty FROM growth_engine_costs WHERE created_at >= $1 GROUP BY ${col} ORDER BY cents DESC`, [sinceTs])).rows.map((r) => ({ key: r.k, cents: Number(r.cents), n: Number(r.n), quantity: Number(r.qty) }));
+  const total = Number((await q(`SELECT COALESCE(SUM(cents), 0) AS c FROM growth_engine_costs WHERE created_at >= $1`, [sinceTs])).rows[0].c);
+  const perReport = (await q(`SELECT AVG(c) AS avg FROM (SELECT SUM(cents) AS c FROM growth_engine_costs WHERE created_at >= $1 AND report_id IS NOT NULL GROUP BY report_id) t`, [sinceTs])).rows[0];
+  const users = (await q(`SELECT c.account_id, u.email, SUM(c.cents) AS cents, COUNT(DISTINCT c.report_id) AS reports FROM growth_engine_costs c LEFT JOIN users u ON u.user_id = c.account_id WHERE c.created_at >= $1 AND c.account_id IS NOT NULL GROUP BY c.account_id, u.email ORDER BY cents DESC LIMIT $2`, [sinceTs, limit])).rows;
+  let revenue = [];
+  try { revenue = (await q(`SELECT account_id, SUM((props::json->>'amount_cents')::numeric) AS cents FROM growth_engine_events WHERE name IN ('subscribe','unlock') AND account_id IS NOT NULL AND props IS NOT NULL GROUP BY account_id`)).rows; }
+  catch (e) { console.warn("[Costs] revenue query failed:", e.message); }
+  const rev = Object.fromEntries(revenue.map((r) => [r.account_id, Number(r.cents) || 0]));
+  return { total_cents: total, avg_cents_per_report: Number(perReport?.avg || 0), by_kind: await by("kind"), by_provider: await by("provider"), by_feature: await by("feature"), by_model: await by("model"),
+    users: users.map((u) => ({ account_id: u.account_id, email: u.email, cost_cents: Number(u.cents), reports: Number(u.reports), revenue_cents: rev[u.account_id] || 0 })) };
+}
+
+
+// ===================== OUTCOMES (spec 1.15) =====================
+async function logMove({ accountId, reportId, handle, platform, category, moveKey, done, overall, dims, planDay }) {
+  await q(`INSERT INTO growth_engine_move_log (id, account_id, report_id, handle, platform, category, move_key, done, overall_at, dims_at, plan_day, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+    ["ml_" + uid(), accountId, reportId, handle || null, platform || null, category || null, moveKey, !!done, overall ?? null, dims ? JSON.stringify(dims) : null, planDay ?? null, Date.now()]);
+}
+async function recordMoveOutcomes({ accountId, handle, platform, category, moveKeys, before, after, days, fromReport, toReport }) {
+  for (const k of moveKeys) {
+    await q(`INSERT INTO growth_engine_move_outcomes (id, account_id, handle, platform, category, move_key, moves_done_together, score_before, score_after, dims_before, dims_after, days, from_report, to_report, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+      ["mo_" + uid(), accountId, handle || null, platform || null, category || null, k, moveKeys.length, before.overall ?? null, after.overall ?? null, JSON.stringify(before.dims || {}), JSON.stringify(after.dims || {}), days ?? null, fromReport || null, toReport || null, Date.now()]);
+  }
+}
+async function moveOutcomeSummary({ category = null, platform = null } = {}) {
+  const where = []; const params = [];
+  if (category) { params.push(category); where.push(`category = $${params.length}`); }
+  if (platform) { params.push(platform); where.push(`platform = $${params.length}`); }
+  const r = await q(`SELECT category, platform, move_key, COUNT(*) AS n, AVG(score_after - score_before) AS avg_delta, AVG(moves_done_together) AS avg_together FROM growth_engine_move_outcomes ${where.length ? "WHERE " + where.join(" AND ") : ""} GROUP BY category, platform, move_key ORDER BY n DESC, avg_delta DESC`, params);
+  return r.rows.map((x) => ({ ...x, n: Number(x.n), avg_delta: Number(x.avg_delta), avg_together: Number(x.avg_together) }));
+}
+
+
+// ===================== SHARE CARDS (spec 1.7) =====================
+async function createShare({ accountId, reportId, kind, data, ref }) {
+  const shareId = crypto.randomBytes(6).toString("base64url");
+  await q(`INSERT INTO growth_engine_shares (share_id, account_id, report_id, kind, data, ref, views, created_at) VALUES ($1, $2, $3, $4, $5, $6, 0, $7)`, [shareId, accountId || null, reportId, kind, JSON.stringify(data), ref || null, Date.now()]);
+  return getShare(shareId);
+}
+async function getShare(shareId) {
+  const r = (await q(`SELECT * FROM growth_engine_shares WHERE share_id = $1`, [shareId])).rows[0];
+  return r ? { shareId: r.share_id, accountId: r.account_id, reportId: r.report_id, kind: r.kind, data: parseJson(r.data) || {}, ref: r.ref, views: Number(r.views), createdAt: Number(r.created_at) } : null;
+}
+async function bumpShareViews(shareId) { await q(`UPDATE growth_engine_shares SET views = views + 1 WHERE share_id = $1`, [shareId]); }
+
+
+// ===================== REFERRALS (spec 1.8) =====================
+const REF_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
+function newRefCode() { const b = crypto.randomBytes(8); let s = ""; for (let i = 0; i < 8; i++) s += REF_ALPHABET[b[i] % REF_ALPHABET.length]; return s; }
+async function ensureRefCode(userId) {
+  const u = await getUserById(userId); if (!u) return null;
+  if (u.refCode) return u.refCode;
+  for (let i = 0; i < 5; i++) { try { await q(`UPDATE users SET ref_code = $1 WHERE user_id = $2 AND ref_code IS NULL`, [newRefCode(), userId]); return (await getUserById(userId)).refCode; } catch { /* collision */ } }
+  return null;
+}
+async function getUserByRefCode(code) { const r = (await q(`SELECT user_id FROM users WHERE ref_code = $1`, [String(code || "").toLowerCase()])).rows[0]; return r ? getUserById(r.user_id) : null; }
+async function recordReferralSignup({ refCode, referrerId, referredId }) {
+  if (!referrerId || !referredId || referrerId === referredId) return null;
+  try { await q(`INSERT INTO growth_engine_referrals (id, ref_code, referrer_id, referred_id, signed_up_at, created_at) VALUES ($1, $2, $3, $4, $5, $6)`, ["rf_" + uid(), refCode, referrerId, referredId, Date.now(), Date.now()]); return true; } catch { return null; }
+}
+async function recordReferralPayment({ referredId, cents, product }) {
+  await q(`UPDATE growth_engine_referrals SET first_paid_at = $1, first_paid_cents = $2, first_paid_product = $3, payout_status = CASE WHEN payout_status = 'none' THEN 'pending' ELSE payout_status END WHERE referred_id = $4 AND first_paid_at IS NULL`, [Date.now(), Number(cents) || 0, product || null, referredId]);
+}
+async function referralStats(referrerId) {
+  const r = (await q(`SELECT COUNT(*) AS signed_up, SUM(CASE WHEN first_paid_at IS NOT NULL THEN 1 ELSE 0 END) AS paid, SUM(COALESCE(first_paid_cents, 0)) AS cents FROM growth_engine_referrals WHERE referrer_id = $1`, [referrerId])).rows[0] || {};
+  return { signed_up: Number(r.signed_up || 0), paid: Number(r.paid || 0), paid_cents: Number(r.cents || 0) };
+}
+async function adminReferrals(limit = 50) {
+  const r = await q(`SELECT r.referrer_id, u.email, MIN(r.ref_code) AS ref_code, COUNT(*) AS signed_up, SUM(CASE WHEN r.first_paid_at IS NOT NULL THEN 1 ELSE 0 END) AS paid, SUM(COALESCE(r.first_paid_cents, 0)) AS cents FROM growth_engine_referrals r LEFT JOIN users u ON u.user_id = r.referrer_id GROUP BY r.referrer_id, u.email ORDER BY paid DESC, signed_up DESC LIMIT $1`, [limit]);
+  return r.rows.map((x) => ({ referrer_id: x.referrer_id, email: x.email, ref_code: x.ref_code, signed_up: Number(x.signed_up), paid: Number(x.paid), paid_cents: Number(x.cents) }));
+}
+
 // ===================== CATEGORY BASELINES =====================
 
+async function nichePercentile(category, platform, score) {
+  const r = platform ? (await q(`SELECT COUNT(*) AS n, SUM(CASE WHEN overall < $1 THEN 1 ELSE 0 END) AS below FROM growth_engine_baselines WHERE category = $2 AND platform = $3`, [score, category, platform])).rows[0]
+                     : (await q(`SELECT COUNT(*) AS n, SUM(CASE WHEN overall < $1 THEN 1 ELSE 0 END) AS below FROM growth_engine_baselines WHERE category = $2`, [score, category])).rows[0];
+  const n = Number(r?.n || 0); if (!n) return null;
+  return { n, beats_pct: Math.round((Number(r.below || 0) / n) * 100) };
+}
 async function listBaselines() {
   const r = await q(`SELECT category, platform, handle, overall, dimensions, created_at FROM growth_engine_baselines ORDER BY category, platform, handle`);
   return r.rows.map((x) => { const dims = parseJson(x.dimensions) || {}; return { category: x.category, platform: x.platform, handle: x.handle, overall: Number(x.overall), dimensions: Object.entries(dims).map(([label, score]) => ({ label, score })), created_at: Number(x.created_at) }; });
@@ -650,11 +973,37 @@ module.exports = {
   updateUserPassword,
   setEmailPaused,
   isEmailPaused,
+  setEmailPrefs,
+  insertEmailLog,
+  listEmailLog,
+  insertRoastRejection,
+  listRoastRejections,
+  setGoal,
+  setPause,
+  setSubscriptionPrice,
+  setPendingTier,
+  countFounders,
+  getUsageSince,
+  paidPlatformsFor,
+  limitHitSummary,
+  insertCancelReason,
+  listCancelReasons,
+  listLapsedEntitlements,
+  listReportsWithEmailSince,
+  listReportsByCategorySince,
+  listReportsSince,
+  setUserUtm,
+  sourceSummary,
+  getNicheBrief,
+  upsertNicheBrief,
+  setUserProfile,
+  listBusinessAccounts,
   // Jobs
   createJob,
   getJob,
   updateJobStatus,
   countFreeSnapshotsByEmail,
+  latestFreeSnapshotForEmail,
   findFreeSnapshotForHandle,
   adoptAnonymousReports,
   getCachedProfile,
@@ -667,6 +1016,7 @@ module.exports = {
   getPlanContext,
   setPlanContext,
   listPaidReportsBetween,
+  listReportsForThumbCleanup,
   deleteAccount,
   // Reports
   createReport,
@@ -684,6 +1034,11 @@ module.exports = {
   adminRecentReports,
   adminFailedJobs,
   adminFindAccount,
+  insertEvent, eventFunnel, paidRetention, variantFunnel,
+  insertCost, adminCosts, attachReportToCosts,
+  logMove, recordMoveOutcomes, moveOutcomeSummary,
+  createShare, getShare, bumpShareViews,
+  ensureRefCode, getUserByRefCode, recordReferralSignup, recordReferralPayment, referralStats, adminReferrals,
   createPromo, getPromo, listPromos, setPromoActive, hasRedeemed, redeemPromo, listRedemptions,
   setCancelAt,
   setBillingPeriod,
@@ -697,6 +1052,7 @@ module.exports = {
   getCategoryBaseline,
   getBaselineSummary,
   listBaselines,
+  nichePercentile,
   createBaseline,
   getBaselineStats,
 };

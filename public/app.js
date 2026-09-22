@@ -39,7 +39,7 @@
   ];
   const STEPS = [
     ['finding', 'Finding the account', 'Found the account'],
-    ['reading', 'Reading the last 12 posts', 'Read the last 12 posts'],
+    ['reading', 'Reading your recent posts', 'Read your recent posts'],
     ['scoring', 'Scoring the four dimensions', 'Scored the four dimensions'],
     ['writing', 'Writing your 30-60-90 plan', 'Wrote your 30-60-90 plan']
   ];
@@ -69,6 +69,16 @@
   const setTokenRaw = t => { try { t ? localStorage.setItem('sc_token', t) : localStorage.removeItem('sc_token'); } catch { } };
   const setToken = t => { setTokenRaw(t); if (t) refreshAdminFlag(); else { try { localStorage.removeItem('sc_admin'); } catch { } } };
   const go = hash => { location.hash = hash; };
+  // Funnel attribution (spec 1.13): an anonymous browser id, and the referral
+  // code from the first ?ref= link seen (spec 1.8 formalises referrals).
+  const anonId = () => { try { let a = localStorage.getItem('sc_anon'); if (!a) { a = 'anon_' + Math.random().toString(36).slice(2, 12) + Date.now().toString(36); localStorage.setItem('sc_anon', a); } return a; } catch { return null; } };
+  (() => { try { const r = new URLSearchParams(location.search).get('ref') || new URLSearchParams(location.hash.split('?')[1] || '').get('ref'); if (r && !localStorage.getItem('sc_ref')) localStorage.setItem('sc_ref', r.trim().slice(0, 32)); } catch { } })();
+  // Marketing attribution (spec 5.4): utm_* and ?src= from the first visit, kept until signup.
+  (() => { try { if (localStorage.getItem('sc_utm')) return; const q = new URLSearchParams(location.search); const h = new URLSearchParams(location.hash.split('?')[1] || ''); const get = k => q.get(k) || h.get(k); const o = {}; for (const k of ['source', 'medium', 'campaign', 'content', 'term']) { const v = get('utm_' + k); if (v) o[k] = v.trim().slice(0, 80); } const src = get('src'); if (src) o.src = src.trim().slice(0, 80); if (Object.keys(o).length) localStorage.setItem('sc_utm', JSON.stringify(o)); } catch { } })();
+  const utmHeader = () => { try { const v = localStorage.getItem('sc_utm'); return v && v.length < 600 ? v : null; } catch { return null; } };
+  const refCode = () => { try { return localStorage.getItem('sc_ref') || ''; } catch { return ''; } };
+  // Fire-and-forget event; never blocks the UI.
+  function track(name, props, reportId) { try { api('/events', { method: 'POST', body: JSON.stringify({ name, props: props || undefined, report_id: reportId || undefined }) }, { allow401: true }).catch(() => { }); } catch { } }
   // Promo: { code, description, amount_cents, base_cents, product, free_months } once checked; { code, pending } before.
   const promo = () => sget('sc_promo', null);
   async function checkPromo(code, product, billingCycle) {
@@ -77,6 +87,62 @@
     return r;
   }
   const clearPromo = () => { try { sessionStorage.removeItem('sc_promo'); } catch { } };
+  // Prices this visitor sees (may be an A/B variant): used by the report upsell and events.
+  // Score bands (spec 2.2) — GET /levels is config, cached per tab.
+  let LEVELS = sget('sc_levels', null);
+  const loadLevels = async () => { if (LEVELS) return LEVELS; try { LEVELS = await api('/levels'); sset('sc_levels', LEVELS); } catch { } return LEVELS; };
+  const levelOf = (score, given) => { if (given && given.name) return given; if (!LEVELS || !Number.isFinite(score)) return null; const ls = LEVELS.levels; const l = ls.filter(x => score >= x.min).pop() || ls[0]; const n = ls.find(x => x.min > l.min) || null; return { name: l.name, rank: l.rank, of: ls.length, next: n ? { name: n.name, min: n.min, points_away: n.min - score } : null }; };
+  // Goal onboarding (spec 3.3): asked right after the first report, kept on the
+  // account (signed in) and the report; the plan, Monday moves and post writing
+  // read it through plan_context.
+  const GOALS = [['followers', 'Grow to a follower target', 'a number you want to hit'], ['deals', 'Land brand deals'], ['sell', 'Sell a product or service', 'a guide, coaching, bookings'], ['bookings', 'Bookings or clients'], ['consistency', 'Just grow consistently']];
+  const goalLabel = g => (GOALS.find(x => x[0] === g) || [])[1] || '';
+  const niceTarget = f => { const n = Math.max(100, (Number(f) || 0) * 1.5); const p = Math.pow(10, Math.floor(Math.log10(n))); return Math.ceil(n / p) * p; };
+  const knownGoal = report => (report && report.goal) || sget('sc_goal', null)?.goal || null;
+  // Progress toward the goal, from what the report already knows. null = nothing measurable yet.
+  function goalProgress(goal, target, report) {
+    if (!goal || !report) return null;
+    const followers = report.business?.followers || 0;
+    if (goal === 'followers') { const t = target || niceTarget(followers); return { pct: clamp(Math.round(followers / t * 100), 0, 100), label: `${fmtN(followers)} of ${fmtN(t)} followers`, sub: report.history?.delta_followers != null ? `${report.history.delta_followers >= 0 ? '+' : ''}${fmtN(report.history.delta_followers)} since ${fmtShort(report.history.previous.generated_at)}` : 'Updated at every rescore' }; }
+    if (goal === 'consistency') { const w = report.streak?.visible ? report.streak.weeks : 0; return { pct: clamp(Math.round(w / 4 * 100), 0, 100), label: `${w} on-plan week${w === 1 ? '' : 's'} toward a 4-week streak`, sub: report.streak?.visible ? `Posted on ${report.streak.posted_days ?? '—'} of ${report.streak.planned_days} planned days last week` : 'Counted from your first rescore on the plan' }; }
+    const phases = report.growth_path?.phases || []; const total = phases.reduce((n, p) => n + (p.not_included ? 0 : 1 + (p.moves || []).length), 0); const done = Object.keys(report.moves_done || {}).length;
+    const paid = report.tier && report.tier !== 'social_snapshot';
+    return { pct: clamp(Math.round(done / Math.max(1, total) * 100), 0, 100), label: `${done} of ${total} plan moves done`, sub: paid ? `Every move in the plan is written toward ${goalLabel(goal).toLowerCase()}` : 'The Growth Plan writes all 13 moves toward this goal' };
+  }
+  function goalPickerHTML(cur, target, followers, { first = false } = {}) {
+    return h`<div class="goalpick"><div class="opts">${raw(GOALS.map(([k, l, d]) => h`<button type="button" class="opt ${k === cur ? 'on' : ''}" data-goal="${k}"><b>${l}</b>${d ? raw(h`<small>${d}</small>`) : ''}</button>`).join(''))}</div>
+      <div class="target" ${cur === 'followers' ? '' : 'hidden'}><label>Follower target <input type="number" name="goal_target" min="1" step="1" value="${target || niceTarget(followers)}" inputmode="numeric"></label></div>
+      <div class="acts"><button type="button" class="btn dark" data-goal-save="1" ${cur ? '' : 'disabled'}>${first ? 'Set my goal' : 'Save'}</button>${first ? raw(h`<button type="button" class="btn ghost" data-goal-skip="1">Not now</button>`) : ''}</div></div>`;
+  }
+  // Wires a picker; onSave(goal, target) does the API call.
+  function bindGoalPicker(root, onSave, onSkip) {
+    let cur = root.querySelector('.opt.on')?.dataset.goal || null;
+    root.addEventListener('click', e => {
+      const o = e.target.closest('[data-goal]'); if (o) { cur = o.dataset.goal; root.querySelectorAll('[data-goal]').forEach(x => x.classList.toggle('on', x === o)); root.querySelector('.target').hidden = cur !== 'followers'; root.querySelector('[data-goal-save]').disabled = false; return; }
+      if (e.target.closest('[data-goal-save]')) { const t = Number(root.querySelector('[name=goal_target]')?.value) || null; onSave(cur, cur === 'followers' ? t : null); }
+      if (e.target.closest('[data-goal-skip]') && onSkip) onSkip();
+    });
+  }
+  // Fair-use limit (P.4): the server's message already names the reset date; add the upgrade path.
+  function limitNotice(e, where) {
+    if (!e || (e.code !== 'LIMIT_REACHED' && e.code !== 'UPGRADE_REQUIRED')) return false;
+    const up = e.upgrade || e.required_tier || null;
+    const host = where || document.querySelector('.report') || $view;
+    let n = host.querySelector('.limitnote'); if (!n) { n = document.createElement('div'); n.className = 'notice limitnote'; host.prepend(n); }
+    n.innerHTML = h`<span>${e.message}</span>${up ? raw(h` <button type="button" class="btn sm" data-upgrade="${up}">${up === 'growth_plan_pro' ? 'Upgrade to Pro' : 'See plans'}</button>`) : ''}`;
+    n.querySelector('[data-upgrade]')?.addEventListener('click', () => { sset('sc_intent_tier', up); if (up === 'growth_plan_pro') sset('sc_pro_open', true); go('#/pricing'); });
+    n.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return true;
+  }
+  // The score arrives: count up over ~900ms. Off when the user prefers reduced motion.
+  const reduceMotion = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; } };
+  function countUp(el, to, ms = 900) {
+    if (!el || !Number.isFinite(to) || reduceMotion()) return;
+    const start = performance.now(); const from = Math.max(0, to - Math.min(to, 40));
+    const tick = now => { const t = Math.min(1, (now - start) / ms); const e = 1 - Math.pow(1 - t, 3); el.textContent = Math.round(from + (to - from) * e); if (t < 1) requestAnimationFrame(tick); else el.textContent = to; };
+    el.textContent = from; requestAnimationFrame(tick);
+  }
+  function rememberPricing(p) { try { const g = (p.tiers || []).find(t => t.tier === 'growth_plan'); sset('sc_pricing', { at: Date.now(), variant: p.variant || 'control', growth_plan: g?.monthlyPrice, plan_unlock: p.one_time?.[0]?.price, one_time_sold: !!(p.one_time || []).length, founders: p.founders && p.founders.left > 0 ? p.founders : null, pro: (p.tiers || []).find(t => t.tier === 'growth_plan_pro')?.monthlyPrice, rescore: Object.fromEntries(Object.entries(p.limits || {}).map(([k, v]) => [k, v && v.rescore_days])) }); } catch { } }
   // Admin link in the nav: ask /auth/me once per token and remember the answer.
   async function refreshAdminFlag() {
     if (!token()) { try { localStorage.removeItem('sc_admin'); } catch { } return; }
@@ -90,16 +156,20 @@
   function toast(msg) {
     let el = document.querySelector('.toast');
     if (!el) { el = document.createElement('div'); el.className = 'toast'; document.body.appendChild(el); }
-    el.textContent = msg; el.hidden = false;
+    el.textContent = msg; el.hidden = false; el.setAttribute('role', 'status');
+    const live = document.getElementById('toastLive'); if (live) { live.textContent = ''; setTimeout(() => { live.textContent = msg; }, 50); }
     clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, 3200);
   }
 
   // ------------------------------------------------------------ api
-  class ApiError extends Error { constructor(status, body) { super(body?.error || ('HTTP ' + status)); this.status = status; this.body = body; } }
+  class ApiError extends Error { constructor(status, body) { super(body?.error || ('HTTP ' + status)); this.status = status; this.body = body;  if (body && typeof body === 'object') for (const k of ['code', 'upgrade', 'resets_at', 'limit', 'used', 'required_tier']) if (body[k] !== undefined) this[k] = body[k]; } }
   async function api(path, init = {}, opts = {}) {
     const url = path.startsWith('/api/') || path.startsWith('http') ? path : API + path;
     const headers = { 'Content-Type': 'application/json', ...(init.headers || {}) };
     const t = token(); if (t) headers.Authorization = 'Bearer ' + t;
+    const a = anonId(); if (a) headers['x-anon-id'] = a;
+    const r = refCode(); if (r) headers['x-ref'] = r;
+    const u = utmHeader(); if (u) headers['x-utm'] = u;
     const doFetch = CFG.useMock && window.scalecraftMockFetch ? window.scalecraftMockFetch : fetch;
     const res = await doFetch(url, { ...init, headers });
     let body = null; try { body = await res.json(); } catch { }
@@ -149,7 +219,7 @@
   // and #/report/sample so prospects can read a full paid report.
   const SHIPPED = window.SCALECRAFT_SAMPLE || null;
   const SAMPLE = SHIPPED ? {
-    handle: SHIPPED.business.handle, platform: SHIPPED.business.platform, date: SHIPPED.created_at, followers: SHIPPED.business.followers || 0, overall: SHIPPED.scores.overall,
+    handle: SHIPPED.business.handle, platform: SHIPPED.business.platform, date: SHIPPED.generated_at || SHIPPED.created_at, followers: SHIPPED.business.followers || 0, overall: SHIPPED.scores.overall,
     dims: (SHIPPED.scores.dimensions || []).map(d => ({ label: d.label, score: d.score, category_avg: d.category_avg })), summary: SHIPPED.scores.summary || '', link: '#/report/sample'
   } : {
     handle: 'yourhandle', platform: 'instagram', date: '2026-09-18T00:00:00Z', followers: 4820, overall: 53,
@@ -183,31 +253,42 @@
         ${pr ? raw(h`<div class="promobar">Code <b>${pr.code}</b> ${pr.description ? '— ' + pr.description + '. ' : 'is ready. '}It's applied when you start the plan. <a href="#/pricing">See pricing →</a></div>`) : ''}
         <section class="hero">
           <div class="l">
-            <h1>Score your account. See exactly why. Get the plan.</h1>
-            <p class="sub">Type your handle. About a minute later you'll know where you stand in your niche, what's working, and the first three things to change.</p>
+            <h1>Stop posting into the void.</h1>
+            <p class="sub">Growth is a system, not luck. Scalecraft scores your account out of 100 from what you actually post, shows exactly where the points went, and writes the next 90 days — move by move, week by week.</p>
             <form class="darkform" id="evalForm" novalidate>
+              <div class="ql formlead">Score your account. See exactly why. Get the plan.</div>
               <div class="row">
-                <div class="field"><div class="handle"><span>@</span><input type="text" name="handle" placeholder="yourhandle" autocomplete="off" autocapitalize="none" spellcheck="false" value="${CFG.useMock && !last.handle ? 'humansofny' : (last.handle || '')}" aria-label="Your handle"></div></div>
-                <div class="field selwrap"><select name="category" aria-label="Niche">${raw(NICHES.map(([k, n]) => h`<option value="${k}" ${k === niche ? 'selected' : ''}>${n}</option>`).join(''))}</select></div>
+                <div class="field"><label class="flabel" for="evHandle">Your handle</label><div class="handle"><span>@</span><input id="evHandle" type="text" name="handle" placeholder="yourhandle" autocomplete="off" autocapitalize="none" spellcheck="false" value="${CFG.useMock && !last.handle ? 'humansofny' : (last.handle || '')}" aria-label="Your handle"></div></div>
+                <div class="field selwrap"><label class="flabel" for="evNiche">Your niche</label><select id="evNiche" name="category" aria-label="Niche">${raw(NICHES.map(([k, n]) => h`<option value="${k}" ${k === niche ? 'selected' : ''}>${n}</option>`).join(''))}</select></div>
               </div>
               <div class="field" id="otherWrap" ${niche === 'other' ? '' : 'hidden'}><input type="text" name="other" placeholder="Your niche, in a word or two" value="${last.other || ''}" aria-label="Your niche"></div>
+              <div class="optq bizq"><div class="ql">Is this a business account?</div>
+                <div class="chips" role="radiogroup" aria-label="Business account"><button type="button" class="chip ${last.is_business ? '' : 'on'}" data-biz="no" role="radio" aria-checked="${!last.is_business}">No — I'm a creator</button><button type="button" class="chip ${last.is_business ? 'on' : ''}" data-biz="yes" role="radio" aria-checked="${!!last.is_business}">Yes</button></div>
+                <div class="hint" id="bizHint" ${last.is_business ? '' : 'hidden'}>Business plans are coming — you'll get the creator scoring today and a note when the business version is ready.</div></div>
               <div class="chips" role="radiogroup" aria-label="Platform">
                 ${raw(LIVE.map(([k, n]) => h`<button type="button" class="chip ${k === platform ? 'on' : ''}" data-platform="${k}" role="radio" aria-checked="${k === platform}">${n}</button>`).join(''))}
-                ${raw(SOON.map(([k, n]) => h`<button type="button" class="chip soon" data-soon="${k}">${n} · soon</button>`).join(''))}
+                <button type="button" class="chip soon more" data-soon-more aria-expanded="false">More platforms · soon</button>
+                <span class="soonlist" hidden>${raw(SOON.map(([k, n]) => h`<button type="button" class="chip soon" data-soon="${k}">${n} · soon</button>`).join(''))}</span>
               </div>
               <div id="waitSlot"></div>
               <div class="optq"><div class="ql">Your next 90 days <span>optional</span></div>
                 <div class="chips" role="radiogroup" aria-label="Your next 90 days">${raw([['usual', 'Business as usual'], ['fewer_shoots', 'Fewer new shoots'], ['launch', 'Something launching']].map(([k, n]) => h`<button type="button" class="chip ${last.horizon === k ? 'on' : ''}" data-horizon="${k}" role="radio" aria-checked="${last.horizon === k}">${n}</button>`).join(''))}</div>
                 <div class="hint">Shapes your first three moves. The Growth Plan asks four more so the whole plan fits.</div></div>
-              <div class="field"><input type="email" name="email" placeholder="you@email.com — where to send it" autocomplete="email" value="${last.email || ''}" aria-label="Email"></div>
+              <div class="field"><label class="flabel" for="evEmail">Email — where we send the report</label><input id="evEmail" type="email" name="email" placeholder="you@email.com" autocomplete="email" value="${last.email || ''}" aria-label="Email"></div>
               <div class="form-error" id="formError" hidden></div>
               <div class="cta">
                 <button class="btn" type="submit">Score my account — free</button>
-                <div class="reassure">No login to your account · Public data only<br>Score in about a minute</div>
+                <div class="reassure">About a minute · Public posts only · No card</div>
               </div>
             </form>
           </div>
           <div class="r">${raw(scoreCardHTML(hero))}</div>
+        </section>
+
+        <section class="stance">
+          <div class="it"><b>Four numbers, no mystery.</b><p>Posting Consistency, Content Mix, Engagement Quality, Profile Clarity — each one shows the posts that cost you the points.</p></div>
+          <div class="it"><b>A plan, not a pep talk.</b><p>Thirteen moves across 90 days, written from your own feed, with the how and a paste-ready example.</p></div>
+          <div class="it"><b>Re-scored every week.</b><p>Do the moves, watch the number move. Your trend first; the niche second.</p></div>
         </section>
 
         <section class="howstrip" id="how">
@@ -215,13 +296,13 @@
         </section>
 
         <section class="founders" id="founders">
-          <div class="t"><h3>Founding creators</h3><p>The first 50 accounts get the Growth Plan free for a month. Tell us what worked.</p></div>
+          <div class="t"><h2>Founders pricing</h2><p>${(() => { const f = sget('sc_pricing', null)?.founders; return f ? `${fmtN(f.left)} of ${fmtN(f.cap)} spots left — Growth at $${f.monthlyPrice}/mo, locked in for as long as you stay. Leave your email for the launch note.` : 'The first subscribers lock Growth at the launch price for as long as they stay. Leave your email for the launch note.'; })()} <a href="#/pricing">See pricing →</a></p></div>
           <form id="foundersForm"><input type="email" name="email" placeholder="you@email.com" aria-label="Email"><button class="btn light" type="submit">Count me in</button></form>
         </section>
 
         <section class="card sharepromo">
           <div class="mini"><canvas id="promoCard" width="1080" height="1920"></canvas></div>
-          <div class="t"><h3>Post your score</h3><p>Creators post their number. Then they post the one six weeks later.</p></div>
+          <div class="t"><h2>Post your score</h2><p>Creators post their number. Then they post the one six weeks later.</p></div>
         </section>
       </div>
       ${raw(footer())}`;
@@ -229,8 +310,15 @@
     drawShareCard($view.querySelector('#promoCard'), hero, 'story');
 
     const form = $view.querySelector('#evalForm');
+    $view.querySelector('[data-soon-more]')?.addEventListener('click', e => { const b = e.currentTarget; const l = $view.querySelector('.soonlist'); l.hidden = false; b.hidden = true; });
     let chosenPlatform = platform;
     let chosenHorizon = last.horizon || null;
+    let chosenBiz = !!last.is_business;
+    form.querySelectorAll('[data-biz]').forEach(b => b.addEventListener('click', () => {
+      chosenBiz = b.dataset.biz === 'yes';
+      form.querySelectorAll('[data-biz]').forEach(x => { const on = (x.dataset.biz === 'yes') === chosenBiz; x.classList.toggle('on', on); x.setAttribute('aria-checked', on); });
+      const hint = form.querySelector('#bizHint'); if (hint) hint.hidden = !chosenBiz;
+    }));
     form.querySelectorAll('[data-horizon]').forEach(b => b.addEventListener('click', () => {
       chosenHorizon = chosenHorizon === b.dataset.horizon ? null : b.dataset.horizon; // tap again to clear
       form.querySelectorAll('[data-horizon]').forEach(x => { const on = x.dataset.horizon === chosenHorizon; x.classList.toggle('on', on); x.setAttribute('aria-checked', on); });
@@ -269,6 +357,7 @@
         email: form.email.value.trim(),
         other: otherText,
         horizon: chosenHorizon || undefined,
+        is_business: chosenBiz || undefined,
       };
       if (chosenHorizon) { payload.plan_context = { ...(sget('sc_plan_context', null) || {}), horizon: chosenHorizon }; sset('sc_plan_context', payload.plan_context); }
       const problems = [];
@@ -282,9 +371,9 @@
     $view.querySelector('#foundersForm').addEventListener('submit', async e => {
       e.preventDefault(); const f = e.currentTarget; const email = f.email.value.trim();
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast('Add an email first.'); return; }
-      let r = null; try { r = await api('/waitlist', { method: 'POST', body: JSON.stringify({ email, platform: 'founders' }) }); } catch { }
-      if (r && r.promo) { sset('sc_promo', { code: r.promo.code, pending: true }); f.innerHTML = h`<div class="waitdone" style="flex:1">You're in. Your code is <b class="code">${r.promo.code}</b> — ${r.promo.description}. It's applied when you <a href="#/pricing">start the plan</a>.</div>`; }
-      else f.innerHTML = h`<div class="waitdone" style="flex:1">You're in. We'll email you when your month starts.</div>`;
+      try { await api('/waitlist', { method: 'POST', body: JSON.stringify({ email, platform: 'launch' }) }); } catch { }
+      const f2 = sget('sc_pricing', null)?.founders;
+      f.innerHTML = h`<div class="waitdone" style="flex:1">Noted — the launch note goes to ${email}. ${f2 ? raw(h`Founders pricing is live now: <a href="#/pricing">$${f2.monthlyPrice}/mo, ${fmtN(f2.left)} spots left</a>.`) : ''}</div>`;
     });
     const scrollTo = sget('sc_scroll', null);
     if (scrollTo) { sessionStorage.removeItem('sc_scroll'); document.getElementById(scrollTo)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
@@ -294,10 +383,13 @@
     if (btn) { btn.disabled = true; btn.dataset.label = btn.innerHTML; btn.textContent = 'Starting…'; }
     try {
       const body = { handle: payload.handle, platform: payload.platform, category: payload.category, email: payload.email };
+      try { body.tz = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { }
       if (payload.competitors && payload.competitors.length) body.competitors = payload.competitors;
-      const ctx = payload.plan_context || sget('sc_plan_context', null);
+      let ctx = payload.plan_context || sget('sc_plan_context', null);
+      const g = sget('sc_goal', null); if (g && g.goal && !(ctx && ctx.goal)) ctx = { ...(ctx || {}), goal: g.goal, goal_target: g.goal_target || undefined };
       if (ctx) body.plan_context = ctx;
       if (payload.rerun_of) body.rerun_of = payload.rerun_of;
+      if (payload.is_business) body.is_business = true;
       const res = await api('/evaluate/social-snapshot', { method: 'POST', body: JSON.stringify(body) });
       sset('sc_job_' + res.job_id, { ...payload, submitted_at: Date.now() });
       go('#/evaluating/' + encodeURIComponent(res.job_id));
@@ -388,7 +480,7 @@
   // The landing hero shows the visitor's own latest report once they have one.
   function rememberSample(r) {
     if (!r.scores || r.scores.overall == null) return;
-    sset('sc_sample', { report_id: r.report_id, handle: r.business?.handle, platform: r.business?.platform, date: r.created_at, followers: r.business?.followers || r.followers || 0, overall: r.scores.overall, dims: (r.scores.dimensions || []).map(d => ({ label: d.label, score: d.score, category_avg: d.category_avg })), summary: r.scores.summary || '' });
+    sset('sc_sample', { report_id: r.report_id, handle: r.business?.handle, platform: r.business?.platform, date: r.generated_at || r.created_at, followers: r.business?.followers || r.followers || 0, overall: r.scores.overall, dims: (r.scores.dimensions || []).map(d => ({ label: d.label, score: d.score, category_avg: d.category_avg })), summary: r.scores.summary || '' });
   }
 
   // ------------------------------------------------------------ report normalisation
@@ -414,7 +506,7 @@
     const wrapped = rawR && rawR.reportBody && typeof rawR.reportBody === 'object';
     const body = wrapped ? rawR.reportBody : (rawR || {});
     const r = { ...body };
-    r.report_id = body.report_id || rawR?.reportId || reportId;
+    r.report_id = rawR?.reportId || body.report_id || reportId; // the row id wins over the body's provisional one
     r.tier = body.tier || rawR?.tier;
     r.business = body.business || rawR?.business || {};
     r.created_at = body.created_at || body.generated_at || rawR?.generatedAt || Date.now();
@@ -474,40 +566,90 @@
   }
   function roundRect(ctx, x, y, w, hh, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + hh, r); ctx.arcTo(x + w, y + hh, x, y + hh, r); ctx.arcTo(x, y + hh, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
 
-  function openShareSheet(report) {
+  // Modal sheets (WCAG 2.1.2 / 2.4.3): trap Tab inside, Escape closes, focus goes back where it came from.
+  function mountSheet(el, { label, onClose } = {}) {
+    const opener = document.activeElement;
+    const panel = el.querySelector('.panel') || el;
+    panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-modal', 'true'); if (label) panel.setAttribute('aria-label', label);
+    document.body.appendChild(el);
+    const focusables = () => [...panel.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')].filter(x => !x.disabled && x.offsetParent !== null);
+    const first = focusables()[0]; (first || panel).focus?.();
+    if (!first) { panel.tabIndex = -1; panel.focus(); }
+    const key = e => {
+      if (e.key === 'Escape') { e.preventDefault(); close(); return; }
+      if (e.key !== 'Tab') return;
+      const f = focusables(); if (!f.length) return;
+      const i = f.indexOf(document.activeElement);
+      if (e.shiftKey && (i <= 0)) { e.preventDefault(); f[f.length - 1].focus(); }
+      else if (!e.shiftKey && (i === f.length - 1 || i === -1)) { e.preventDefault(); f[0].focus(); }
+    };
+    document.addEventListener('keydown', key);
+    const close = () => { document.removeEventListener('keydown', key); el.remove(); if (onClose) onClose(); if (opener && opener.focus && document.contains(opener)) opener.focus(); };
+    el.addEventListener('click', e => { if (e.target === el) close(); });
+    return close;
+  }
+  function drawMomentCard(canvas, s, size, m) {
+    const W = 1080, H = size === 'square' ? 1080 : 1920, P = 84; canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d'); const cs = getComputedStyle(document.documentElement);
+    ctx.fillStyle = cs.getPropertyValue('--ground').trim() || '#FBF4EA'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = cs.getPropertyValue('--act').trim() || '#D5673B'; ctx.textBaseline = 'top';
+    const sq = size === 'square';
+    ctx.font = `600 ${sq ? 34 : 40}px Inter, system-ui, sans-serif`; ctx.fillText(`@${s.handle} · ${m.kind === 'rank_up' ? 'RANK UP' : m.kind === 'record' ? 'PERSONAL RECORD' : m.kind === 'badge' ? 'BADGE' : m.kind === 'roast' ? 'ROASTED · ' + (m.heat_label || '') : 'MILESTONE'}`.toUpperCase(), P, P);
+    let y = sq ? 250 : 560; const tpx = sq ? 132 : 168; ctx.font = `700 ${tpx}px Inter, system-ui, sans-serif`;
+    let line = ''; for (const w of String(m.title).split(' ')) { const t = line ? line + ' ' + w : w; if (ctx.measureText(t).width > W - P * 2 && line) { ctx.fillText(line, P - 6, y); y += tpx * 1.02; line = w; } else line = t; }
+    if (line) { ctx.fillText(line, P - 6, y); y += tpx * 1.02; }
+    y += sq ? 20 : 40; ctx.font = `600 ${sq ? 40 : 52}px Inter, system-ui, sans-serif`; ctx.fillText(m.line || '', P, y); y += (sq ? 40 : 52) * 1.7;
+    ctx.font = `700 ${sq ? 150 : 240}px Inter, system-ui, sans-serif`; ctx.fillText(String(m.score ?? s.overall), P - 8, y);
+    ctx.font = `600 ${sq ? 32 : 40}px Inter, system-ui, sans-serif`; ctx.fillText('MY SCALECRAFT SCORE', P + (sq ? 220 : 340), y + (sq ? 100 : 160));
+    ctx.font = `500 ${sq ? 28 : 34}px Inter, system-ui, sans-serif`; ctx.fillText(`${fmtDate(m.at || Date.now())} · Score yours at scalecraft.app`, P, sq ? H - 62 : H - P - 30);
+  }
+  function openShareSheet(report, moment = null) {
     const s = { handle: report.business?.handle, platform: report.business?.platform, niche: report.business?.category, date: report.created_at, overall: report.scores.overall, dims: report.scores.dimensions };
     const prev = report.history?.previous?.overall;
     const el = document.createElement('div'); el.className = 'sheet';
     el.innerHTML = h`<div class="panel" role="dialog" aria-label="Share your score"><div class="grab"></div>
       <div class="row">
         <div class="preview"><canvas id="shareCanvas"></canvas></div>
-        <div class="opts"><h3>Post your score</h3>
+        <div class="opts"><h2>${moment ? (moment.kind === 'roast' ? 'Post the roast' : moment.title) : 'Post your score'}</h2>
           <div class="sizes"><button type="button" class="pill dark" data-size="story">Story 1080×1920</button><button type="button" class="pill" data-size="square">Square</button></div>
-          ${prev != null && prev !== s.overall ? raw(h`<label class="check"><input type="checkbox" id="thenNow" checked> Show ${prev} → ${s.overall}</label>`) : ''}
+          ${!moment && prev != null && prev !== s.overall ? raw(h`<label class="check"><input type="checkbox" id="thenNow" checked> Show ${prev} → ${s.overall}</label>`) : ''}
           <button type="button" class="btn" data-share="post">Post your score</button>
           <button type="button" class="btn ghost" data-share="save">Save image</button>
           <button type="button" class="btn ghost" data-share="copy">Copy link</button>
         </div></div></div>`;
-    document.body.appendChild(el);
+    const close = mountSheet(el, { label: moment ? (moment.kind === 'roast' ? 'Post the roast' : moment.title) : 'Share your score' });
     const canvas = el.querySelector('#shareCanvas');
+    canvas.setAttribute('role', 'img'); canvas.setAttribute('aria-label', moment ? `${moment.title} card for @${s.handle}` : `Score card: @${s.handle} scored ${s.overall} out of 100`);
     let size = 'story';
-    const redraw = () => { const tn = el.querySelector('#thenNow'); drawShareCard(canvas, s, size, tn && tn.checked ? { prev, span: report.history?.previous?.generated_at ? 'since ' + fmtShort(report.history.previous.generated_at) : 'in six weeks' } : {}); };
+    // Server-rendered card (spec 1.7) with a public share page; the client
+    // canvas stays as the fallback (mock mode, sample, or the call failing).
+    let share = null;
+    const isSample = report.report_id === 'sample';
+    const thenNowOn = () => { const tn = el.querySelector('#thenNow'); return !!(tn && tn.checked); };
+    const makeShare = async () => {
+      if (CFG.useMock || isSample) return null;
+      try { return await api('/reports/' + encodeURIComponent(report.report_id) + '/share', { method: 'POST', body: JSON.stringify(moment ? (moment.kind === 'roast' ? { kind: 'roast' } : { kind: 'moment', moment_key: moment.key }) : { kind: 'score', then_now: thenNowOn() }) }, { allow401: true }); } catch (e) { console.warn('[share] card unavailable:', e && e.message); return null; }
+    };
+    const redraw = async () => {
+      if (moment) drawMomentCard(canvas, s, size, moment); else drawShareCard(canvas, s, size, thenNowOn() ? { prev, span: report.history?.previous?.generated_at ? 'since ' + fmtShort(report.history.previous.generated_at) : 'in six weeks' } : {});
+      if (!share) { share = await makeShare(); if (share) el.dataset.share = share.share_id; }
+      if (share) { const img = new Image(); img.onload = () => { const ctx = canvas.getContext('2d'); canvas.width = img.width; canvas.height = img.height; ctx.drawImage(img, 0, 0); }; img.src = share.png[size] + '&t=' + Date.now(); }
+    };
     redraw();
     el.querySelectorAll('[data-size]').forEach(b => b.addEventListener('click', () => { size = b.dataset.size; el.querySelectorAll('[data-size]').forEach(x => x.classList.toggle('dark', x === b)); redraw(); }));
-    el.querySelector('#thenNow')?.addEventListener('change', redraw);
-    const close = () => el.remove();
-    el.addEventListener('click', e => { if (e.target === el) close(); });
-    const toBlob = () => new Promise(r => canvas.toBlob(r, 'image/png'));
+    el.querySelector('#thenNow')?.addEventListener('change', () => { share = null; redraw(); });
+    const toBlob = async () => { if (share) { try { const r = await fetch(share.png[size]); if (r.ok) return await r.blob(); } catch { } } return new Promise(r => canvas.toBlob(r, 'image/png')); };
     el.querySelector('[data-share=save]').addEventListener('click', async () => {
+      if (report.report_id !== 'sample') track('card_downloaded', { size }, report.report_id);
       const blob = await toBlob(); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `scalecraft-${s.handle}-${size}.png`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
     });
     el.querySelector('[data-share=post]').addEventListener('click', async () => {
       const blob = await toBlob(); const file = new File([blob], `scalecraft-${s.handle}.png`, { type: 'image/png' });
-      if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file], text: `My account scored ${s.overall}/100 on Scalecraft` }); return; } catch { } }
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file], text: moment ? (moment.kind === 'roast' ? `I got roasted by Scalecraft: “${moment.title}”` : `${moment.title} — ${moment.line} on Scalecraft`) : `My account scored ${s.overall}/100 on Scalecraft`, url: share ? share.url : undefined }); return; } catch { } }
       el.querySelector('[data-share=save]').click(); toast('Saved — post it from your camera roll.');
     });
     el.querySelector('[data-share=copy]').addEventListener('click', async () => {
-      const url = location.origin + location.pathname + '#/report/' + report.report_id;
+      const url = share ? share.url : location.origin + location.pathname + '#/report/' + report.report_id;
       try { await navigator.clipboard.writeText(url); toast('Link copied.'); } catch { toast(url); }
     });
   }
@@ -596,6 +738,9 @@
   }
 
   async function viewReport(reportId) {
+    // Live prices for the upsell and plan copy — never the numbers frozen into an old report body.
+    // Founders spots and prices can change under an open tab: refetch after 10 minutes so the page and checkout agree.
+    { const pc = sget('sc_pricing', null); if (!pc || !pc.at || Date.now() - pc.at > 10 * 60 * 1000) { try { rememberPricing(await api('/billing/pricing', {}, { allow401: true })); } catch { } } }
     const isSample = reportId === 'sample';
     if (isSample && !SHIPPED) { renderHeader('report'); $view.innerHTML = h`<div class="center-msg"><h2>Score your own account to see a real one.</h2><a href="#/">Score my account</a></div>`; return; }
     let report = isSample ? SHIPPED : sget('sc_report_' + reportId, null);
@@ -614,6 +759,10 @@
     const biz = report.business || {};
     const paid = !!report.tier && report.tier !== 'social_snapshot';
     const overall = clamp(s.overall, 0, 100); const [gl, gc] = grade(overall);
+    const lvl = levelOf(overall, s.level);
+    const goalNow = knownGoal(report);
+    const showGoalAsk = !isSample && !goalNow && !(report.history && report.history.runs > 1) && !sget('sc_goal_skipped_' + report.report_id, false);
+    const momentsToShow = isSample ? [] : (report.moments || []).filter(m => { try { return !localStorage.getItem('sc_moment_' + report.report_id + '_' + m.key); } catch { return true; } });
     const niche = nicheName(biz.category);
     const nicheKnown = s.niche_known !== false;
     const phases = (report.growth_path?.phases || []).map(normalizePhase);
@@ -625,8 +774,10 @@
     const doneKey = 'sc_done_' + report.report_id;
     const done = isSample ? {} : { ...(lget(doneKey, {})), ...(report.moves_done || {}) };
     const isDone = k => !!done[k];
-    const price = report.upsell?.monthly_price || 12;
-    const oneTime = report.upsell?.one_time_price || 15;
+    const pv = sget('sc_pricing', null);
+    const founders = pv?.founders || null;
+    const price = founders ? founders.monthlyPrice : (pv?.growth_plan ?? report.upsell?.monthly_price ?? 19);
+    const oneTime = pv ? (pv.one_time_sold ? pv.plan_unlock : null) : (report.upsell?.one_time_price ?? null);
     const thisWeek = phases[0];
     const nextPhase = phases[1];
     const followers = biz.followers || report.followers || (report.post_insights && report.post_insights.followers) || null;
@@ -643,27 +794,32 @@
     if (subscriber && qs.get('checkin') && qs.get('changed') === '1') { go(`#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=checkin&phase=${qs.get('checkin')}`); return; }
     if (isSample) sset('sc_once_price', oneTime);
 
+    if (!isSample && !sget('sc_viewed_' + report.report_id, false)) { sset('sc_viewed_' + report.report_id, true); track('report_viewed', { tier: report.tier, paid }, report.report_id); }
     renderHeader('report');
     $view.innerHTML = h`
       <div class="wrap">
         ${isSample ? raw(h`<div class="samplebar"><b>Sample report.</b> A real Growth Plan for a real account, scored ${fmtDate(report.created_at)}. Yours is written from your own posts. <a href="#/" data-scroll="evalForm">Score my account →</a></div>`) : ''}
         <div class="rhead">
-          <div class="l"><span class="h">@${biz.handle || ''}</span><span class="ctx">${platName(biz.platform)} · ${niche} · ${fmtDate(report.created_at)}</span>${paid ? raw(h`<span class="tag dark">${once ? '60-DAY PLAN' : 'GROWTH PLAN'}</span>`) : ''}</div>
-          <div class="r">${isSample ? '' : raw(h`<button class="btn ghost sm" data-action="email-report">Email me this report</button>`)}<button class="btn dark sm" data-action="share">${isSample ? 'Share this sample' : 'Share my score'}</button></div>
+          <div class="l"><h1 class="h">@${biz.handle || ''}</h1><span class="ctx">${platName(biz.platform)} · ${niche} · ${fmtDate(report.created_at)}</span>${paid ? raw(h`<span class="tag dark">${once ? '60-DAY PLAN' : 'GROWTH PLAN'}</span>`) : ''}</div>
+          <div class="r">${isSample ? '' : raw(h`<button class="btn ghost sm" data-action="email-report">Email me this report</button>`)}${isSample || !CFG.roast ? '' : raw(h`<button class="btn sm roastbtn" data-action="roast">${report.roast ? 'See my roast' : 'Roast me'} 🔥</button>`)}<button class="btn dark sm" data-action="share">${isSample ? 'Share this sample' : 'Share my score'}</button></div>
         </div>
         ${paid ? raw(h`<div class="ctxrow">${ctx ? raw(contextChips(ctx) + (ctx.notes ? h`<span class="chip note">“${ctx.notes}”</span>` : '')) : raw(h`<span class="chip empty">Written without your answers</span>`)}${isSample ? '' : once ? '' : raw(h`<a class="edit" href="#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=edit">${ctx ? 'Plans changed? Update' : 'Tell us about your next 90 days'} →</a>`)}</div>`)
         : raw(h`<div class="ctxrow free">${ctx && ctx.horizon ? raw(h`<span class="chip">${ctxLabel('horizon', ctx.horizon)}</span><span class="ex">Your three first moves were written around this. The Growth Plan asks four more — time, goal, how you make content — so every move and calendar slot fits.</span>`) : raw(h`<span class="chip empty">Written as business as usual</span><span class="ex">The Growth Plan asks four short questions — your next 90 days, time, goal, how you make content — so every move and calendar slot fits your life.</span>`)}</div>`)}
-        ${duePhase ? raw(h`<div class="checkin"><div class="t"><div class="eb">DAY ${Math.round(ageDays)} · CHECK-IN</div><h3>Phase ${duePhase} starts. Anything change?</h3><p>The next 30 days were written when you started. If your time, goal or next few weeks changed, the plan is rewritten tonight.</p></div><div class="acts"><button class="btn green" data-checkin="${duePhase}" data-changed="0">Nothing changed</button><a class="btn ghost" href="#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=checkin&phase=${duePhase}">Something changed</a></div></div>`) : ''}
-        ${nudge ? raw(h`<div class="checkin nudge" id="nudge"><div class="t"><div class="eb">FROM THIS WEEK'S RE-SCORE</div><h3>${nudge.title}</h3><p>${nudge.text}</p></div><div class="acts"><button class="btn" data-nudge="${nudge.key}" data-changed="1">${nudge.cta}</button><button class="btn ghost" data-nudge="${nudge.key}" data-changed="0">Keep the plan as is</button></div></div>`) : ''}
+        ${duePhase ? raw(h`<div class="checkin"><div class="t"><div class="eb">DAY ${Math.round(ageDays)} · CHECK-IN</div><h2>Phase ${duePhase} starts. Anything change?</h2><p>The next 30 days were written when you started. If your time, goal or next few weeks changed, the plan is rewritten tonight.</p></div><div class="acts"><button class="btn green" data-checkin="${duePhase}" data-changed="0">Nothing changed</button><a class="btn ghost" href="#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=checkin&phase=${duePhase}">Something changed</a></div></div>`) : ''}
+        ${nudge ? raw(h`<div class="checkin nudge" id="nudge"><div class="t"><div class="eb">FROM THIS WEEK'S RE-SCORE</div><h2>${nudge.title}</h2><p>${nudge.text}</p></div><div class="acts"><button class="btn" data-nudge="${nudge.key}" data-changed="1">${nudge.cta}</button><button class="btn ghost" data-nudge="${nudge.key}" data-changed="0">Keep the plan as is</button></div></div>`) : ''}
+        ${raw(momentsToShow.slice(0, 1).map(m => h`<div class="moment ${m.kind}" data-moment="${m.key}"><div class="t"><div class="eb">${m.kind === 'rank_up' ? 'RANK UP' : m.kind === 'record' ? 'PERSONAL RECORD' : m.kind === 'badge' ? 'BADGE' : 'MILESTONE'} · FROM THIS RE-SCORE</div><h2>${m.title}</h2><p>${m.line}</p></div><div class="acts"><button class="btn dark" data-moment-share="${m.key}">Share the card</button><button class="btn ghost" data-moment-dismiss="${m.key}">Later</button></div></div>`).join(''))}
         <div class="report">
           <div class="toprow">
             <div class="card scorebox">
+              ${hist && hist.delta_overall != null ? raw(h`<div class="trend ${hist.delta_overall > 0 ? 'up' : hist.delta_overall < 0 ? 'down' : 'flat'}"><b>${hist.delta_overall > 0 ? `Up ${hist.delta_overall} point${hist.delta_overall === 1 ? '' : 's'}` : hist.delta_overall < 0 ? `Down ${-hist.delta_overall} point${hist.delta_overall === -1 ? '' : 's'}` : 'Unchanged'}</b> since ${fmtShort(hist.previous.generated_at)}${hist.runs ? raw(h` · run ${hist.runs}`) : ''}${hist.delta_followers != null && hist.delta_followers !== 0 ? raw(h` · ${hist.delta_followers > 0 ? '+' : ''}${fmtN(hist.delta_followers)} followers`) : ''}</div>`) : paid && !isSample ? raw(h`<div class="trend first">Your first score — the plan rescores you weekly, so this line becomes your own trend.</div>`) : ''}
               <div class="bigrow"><span class="bignum">${overall}</span>
-                <div class="meta"><span class="tag ${gc}">${gl.toUpperCase()}</span>
+                <div class="meta"><span class="tag ${gc}">${gl.toUpperCase()}</span>${lvl ? raw(h`<span class="lvl" title="Rank ${lvl.rank} of ${lvl.of}">${lvl.name.toUpperCase()}${lvl.next ? raw(h`<em>· ${lvl.next.points_away} to ${lvl.next.name}</em>`) : raw('<em>· top band</em>')}</span>`) : ''}${report.streak && report.streak.visible ? raw(h`<span class="streak ${report.streak.weeks ? 'on' : ''}" title="An on-plan week means you posted on at least ${report.streak.planned_days} days. A freeze covers a missed week.">${report.streak.weeks ? `🔥 ${report.streak.weeks}-week streak` : 'New streak starts this week'}${report.streak.freezes ? raw(h`<em>· ${report.streak.freezes} freeze${report.streak.freezes === 1 ? '' : 's'}</em>`) : ''}</span>`) : ''}
                   ${followers ? raw(h`<span class="f">${fmtN(followers)} followers</span>`) : ''}
-                  ${hist && hist.delta_overall != null ? raw(h`<span class="delta ${hist.delta_overall > 0 ? 'up' : hist.delta_overall < 0 ? 'down' : 'flat'}">${hist.delta_overall === 0 ? `${overall} → ${overall} · unchanged since ${fmtShort(hist.previous.generated_at)}` : `${hist.delta_overall > 0 ? '+' : ''}${hist.delta_overall} since ${fmtShort(hist.previous.generated_at)}`}</span>`) : ''}
                 </div></div>
               <p class="why">${s.summary || ''}</p>
+              ${s.category_percentile ? raw(h`<div class="pct">Scores higher than <b>${s.category_percentile.beats_pct}%</b> of ${niche} accounts we've scored (${fmtN(s.category_percentile.n)}).</div>`) : ''}
+              ${raw(historyChartHTML(hist))}
+              ${(report.badges || []).length ? raw(h`<div class="badges">${raw(report.badges.map(b => h`<span class="badge" title="Earned ${fmtDate(b.earned_at)}">🏅 ${b.title}</span>`).join(''))}</div>`) : ''}
             </div>
             ${thisWeek ? raw(h`<div class="weekcard">
               <div class="eb"><span>This week</span><span>${thisWeek.days} · ${thisWeek.label}</span></div>
@@ -671,10 +827,25 @@
               <p class="a">${thisWeek.action}</p>
               ${thisWeek.detail ? raw(h`<p class="w">${thisWeek.detail}</p>`) : ''}
               ${paid && thisWeek.opener ? raw(moveDetailHTML(thisWeek.opener, true)) : ''}
-              <button class="done ${isDone('p1m1') ? 'on' : ''}" data-move="p1m1"><span class="box">${isDone('p1m1') ? '✓' : ''}</span>Mark this move done</button>
+              <button class="done ${isDone('p1m1') ? 'on' : ''}" data-move="p1m1" aria-pressed="${isDone('p1m1') ? 'true' : 'false'}"><span class="box" aria-hidden="true">${isDone('p1m1') ? '✓' : ''}</span>Mark this move done</button>
               ${nextPhase ? raw(h`<div class="next">Next: Day 31 — ${nextPhase.label}</div>`) : ''}
             </div>`) : ''}
           </div>
+
+        ${showGoalAsk ? raw(h`<div class="card goalcard ask" id="goalAsk"><div class="eb">ONE QUESTION</div><h2>What do you want from this?</h2><p>The plan, your Monday move and the posts we write all lean toward it. Change it any time on your reports page.</p>${raw(goalPickerHTML(null, null, followers, { first: true }))}</div>`) : ''}
+        <div class="roastwrap" id="roastWrap" hidden></div>
+        <div class="statusrow">
+        ${goalNow && !showGoalAsk && !isSample ? raw((() => { const gp = goalProgress(goalNow, report.goal_target || sget('sc_goal', null)?.goal_target || null, report); return gp ? h`<div class="goalbar"><div class="t"><span class="l">${goalLabel(goalNow)}</span><span class="v">${gp.label}</span></div><div class="bar"><div class="fill" style="width:${gp.pct}%"></div></div><div class="fine">${gp.sub}</div></div>` : ''; })()) : ''}
+        ${paid && !isSample && report.quest ? raw(h`<div class="card questcard"><div class="eb">THIS WEEK'S QUEST${report.quest.week ? raw(h` · WEEK ${report.quest.week}`) : ''}</div><h2>${report.quest.title}</h2><div class="bar"><div class="fill" style="width:${clamp(Math.round((report.quest.progress || 0) / Math.max(1, report.quest.target?.n || 1) * 100), 0, 100)}%"></div></div><div class="fine">${report.quest.done ? 'Done — counted at your rescore.' : `${report.quest.progress || 0} of ${report.quest.target?.n || '?'} so far · ends ${fmtShort(report.quest.ends_at)} · checked at your next rescore`}</div>${(report.quest_history || []).length ? raw(h`<div class="qh">${raw(report.quest_history.slice(-4).reverse().map(q => h`<span class="${q.done ? 'ok' : ''}">${q.done ? '✓' : '·'} ${q.title} (${q.progress}/${q.n})</span>`).join(''))}</div>`) : ''}</div>`) : ''}
+        </div>
+        <div class="brief" id="briefWrap" hidden></div>
+        ${paid && !isSample && (report.post_reviews || []).length ? raw(h`<details class="card acc reviews"><summary>Your posts, 48 hours in <span class="fine">${report.post_reviews.length} reviewed</span></summary>
+          <div class="rlist">${raw(report.post_reviews.map(r => h`<div class="rv" id="rv-${r.post_id}"><div class="h"><span class="when">${fmtDate(r.posted_at)} · ${String(r.type || '').toUpperCase()}</span><span class="vs ${r.metrics?.vs_avg >= 1.05 ? 'up' : r.metrics?.vs_avg < 0.8 ? 'down' : ''}">${r.metrics?.vs_avg != null ? `${r.metrics.vs_avg}× your average` : ''}</span></div>
+            ${r.caption ? raw(h`<div class="cap">“${r.caption.slice(0, 120)}${r.caption.length > 120 ? '…' : ''}”</div>`) : ''}
+            <p><b>How it did.</b> ${r.review?.performance || ''}</p><p><b>Likely why.</b> ${r.review?.likely_reason || ''}</p><p><b>Next post.</b> ${r.review?.next || ''}</p>
+            <div class="fine">${fmtN(r.metrics?.likes)} likes · ${fmtN(r.metrics?.comments)} comments${r.metrics?.views ? ` · ${fmtN(r.metrics.views)} views` : ''}${r.permalink ? raw(h` · <a href="${r.permalink}" target="_blank" rel="noopener">Open the post</a>`) : ''}</div></div>`).join(''))}</div>
+          <div class="fine">We re-read your profile every couple of days; each new post gets a review about 48 hours after it goes up.</div></details>`) : paid && !isSample ? raw(h`<div class="fine reviews-soon">New posts get a 48-hour review here — how each one did against your own average, and what to repeat.</div>`) : ''}
+        ${paid && !isSample && report.offers && report.offers.annual && !sget('sc_annual_dismissed', false) ? raw(h`<div class="card offercard" id="annualOffer"><div class="eb">YOUR FIRST RISE · ANNUAL PLAN</div><h2>Lock in a year for $${report.offers.annual.annual}.</h2><p>Instead of $${report.offers.annual.monthly * 12} month by month — $${report.offers.annual.saves} off, the same plan, nothing changes in what runs weekly.</p><div class="acts"><button type="button" class="btn dark" data-action="take-annual">Switch to annual</button><button type="button" class="btn ghost" data-action="dismiss-annual">Not now</button></div></div>`) : ''}
 
           <details class="card acc" open>
             <summary>The four dimensions</summary>
@@ -682,7 +853,7 @@
               ${raw((s.dimensions || []).map(d => { const sc = clamp(d.score, 0, 100); const [g, gcc] = grade(sc); const hue = hueOf(d.label); const dd = hist?.delta_dimensions?.find(x => x.label === d.label);
                 return h`<div class="dimcard bd${hue}"><div class="top"><span class="n">${d.label}</span><span class="s hue${hue}">${sc} · ${g}${dd && dd.delta ? raw(h`<span class="dd g-${dd.delta > 0 ? 'strong' : 'weak'}">${dd.delta > 0 ? '+' : ''}${dd.delta}</span>`) : ''}</span></div>
                   <div class="bar in"><div class="fill bg${hue}" style="width:${sc}%"></div>${d.category_avg != null ? raw(h`<div class="mark" style="left:${clamp(d.category_avg, 0, 100)}%"></div>`) : ''}</div>
-                  <p>${d.explanation || ''}</p></div>`; }).join(''))}
+                  <p>${d.explanation || ''}</p>${raw(evidenceHTML(d.evidence_posts))}</div>`; }).join(''))}
               <div class="fine">${s.category_avg != null ? `The marker is your ${niche} average (${fmtN(s.category_sample_size)} accounts).` : pending ? `The marker is your niche average. Your ${niche} average appears once ${pending.min_n} accounts are scored — ${pending.n} so far.` : nicheKnown ? 'The marker is your niche average.' : `Scored against all creators — we don't have enough ${niche} accounts yet.`}</div>
             </div>
           </details>
@@ -698,6 +869,15 @@
             </div>
           </details>`) : ''}
 
+          ${report.best_times ? raw(h`<details class="card acc" open>
+            <summary>Best times to post${report.best_times.confident ? '' : raw(h`<span class="tag fair" style="margin-left:10px">STARTING POINT</span>`)}</summary>
+            <div class="body">
+              <div class="windows">${raw((report.best_times.windows || []).map((w, i) => h`<div class="window bd${(i % 4) + 1}"><div class="d">${w.label}</div>${w.vs_avg ? raw(h`<div class="x">${w.vs_avg}× your usual</div>`) : raw('<div class="x muted">common window</div>')}<p>${w.explanation}</p></div>`).join(''))}</div>
+              ${(report.best_times.best_days || []).length ? raw(h`<div class="fine">Strongest days overall: ${report.best_times.best_days.map(d => `${d.day} (${d.vs_avg}× over ${d.n} posts)`).join(' · ')}.</div>`) : ''}
+              <div class="fine">${report.best_times.note}</div>
+            </div>
+          </details>`) : ''}
+
           ${phases.length ? raw(h`<details class="card acc" ${paid ? 'open' : ''}>
             <summary>Your 30-60-90 path</summary>
             <div class="body">${raw(phases.map((p, i) => {
@@ -706,9 +886,9 @@
               return h`<div class="phase">
                 <div class="ph" style="background:${raw(tone)}"><span>${p.days} · ${p.label}</span>${paid && p.not_included ? raw(h`<span class="prog" style="color:${raw(toneT)}">Growth Plan only</span>`) : paid && p.moves.length ? raw(h`<span class="prog" style="color:${raw(toneT)}">${doneN} of ${total} done</span>`) : ''}</div>
                 <div class="pb">
-                  ${paid && p.opener ? raw(h`<div class="mvrow opener ${isSample || i === 0 ? 'open' : ''} ${isDone(p.key + 'm1') ? 'on' : ''}" data-row="${p.key}m1"><button class="box" data-move="${p.key}m1" aria-label="Mark move 01 done">${isDone(p.key + 'm1') ? '✓' : ''}</button><div class="b"><div class="t">01 · ${p.label}</div><p>${p.action}</p>${p.detail ? raw(h`<p class="w">${p.detail}</p>`) : ''}${raw(moveDetailHTML(p.opener))}<span class="more" aria-hidden="true"></span></div></div>`)
+                  ${paid && p.opener ? raw(h`<div class="mvrow opener ${isSample || i === 0 ? 'open' : ''} ${isDone(p.key + 'm1') ? 'on' : ''}" data-row="${p.key}m1"><button class="box" aria-label="Mark move done" aria-pressed="${isDone(p.key + 'm1') ? 'true' : 'false'}" data-move="${p.key}m1" aria-label="Mark move 01 done">${isDone(p.key + 'm1') ? '✓' : ''}</button><div class="b"><div class="t">01 · ${p.label}</div><p>${p.action}</p>${p.detail ? raw(h`<p class="w">${p.detail}</p>`) : ''}${raw(moveDetailHTML(p.opener))}<span class="more" aria-hidden="true"></span></div></div>`)
                   : raw(h`<div class="move"><span class="n">01</span><p>${p.action}</p></div>`)}
-                  ${paid && !p.not_included ? raw(p.moves.map(m => h`<div class="mvrow ${isSample || i === 0 ? 'open' : ''} ${isDone(p.key + 'm' + m.n) ? 'on' : ''}" data-row="${p.key}m${m.n}"><button class="box" data-move="${p.key}m${m.n}" aria-label="Mark move ${m.n} done">${isDone(p.key + 'm' + m.n) ? '✓' : ''}</button><div class="b"><div class="t">${String(m.n).padStart(2, '0')} · ${m.title || ''}</div><p>${m.action}</p>${m.why ? raw(h`<p class="w">Why: ${m.why}</p>`) : ''}${raw(moveDetailHTML(m))}<span class="more" aria-hidden="true"></span></div></div>`).join(''))
+                  ${paid && !p.not_included ? raw(p.moves.map(m => h`<div class="mvrow ${isSample || i === 0 ? 'open' : ''} ${isDone(p.key + 'm' + m.n) ? 'on' : ''}" data-row="${p.key}m${m.n}"><button class="box" aria-label="Mark move done" aria-pressed="${isDone(p.key + 'm' + m.n) ? 'true' : 'false'}" data-move="${p.key}m${m.n}" aria-label="Mark move ${m.n} done">${isDone(p.key + 'm' + m.n) ? '✓' : ''}</button><div class="b"><div class="t">${String(m.n).padStart(2, '0')} · ${m.title || ''}</div><p>${m.action}</p>${m.why ? raw(h`<p class="w">Why: ${m.why}</p>`) : ''}${raw(moveDetailHTML(m))}<span class="more" aria-hidden="true"></span></div></div>`).join(''))
                   : raw(h`<div class="locked"><div class="rows">${raw((p.teasers.length ? p.teasers : Array.from({ length: p.count }, () => 'Written from your posts when you unlock')).slice(0, 4).map((t, k) => h`<div>${String(p.firstLocked + k).padStart(2, '0')} · ${t.replace(/^MOVE \d+\s*·?\s*/i, '')}${/…$/.test(t) ? '' : '…'}</div>`).join(''))}
                       <div class="grid">${raw(Array.from({ length: 28 }, (_, k) => `<span style="${[0, 2, 4, 6].includes(k % 7) ? `background:var(--c${(Math.floor(k / 7) % 4) + 1})` : ''}"></span>`).join(''))}</div></div>
                     <div class="lk"><i>🔒</i>${p.lockedHeader}</div></div>`)}
@@ -721,6 +901,17 @@
               <summary><span class="wk">WEEK ${w.week} · DAYS ${(w.week - 1) * 7 + 1}–${w.week * 7}</span><span class="sl">${(w.slots || []).map(sl => `${String(sl.day).slice(0, 3)} ${sl.format}`).join(' · ')}</span></summary>
               <div class="slots">${raw((w.slots || []).map((sl, k) => h`<div class="slot bd${(k % 4) + 1}"><div class="d">${String(sl.day).slice(0, 3).toUpperCase()} · ${String(sl.format).toUpperCase()}${sl.source ? raw(h`<span class="src ${sl.source}">${sl.source === 'new' ? 'NEW SHOOT' : sl.source === 'archive' ? 'FROM ARCHIVE' : 'NO CAMERA'}</span>`) : ''}</div><div class="a">${sl.angle}</div>${sl.prompt ? raw(h`<div class="p">${sl.prompt}</div>`) : ''}</div>`).join(''))}</div>
             </details>`).join(''))}</div>
+          </details>`) : ''}
+
+          ${paid && Array.isArray(report.next_posts) && report.next_posts.length ? raw(h`<details class="card acc" open>
+            <summary>Your next posts <span class="fine" style="font-weight:500">written from your best ones</span></summary>
+            <div class="body" id="nextPosts">${raw(report.next_posts.map((p, i) => h`<article class="npost bd${(i % 4) + 1}" data-post="${i}">
+              <div class="nh"><span class="when">${p.day} ${p.time}</span><span class="fmt">${String(p.format).toUpperCase()}</span>${p.source ? raw(h`<span class="src ${p.source}">${p.source === 'new' ? 'NEW SHOOT' : p.source === 'archive' ? 'FROM ARCHIVE' : 'NO CAMERA'}</span>`) : ''}<button class="btn ghost sm" data-regen="${i}" title="Rewrite this post">Regenerate</button></div>
+              <div class="fld"><div class="fl">Hook <button class="copy" data-copy="hook">Copy</button></div><p class="hook">${p.hook}</p></div>
+              <div class="fld"><div class="fl">Caption <button class="copy" data-copy="caption">Copy</button></div><p class="txt">${p.caption}</p></div>
+              ${p.script ? raw(h`<div class="fld"><div class="fl">${/reel|video/.test(p.format) ? 'Script' : /carousel/.test(p.format) ? 'Slides' : 'Shot idea'} <button class="copy" data-copy="script">Copy</button></div><p class="txt script">${p.script}</p></div>`) : ''}
+              ${p.why ? raw(h`<p class="w">Why: ${p.why}</p>`) : ''}
+            </article>`).join(''))}</div>
           </details>`) : ''}
 
           <details class="card acc" ${paid && comp ? 'open' : ''}>
@@ -736,15 +927,15 @@
           <div class="datawindow">${report.data_window || `Based on your last ${pi?.sample || 12} posts. We can't see saves, reach or story views.`}</div>
 
           ${!paid && sget('sc_limit_msg', null) ? raw(h`<div class="notice">${sget('sc_limit_msg', '')} <a href="#/pricing">See the plan →</a></div>`) : ''}
-          ${isSample ? raw(h`<div class="refresh"><div class="t"><h3>This is what $${price} a month gets you</h3><p>Every move with the reason behind it, a 12-week calendar written from the account's own posts, competitors scored the same way, and a fresh score every week. Yours starts with a free Snapshot.</p></div><a class="btn green" href="#/" data-scroll="evalForm">Score my account free</a></div>`)
-          : paid && once ? raw(h`<div class="notin"><div class="hd"><h3>Not in your 60-day plan</h3><p>Yours to keep, as bought. This is what the Growth Plan adds, for $${price} a month — less than the $${oneTime} you paid once.</p></div>
+          ${isSample ? raw(h`<div class="refresh"><div class="t"><h2>This is what $${price} a month gets you${founders ? " (founders price)" : ""}</h2><p>Every move with the reason behind it, a 12-week calendar written from the account's own posts, competitors scored the same way, and a fresh score every week. Yours starts with a free Snapshot.</p></div><a class="btn green" href="#/" data-scroll="evalForm">Score my account free</a></div>`)
+          : paid && once ? raw(h`<div class="notin"><div class="hd"><h2>Not in your 60-day plan</h2><p>Yours to keep, as bought. This is what the Growth Plan adds, for $${price} a month — less than the $${oneTime} you paid once.</p></div>
               <div class="rows">${raw(['Days 61–90 — phase 3, moves 10 through 13', 'Re-scored every week, with what each move changed', 'Day-30 and day-60 check-ins that reshape the plan', 'Up to 5 competitors, scored the same way', 'Score and follower history', 'A fresh plan every 90 days'].map(t => h`<div><i>🔒</i>${t}</div>`).join(''))}</div>
               <button class="btn green" data-action="unlock">Start the plan · $${price}/mo</button></div>`)
-          : paid ? raw(h`<div class="refresh"><div class="t"><h3>This plan refreshes weekly</h3><p>${Object.keys(done).length ? `You did ${Object.keys(done).length} move${Object.keys(done).length === 1 ? '' : 's'} — we'll re-score you and tell you what changed.` : 'Run it again any time — the moves and calendar are rewritten against your latest posts.'}</p></div><a class="btn green" href="#/" data-scroll="evalForm">Run a fresh evaluation</a></div>`)
-          : raw(h`<div class="upsell"><h3>Unlock your full Growth Plan</h3><p>${report.upsell?.unlock_count || 12} locked items: the remaining moves and your week-by-week calendar, written from your own posts — and around four quick answers about your next 90 days, so it's a plan you can actually do.</p>
+          : paid ? raw(h`<div class="refresh"><div class="t"><h2>This plan refreshes ${(sget('sc_pricing', null)?.rescore || {})[report.tier] === 3 ? 'every 3 days' : 'weekly'}</h2><p>${Object.keys(done).length ? `You did ${Object.keys(done).length} move${Object.keys(done).length === 1 ? '' : 's'} — we'll re-score you and tell you what changed.` : 'Run it again any time — the moves and calendar are rewritten against your latest posts.'}</p></div><a class="btn green" href="#/" data-scroll="evalForm">Run a fresh evaluation</a></div>`)
+          : raw(h`<div class="upsell"><h2>Unlock your full Growth Plan</h2><p>${report.upsell?.unlock_count || 12} locked items: the remaining moves and your week-by-week calendar, written from your own posts — and around four quick answers about your next 90 days, so it's a plan you can actually do.</p>
               <div class="paths">
-                <div class="path main"><div class="pn">Growth Plan · <b>$${price}/mo</b></div><div class="pd">All 90 days, written around your life. Re-scored every week with check-ins at day 30 and 60.</div><button class="btn" data-action="unlock">Start the plan →</button></div>
-                <div class="path"><div class="pn">60-day plan · <b>$${oneTime} once</b></div><div class="pd">Phases 1 and 2 — moves 01–09 and 8 weeks of calendar, written once. No subscription.</div><button class="btn light" data-action="unlock-once">Get the 60-day plan</button></div>
+                <div class="path main"><div class="pn">Growth Plan · <b>$${price}/mo</b>${founders ? raw(h` <span class="fine">founders price · ${fmtN(founders.left)} spots left</span>`) : ''}</div><div class="pd">Your full plan, posts written for you every week, and a score that moves — rescored weekly with check-ins at day 30 and 60.</div><button class="btn" data-action="unlock">Start the plan →</button></div>
+                ${oneTime ? raw(h`<div class="path"><div class="pn">60-day plan · <b>$${oneTime} once</b></div><div class="pd">Phases 1 and 2 — moves 01–09 and 8 weeks of calendar, written once. No subscription.</div><button class="btn light" data-action="unlock-once">Get the 60-day plan</button></div>`) : ''}
               </div>
               <div class="fine">Cancel anytime. Keep the report either way.</div></div>`)}
 
@@ -760,12 +951,76 @@
       if (now) done[k] = Date.now(); else delete done[k];
       if (!isSample) lset(doneKey, done);
       const row = b.closest('.mvrow, .done') || b; row.classList.toggle('on', now); (b.classList.contains('box') ? b : b.querySelector('.box')).textContent = now ? '✓' : '';
-      $view.querySelectorAll(`[data-move="${k}"]`).forEach(o => { if (o === b) return; const r = o.closest('.mvrow, .done') || o; r.classList.toggle('on', now); (o.classList.contains('box') ? o : o.querySelector('.box')).textContent = now ? '✓' : ''; });
+      $view.querySelectorAll(`[data-move="${k}"]`).forEach(o => { o.setAttribute('aria-pressed', now ? 'true' : 'false'); if (o === b) return; const r = o.closest('.mvrow, .done') || o; r.classList.toggle('on', now); (o.classList.contains('box') ? o : o.querySelector('.box')).textContent = now ? '✓' : ''; });
       if (token() && paid && !isSample) { try { await api('/reports/' + encodeURIComponent(report.report_id) + '/moves', { method: 'POST', body: JSON.stringify({ key: k, done: now }) }); } catch { } }
       if (!isSample) { report.moves_done = done; sset('sc_report_' + report.report_id, report); }
       $view.querySelectorAll('.phase').forEach((ph, i) => { const p = phases[i]; if (!p || !paid) return; const total = 1 + p.moves.length; const dn = (isDone(p.key + 'm1') ? 1 : 0) + p.moves.filter(m => isDone(p.key + 'm' + m.n)).length; const el = ph.querySelector('.prog'); if (el) el.textContent = `${dn} of ${total} done`; });
     }));
-    $view.querySelector('[data-action=share]').addEventListener('click', () => openShareSheet(report));
+    $view.querySelector('[data-action=share]').addEventListener('click', () => { if (!isSample) track('share_clicked', { overall }, report.report_id); openShareSheet(report); });
+    $view.querySelectorAll('[data-moment-share]').forEach(b => b.addEventListener('click', () => { const m = (report.moments || []).find(x => x.key === b.dataset.momentShare); if (m) openShareSheet(report, m); }));
+    $view.querySelectorAll('[data-moment-dismiss]').forEach(b => b.addEventListener('click', () => { try { localStorage.setItem('sc_moment_' + report.report_id + '_' + b.dataset.momentDismiss, '1'); } catch { } b.closest('.moment')?.remove(); }));
+    countUp($view.querySelector('.scorebox .bignum'), overall);
+    // Weekly trend brief (spec 3.4): loads after the report; hidden until the niche is ready.
+    { const bw = $view.querySelector('#briefWrap'); if (bw && biz.category && !isSample) api('/briefs/' + encodeURIComponent(biz.category) + '?platform=' + encodeURIComponent(biz.platform || 'instagram'), {}, { allow401: true }).then(b => {
+      if (!b || !b.ready) { if (b && b.n != null && paid) { bw.hidden = false; bw.innerHTML = h`<details class="card acc briefcard soon"><summary>What's working in ${niche}</summary><div class="body"><p class="fine">Published once ${b.min_n} ${niche} accounts are scored — ${b.n} so far. It's built from our own data, aggregated and anonymised.</p></div></details>`; } return; }
+      const fm = (b.formats || []).slice(0, 4);
+      bw.hidden = false; bw.innerHTML = h`<details class="card acc briefcard" open><summary>What's working in ${niche} <span class="fine">this week</span></summary><div class="body">
+        <ul class="lines">${raw(b.lines.map(l => h`<li>${l}</li>`).join(''))}</ul>
+        ${fm.length ? raw(h`<div class="fmts">${raw(fm.map(f => h`<div class="fm"><div class="t"><span>${f.key}</span><span>${f.share_top}% of top posts · ${f.share_all}% of all</span></div><div class="bar"><div class="all" style="width:${f.share_all}%"></div><div class="top" style="width:${f.share_top}%"></div></div></div>`).join(''))}</div>`) : ''}
+        <div class="fine">From ${fmtN(b.n)} ${niche} accounts and ${fmtN(b.posts)} posts in the last ${b.window_days} days, aggregated and anonymised — no one's account is shown. "Top" = beat its own account's average by 1.5×.</div></div></details>`;
+    }).catch(() => { }); }
+    { const ao = $view.querySelector('#annualOffer'); if (ao) {
+      ao.querySelector('[data-action=dismiss-annual]').addEventListener('click', () => { sset('sc_annual_dismissed', true); ao.remove(); });
+      ao.querySelector('[data-action=take-annual]').addEventListener('click', async e => { e.currentTarget.disabled = true; try { await api('/billing/subscribe', { method: 'POST', body: JSON.stringify({ tier: 'growth_plan', billingCycle: 'annual' }) }); track('annual_offer_taken', {}, report.report_id); sset('sc_annual_dismissed', true); ao.remove(); toast('Annual plan on. Thank you — same plan, one payment a year.'); } catch (e2) { toast(e2.message); e.currentTarget.disabled = false; } });
+      if (qs.get('annual') === '1') ao.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } }
+    $view.querySelectorAll('details > summary').forEach(sm => { if (sm.querySelector('[role=heading]')) return; const w = document.createElement('span'); w.setAttribute('role', 'heading'); w.setAttribute('aria-level', '2'); while (sm.firstChild) w.appendChild(sm.firstChild); sm.appendChild(w); });
+    const goalAsk = $view.querySelector('#goalAsk');
+    if (goalAsk) bindGoalPicker(goalAsk, async (goal, target) => {
+      try {
+        const res = await api('/reports/' + encodeURIComponent(report.report_id) + '/goal', { method: 'POST', body: JSON.stringify({ goal, goal_target: target }) }, { allow401: true });
+        report.goal = res.goal; report.goal_target = res.goal_target; sset('sc_report_' + report.report_id, report); sset('sc_goal', { goal: res.goal, goal_target: res.goal_target });
+        track('goal_set', { goal, first: true }, report.report_id); toast('Goal set. The next rescore and your Monday moves lean toward it.'); viewReport(report.report_id);
+      } catch (e) { toast('Could not save the goal: ' + e.message); }
+    }, () => { sset('sc_goal_skipped_' + report.report_id, true); goalAsk.remove(); });
+    // Roast mode (spec 2.1): opt-in, heat first, then a line-by-line reveal.
+    const roastWrap = $view.querySelector('#roastWrap');
+    if (roastWrap) {
+      let heat = (report.roast && report.roast.heat) || 'medium'; let timers = [];
+      const HEATS = [['mild', 'Mild', 'A friend with a dig'], ['medium', 'Medium', 'A tight five on your feed'], ['extra_crispy', 'Extra Crispy', 'No survivors (content only)']];
+      const reroastOpen = r => !r || !r.reroast_after || Date.now() >= r.reroast_after;
+      const show = html => { timers.forEach(clearTimeout); timers = []; roastWrap.hidden = false; roastWrap.innerHTML = html; roastWrap.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+      const pick = () => show(h`<div class="roast pick"><div class="eb">ROAST MODE · OPT-IN</div><h2>How hot?</h2><p>Same facts as the report, told with no mercy. It roasts what you post — never who you are.</p>
+        <div class="heats">${raw(HEATS.map(([k, l, d]) => h`<button type="button" class="heat ${k === heat ? 'on' : ''}" data-heat="${k}"><b>${l}</b><span>${d}</span></button>`).join(''))}</div>
+        <div class="acts"><button class="btn dark" data-roast="go">Roast me</button><button class="btn ghost" data-roast="close">Never mind</button></div><p class="fine">Tip: screen-record the reveal.</p></div>`);
+      const reveal = (r, instant = false) => {
+        const lines = r.lines || [];
+        show(h`<div class="roast reveal"><div class="eb">ROASTED · ${r.heat_label || ''}${r.previous ? raw(h` · THEN ${r.previous.overall} → NOW ${r.overall}`) : ''}</div><ol class="lines">${raw(lines.map((l, i) => h`<li style="animation-delay:${instant ? 0 : i * 1.1}s">${l.text}</li>`).join(''))}</ol>
+          <div class="fix" style="animation-delay:${instant ? 0 : lines.length * 1.1 + 0.4}s"><h2>${r.closer || "Okay, here's how we fix it"}</h2>${r.first_move ? raw(h`<p class="a">${r.first_move.action}</p><p class="w">${r.first_move.why}</p>`) : ''}
+          <div class="acts"><button class="btn dark" data-roast="share">Share the roast</button><button class="btn ghost" data-roast="close">Back to the report</button>${reroastOpen(r) ? raw(h`<button class="btn ghost" data-roast="again">Roast me again</button>`) : raw(h`<span class="fine">Roast me again opens ${fmtDate(r.reroast_after)}</span>`)}</div></div></div>`);
+      };
+      const unavailable = why => show(h`<div class="roast off"><div class="eb">ROAST MODE</div><h2>${why === 'minor' ? 'No roast for this account.' : why === 'safety' ? "The roast didn't pass our check." : 'The roast is unavailable right now.'}</h2><p>${why === 'minor' ? "The bio reads as under 18, so it's the normal report only." : why === 'safety' ? 'Every roast is screened for jokes about the person instead of the content. This one failed twice, so you get the normal report.' : 'Try again in a few minutes — the report is still all yours.'}</p><div class="acts"><button class="btn ghost" data-roast="close">Back to the report</button></div></div>`);
+      const run = async (reroast = false) => {
+        show(h`<div class="roast loading"><div class="eb">ROAST MODE · ${(HEATS.find(x => x[0] === heat) || [])[1] || ''}</div><h2>Reading your posts…</h2><p>Every line has to lean on something you actually posted.</p></div>`);
+        try {
+          const res = await api('/reports/' + encodeURIComponent(report.report_id) + '/roast', { method: 'POST', body: JSON.stringify({ heat, reroast }) }, { allow401: true });
+          if (res.unavailable) return unavailable(res.unavailable);
+          report.roast = res.roast; sset('sc_report_' + report.report_id, report);
+          const b = $view.querySelector('[data-action=roast]'); if (b) b.textContent = 'See my roast 🔥';
+          reveal(res.roast);
+        } catch (e) { if (e.status === 429) toast(e.message); else toast('Roast unavailable: ' + e.message); roastWrap.hidden = true; }
+      };
+      roastWrap.addEventListener('click', e => {
+        const hb = e.target.closest('[data-heat]'); if (hb) { heat = hb.dataset.heat; roastWrap.querySelectorAll('[data-heat]').forEach(x => x.classList.toggle('on', x === hb)); return; }
+        const a = e.target.closest('[data-roast]'); if (!a) return;
+        if (a.dataset.roast === 'go') run(false);
+        else if (a.dataset.roast === 'again') { heat = report.roast?.heat || heat; pick(); }
+        else if (a.dataset.roast === 'close') { timers.forEach(clearTimeout); roastWrap.hidden = true; roastWrap.innerHTML = ''; }
+        else if (a.dataset.roast === 'share') { const r = report.roast; if (r) openShareSheet(report, { kind: 'roast', key: 'roast', title: r.lines?.[0]?.text || '', line: r.lines?.[1]?.text || '', score: r.overall, at: r.generated_at, heat_label: r.heat_label }); }
+      });
+      $view.querySelector('[data-action=roast]')?.addEventListener('click', () => { if (report.roast) reveal(report.roast); else pick(); });
+      if (new URLSearchParams(location.hash.split('?')[1] || '').get('roast') === '1') { if (report.roast) reveal(report.roast); else pick(); }
+    }
     // Both paid paths go through the 60-second intake first.
     $view.querySelector('[data-action=unlock]')?.addEventListener('click', () => { sset('sc_intent_tier', 'growth_plan'); sset('sc_form', { handle: biz.handle, platform: biz.platform, category: biz.category, email: sget('sc_form', {}).email || report.email || '' }); go(`#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=subscribe`); });
     $view.querySelector('[data-action=unlock-once]')?.addEventListener('click', () => { sset('sc_once_price', oneTime); go(`#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=once`); });
@@ -782,6 +1037,22 @@
     $view.querySelectorAll('[data-nudge]').forEach(b => b.addEventListener('click', () => answer(b, { nudge: b.dataset.nudge, changed: b.dataset.changed === '1' }, 'Kept as is.')));
     if (subscriber && qs.get('checkin') && qs.get('changed') === '0' && !checkins['p' + qs.get('checkin')]) { const b = $view.querySelector('[data-checkin]'); if (b) b.click(); else answer({ disabled: false }, { phase: Number(qs.get('checkin')), changed: false }, 'Carrying on.'); }
     if (qs.get('nudge')) document.getElementById('nudge')?.scrollIntoView({ behavior: 'smooth' });
+    if (qs.get('review')) document.getElementById('rv-' + qs.get('review'))?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (qs.get('done')) { const k = qs.get('done'); toast(k === 'invalid' ? "That link didn't work — mark the move done on the report." : 'Marked done. It counts toward your next rescore.'); const row = $view.querySelector(`[data-row="${k}"]`); if (row) { row.classList.add('on'); row.scrollIntoView({ behavior: 'smooth', block: 'center' }); } }
+    // next posts: copy fields, regenerate one
+    $view.querySelectorAll('.npost [data-copy]').forEach(b => b.addEventListener('click', async () => {
+      const art = b.closest('.npost'); const i = Number(art.dataset.post); const p = (report.next_posts || [])[i] || {}; const text = p[b.dataset.copy] || '';
+      try { await navigator.clipboard.writeText(text); b.textContent = 'Copied'; setTimeout(() => { b.textContent = 'Copy'; }, 1200); } catch { toast(text.slice(0, 80)); }
+      if (!isSample) track('post_copied', { field: b.dataset.copy, index: i }, report.report_id);
+    }));
+    $view.querySelectorAll('[data-regen]').forEach(b => b.addEventListener('click', async () => {
+      if (isSample) { toast('Regenerate works on your own report.'); return; }
+      const i = Number(b.dataset.regen); b.disabled = true; b.textContent = 'Writing…';
+      try {
+        const r = await api('/reports/' + encodeURIComponent(report.report_id) + '/posts/regenerate', { method: 'POST', body: JSON.stringify({ index: i }) });
+        report.next_posts[i] = r.post; sset('sc_report_' + report.report_id, report); toast('Rewritten.'); route();
+      } catch (e2) { if (e2.status === 401) return; if (!limitNotice(e2)) toast(e2.message || 'Could not rewrite.'); b.disabled = false; b.textContent = 'Regenerate'; }
+    }));
     $view.querySelector('#compForm')?.addEventListener('submit', async e => {
       e.preventDefault(); const f = e.currentTarget; const btn = f.querySelector('button'); const out = $view.querySelector('#compResult');
       const handles = f.handles.value.split(/[,\s]+/).map(x => x.replace(/^@/, '').trim()).filter(Boolean).slice(0, 5);
@@ -791,7 +1062,36 @@
       catch (e2) { if (e2.status === 401) return; if (e2.status === 402) { sset('sc_intent_tier', 'growth_plan'); go('#/pricing'); return; } out.innerHTML = h`<div class="form-error">${e2.message}</div>`; }
       btn.disabled = false; btn.textContent = 'Re-run';
     });
-    if (!paid) api('/billing/pricing', {}, { allow401: true }).then(p => { if (p.support_email) sset('sc_support', p.support_email); const t = (p.tiers || []).find(x => x.tier === 'growth_plan'); if (t && t.monthlyPrice != null) { const el = $view.querySelector('.upsell p'); if (el) el.textContent = el.textContent.replace(/\$\d+\/mo or \$\d+\/yr/, `$${t.monthlyPrice}/mo or $${t.annualPrice ?? Math.round(t.monthlyPrice * 9)}/yr`); } }).catch(() => { });
+    if (!paid) api('/billing/pricing', {}, { allow401: true }).then(p => { if (p.support_email) sset('sc_support', p.support_email); rememberPricing(p); const t = (p.tiers || []).find(x => x.tier === 'growth_plan'); if (t && t.monthlyPrice != null) { const el = $view.querySelector('.upsell p'); if (el) el.textContent = el.textContent.replace(/\$\d+\/mo or \$\d+\/yr/, `$${t.monthlyPrice}/mo or $${t.annualPrice ?? Math.round(t.monthlyPrice * 9)}/yr`); } }).catch(() => { });
+  }
+  // Score history chart (spec 1.11): inline SVG from history.series, shown once there are 2+ runs.
+  function historyChartHTML(hist) {
+    const pts = (hist && hist.series || []).filter(p => Number.isFinite(p.overall)).slice(-12);
+    if (pts.length < 2) return '';
+    const W = 320, H = 96, P = 8;
+    const xs = i => P + (i / (pts.length - 1)) * (W - P * 2);
+    const ys = v => P + (1 - clamp(v, 0, 100) / 100) * (H - P * 2);
+    const d = pts.map((p, i) => `${i ? 'L' : 'M'}${xs(i).toFixed(1)},${ys(p.overall).toFixed(1)}`).join(' ');
+    const first = pts[0], last = pts[pts.length - 1];
+    return h`<div class="histchart"><svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Score history: ${first.overall} to ${last.overall} over ${pts.length} runs">
+      ${raw([25, 50, 75].map(g => `<line x1="${P}" x2="${W - P}" y1="${ys(g).toFixed(1)}" y2="${ys(g).toFixed(1)}" class="grid"/>`).join(''))}
+      <path d="${d}" class="line"/>
+      ${raw(pts.map((p, i) => `<circle cx="${xs(i).toFixed(1)}" cy="${ys(p.overall).toFixed(1)}" r="${i === pts.length - 1 ? 4 : 2.5}" class="${i === pts.length - 1 ? 'dot last' : 'dot'}"/>`).join(''))}
+    </svg><div class="hl"><span>${fmtShort(first.generated_at)} · ${first.overall}</span><span>${pts.length} run${pts.length === 1 ? '' : 's'}</span><span>${fmtShort(last.generated_at)} · ${last.overall}</span></div></div>`;
+  }
+  // Evidence tiles under a dimension explanation (spec 1.4): 1–3 posts, our
+  // own thumbnail or a neutral tile, each linking to the post. Never shown on
+  // share pages or cards.
+  const typeIcon = t => ({ reel: '▶', video: '▶', carousel: '▤', slideshow: '▤', image: '▢' }[t] || '▢');
+  function evidenceHTML(items) {
+    if (!items || !items.length) return '';
+    return h`<div class="evidence">${raw(items.slice(0, 3).map(e => {
+      const alt = (e.caption || '').split(/\s+/).slice(0, 8).join(' ') || `${e.type} from ${fmtShort(e.posted_at)}`;
+      const inner = e.thumbnail_url
+        ? h`<img src="${e.thumbnail_url}" width="320" height="320" loading="lazy" decoding="async" alt="${alt}">`
+        : h`<div class="tile"><span class="ic">${typeIcon(e.type)}</span><span class="dt">${fmtShort(e.posted_at)}</span></div>`;
+      return h`<a class="ev" href="${e.permalink || '#'}" target="_blank" rel="noopener" title="${alt}">${raw(inner)}${/reel|video/.test(e.type) ? raw('<span class="vid">▶</span>') : ''}<span class="m">${e.metric}</span></a>`;
+    }).join(''))}</div>`;
   }
   // The "how" under a move: numbered steps, paste-ready example, done-when, time.
   function moveDetailHTML(d, dark) {
@@ -812,7 +1112,7 @@
     renderHeader('pricing');
     $view.innerHTML = h`<div class="center-msg">Loading pricing…</div>`;
     let pricing, ent = null;
-    try { pricing = await api('/billing/pricing', {}, { allow401: true }); if (pricing.support_email) sset('sc_support', pricing.support_email); }
+    try { pricing = await api('/billing/pricing', {}, { allow401: true }); if (pricing.support_email) sset('sc_support', pricing.support_email); rememberPricing(pricing); }
     catch (e) { $view.innerHTML = h`<div class="center-msg"><h2>Pricing is unavailable right now.</h2>${e.message}</div>`; return; }
     if (token()) { try { ent = await api('/account/subscription-status', {}, { allow401: true }); } catch { } }
     const discM = /(\d+)\s*%/.exec(pricing.discount?.annual || ''); const disc = discM ? Number(discM[1]) / 100 : 0.25;
@@ -826,49 +1126,55 @@
     const yr = t => t.annualPrice ?? Math.round((t.monthlyPrice || 0) * 12 * (1 - disc));
     const cur = t => ent && ent.current_tier === t;
     let promoState = promo();
+    track('pricing_viewed', { intent: intent || null, billing, variant: pricing.variant || 'control' });
     const render = () => {
       const annual = billing === 'annual';
       const pcode = promoState && promoState.code;
       const pOk = promoState && !promoState.pending && promoState.checked_for === 'growth_plan:' + billing;
-      const growthLine = pOk && promoState.product === 'growth_plan' ? (promoState.free_months ? `$0 for your first ${promoState.free_months === 1 ? 'month' : promoState.free_months + ' months'}, then $${annual ? yr(growth) : growth.monthlyPrice}${annual ? '/yr' : '/mo'}` : `$${(promoState.amount_cents / 100).toFixed(promoState.amount_cents % 100 ? 2 : 0)} ${annual ? 'your first year' : 'your first month'}, then $${annual ? yr(growth) : growth.monthlyPrice}`) : null;
+      const fd = pricing.founders && pricing.founders.left > 0 ? pricing.founders : null;
+      const gPrice = fd ? (annual ? fd.annualPrice : fd.monthlyPrice) : (annual ? yr(growth) : growth.monthlyPrice);
+      const gList = annual ? yr(growth) : growth.monthlyPrice;
+      const growthLine = pOk && promoState.product === 'growth_plan' ? (promoState.free_months ? `$0 for your first ${promoState.free_months === 1 ? 'month' : promoState.free_months + ' months'}, then $${gPrice}${annual ? '/yr' : '/mo'}` : `$${(promoState.amount_cents / 100).toFixed(2)} ${annual ? 'for your first year' : 'for your first month'}`) : '';
       const proOpen = sget('sc_pro_open', false);
+      const lim = pricing.limits || {};
+      const limLine = t => { const l = lim[t]; return l ? `${l.written_posts_per_week} posts written a week · ${l.post_regens_per_week} rewrites · ${l.post_reviews_per_week} post reviews · ${l.competitor_handles} competitors · rescored every ${l.rescore_days} day${l.rescore_days === 1 ? '' : 's'}` : ''; };
+      const col = (t, extra) => h`<div class="feats">${raw((t.features || []).map(f => h`<div>${f}</div>`).join(''))}</div>${extra ? raw(extra) : ''}`;
       $view.innerHTML = h`<div class="wrap"><div class="pricing">
         ${limitMsg ? raw(h`<div class="notice" style="margin-bottom:18px">${limitMsg}</div>`) : ''}
         <h1>Pay when the plan is worth doing.</h1>
         <p class="lede">Score first, free. Unlock the rest when you've read it and decided it's right.</p>
-        <div class="toggle" role="tablist"><button type="button" class="${annual ? '' : 'on'}" data-billing="monthly">Monthly</button><button type="button" class="${annual ? 'on' : ''}" data-billing="annual">Annual · ${Math.round(disc * 100)}% off</button></div>
-        <div class="tiers">
+        ${fd ? raw(h`<div class="founders-bar"><b>Founders pricing:</b> ${fmtN(fd.left)} of ${fmtN(fd.cap)} spots left — Growth at $${fd.monthlyPrice}/mo or $${fd.annualPrice}/yr, locked in for as long as you stay subscribed.</div>`) : ''}
+        <div class="toggle" role="tablist" aria-label="Billing period"><button type="button" role="tab" aria-selected="${annual ? 'false' : 'true'}" class="${annual ? '' : 'on'}" data-billing="monthly">Monthly</button><button type="button" role="tab" aria-selected="${annual ? 'true' : 'false'}" class="${annual ? 'on' : ''}" data-billing="annual">Annual · ${pricing.discount?.annual || '2 months free'}</button></div>
+        <div class="tiers three">
           <div class="card tier">
-            <div class="n">Free Snapshot</div>
+            <div class="n">${free.name || 'Free'}</div>
             <div class="p">$0</div>
-            <div class="note">${free.note || 'One report per email'}</div>
-            <div class="feats">${raw((free.features || []).map(f => h`<div>${f}</div>`).join(''))}</div>
-            <a class="btn ghost" href="#/" data-scroll="evalForm">Score my account</a>
+            <div class="note">${free.note || 'One free Snapshot per handle'}</div>
+            ${raw(col(free))}
+            <a class="btn ghost" href="#/" data-scroll="evalForm">${free.cta || 'Score my account'}</a>
           </div>
           <div class="tier dark ${cur('growth_plan') ? 'cur' : ''}">
-            <div class="th"><span class="n">${growth.name || 'Growth Plan'}</span><span class="tag act">${cur('growth_plan') ? 'YOUR PLAN' : 'MOST POPULAR'}</span></div>
-            <div class="price"><span class="p">$${annual ? yr(growth) : growth.monthlyPrice}</span><span class="per">${annual ? '/ year' : '/ month'}</span></div>
-            <div class="note">${growthLine ? raw(h`<span class="promoline">${promoState.code}: ${growthLine}</span>`) : annual ? 'Two and a bit months free' : `Or $${yr(growth)} a year — ${Math.round(disc * 100)}% off`}</div>
-            <div class="feats">${raw((growth.features || []).map(f => h`<div>${f}</div>`).join(''))}</div>
-            <button type="button" class="btn" data-subscribe="growth_plan" ${cur('growth_plan') ? 'disabled' : ''}>${cur('growth_plan') ? 'Current plan' : 'Unlock the plan'}</button>
-            <div class="fine center">Cancel anytime. Keep the report either way.${SHIPPED ? raw(' · <a href="#/report/sample">See a full report</a>') : ''}</div>
+            <div class="th"><span class="n">${growth.name || 'Growth'}</span><span class="tag act">${cur('growth_plan') ? 'YOUR PLAN' : 'MOST POPULAR'}</span></div>
+            <div class="price"><span class="p">$${gPrice}</span><span class="per">${annual ? '/ year' : '/ month'}</span>${fd && gPrice !== gList ? raw(h`<span class="was">$${gList}</span>`) : ''}</div>
+            <div class="note">${growthLine ? raw(h`<span class="promoline">${promoState.code}: ${growthLine}</span>`) : fd ? `Founders price · ${fmtN(fd.left)} spots left` : annual ? 'Two months free' : `Or $${yr(growth)} a year — 2 months free`}</div>
+            ${raw(col(growth, h`<div class="fine">${limLine('growth_plan')}</div>`))}
+            <button type="button" class="btn" data-subscribe="growth_plan" ${cur('growth_plan') ? 'disabled' : ''}>${cur('growth_plan') ? 'Current plan' : (growth.cta || 'Start Growth')}</button>
+            <div class="fine center">Cancel in two clicks. Keep the report either way.${SHIPPED ? raw(' · <a href="#/report/sample">See a full report</a>') : ''}</div>
           </div>
-          <div class="side">
-            ${pro ? raw(h`<div class="card procard ${proOpen ? 'open' : ''}">
-              <button type="button" class="prohead" data-expand><div><div class="n">${pro.name}</div><div class="note">$${annual ? yr(pro) + '/yr' : pro.monthlyPrice + '/mo'} · all platforms together</div></div><span class="caret">${proOpen ? '–' : '+'}</span></button>
-              ${proOpen ? raw(h`<div class="probody"><div class="feats">${raw((pro.features || []).map(f => h`<div>${f}</div>`).join(''))}</div><button type="button" class="btn ghost block" data-subscribe="growth_plan_pro" ${cur('growth_plan_pro') ? 'disabled' : ''}>${cur('growth_plan_pro') ? 'Current plan' : 'Choose Pro'}</button></div>`) : ''}
-            </div>`) : ''}
-            ${raw((pricing.one_time || []).map(o => h`<div class="card tier once"><div class="th"><span class="n">${o.name}</span><span class="tag fair">ONE-TIME</span></div><div class="price"><span class="p">$${o.price}</span><span class="per">once</span></div><div class="note">${o.description}</div><div class="feats">${raw((o.features || []).map(f => h`<div>${f}</div>`).join(''))}</div>${(o.not_included || []).length ? raw(h`<div class="notfeats"><div class="l">Not included</div>${raw(o.not_included.map(f => h`<div>${f}</div>`).join(''))}</div>`) : ''}<a class="btn ghost" href="${token() ? '#/reports' : '#/'}" ${token() ? '' : raw('data-scroll="evalForm"')}>${token() ? 'Pick a report to unlock' : 'Score first, then unlock'}</a></div>`).join(''))}
-            ${(CFG.testimonials || []).length ? raw((CFG.testimonials || []).slice(0, 1).map(t => h`<div class="quote">
-              <p class="q">“${t.quote}”</p>
-              <div class="who"><span class="av"></span><div><div class="nm">${t.name}</div><div class="hd">${t.meta || ''}</div></div></div>
-            </div>`).join('')) : ''}
-          </div>
+          ${pro ? raw(h`<div class="card tier procard ${proOpen ? 'open' : ''} ${cur('growth_plan_pro') ? 'cur' : ''}">
+            <button type="button" class="prohead" data-expand><div><div class="n">${pro.name}</div><div class="price"><span class="p">$${annual ? yr(pro) : pro.monthlyPrice}</span><span class="per">${annual ? '/ year' : '/ month'}</span></div><div class="note">${pro.description || ''}</div></div><span class="caret">${proOpen ? '−' : '+'}</span></button>
+            <div class="probody">${raw(col(pro, h`<div class="fine">${limLine('growth_plan_pro')}</div>`))}<button type="button" class="btn ghost block" data-subscribe="growth_plan_pro" ${cur('growth_plan_pro') ? 'disabled' : ''}>${cur('growth_plan_pro') ? 'Current plan' : (pro.cta || 'Start Pro')}</button></div>
+          </div>`) : ''}
         </div>
+        ${(pricing.one_time || []).length ? raw((pricing.one_time || []).map(o => h`<div class="card tier once"><div class="th"><span class="n">${o.name}</span><span class="tag fair">ONE-TIME</span></div><div class="price"><span class="p">$${o.price}</span><span class="per">once</span></div><div class="note">${o.description}</div><div class="feats">${raw((o.features || []).map(f => h`<div>${f}</div>`).join(''))}</div><a class="btn ghost" href="#/" data-scroll="evalForm">${o.cta}</a></div>`).join('')) : ''}
+        ${(CFG.testimonials || []).length ? raw((CFG.testimonials || []).slice(0, 1).map(t => h`<div class="quote">
+          <p class="q">“${t.quote}”</p>
+          <div class="who"><span class="av"></span><div><div class="nm">${t.name}</div><div class="hd">${t.meta || ''}</div></div></div>
+        </div>`).join('')) : ''}
         <div class="promobox" id="promoBox">${pcode && !promoState.pending && promoState.checked_for === 'growth_plan:' + billing
           ? raw(h`<span>Code <b>${pcode}</b> applied — ${promoState.description}.</span> <a href="#" data-promo="clear">Remove</a>`)
-          : raw(h`<a href="#" data-promo="open">${pcode ? `Apply code ${pcode}` : 'Have a code?'}</a><form id="promoForm" ${pcode ? '' : 'hidden'}><input type="text" name="code" placeholder="CODE" autocomplete="off" autocapitalize="characters" value="${pcode || ''}"><button class="btn dark sm" type="submit">Apply</button><span class="fine" id="promoMsg"></span></form>`)}</div>
-        <div class="pfoot"><div>All tiers keep your report history. Cancel in two clicks.</div><div>${pricing.refund || 'Not useful in the first 7 days? Reply to any email and we refund it.'}${supportEmail() ? raw(h` Or write to <a href="mailto:${supportEmail()}">${supportEmail()}</a>.`) : ''}</div><div class="fine">Business accounts are priced separately — $39 and $99. <a href="#/business">For businesses →</a></div></div>
+          : raw(h`<a href="#" data-promo="open">${pcode ? `Apply code ${pcode}` : 'Have a code?'}</a><form id="promoForm" ${pcode ? '' : 'hidden'}><input type="text" name="code" placeholder="CODE" autocomplete="off" autocapitalize="characters" maxlength="24"><button class="btn ghost sm" type="submit">Apply</button><span class="fine" id="promoMsg"></span></form>`)}</div>
+        <div class="pfoot"><div>All tiers keep your report history. Cancel in two clicks. <a href="#/business">Business pricing →</a></div><div>${pricing.refund || 'Not useful in the first 7 days? Reply to any email and we refund it.'}${supportEmail() ? raw(h` Or write to <a href="mailto:${supportEmail()}">${supportEmail()}</a>.`) : ''}</div></div>
       </div></div>${raw(footer())}`;
       $view.querySelectorAll('[data-billing]').forEach(b => b.addEventListener('click', () => { billing = b.dataset.billing; sset('sc_billing', billing); render(); }));
       $view.querySelector('[data-expand]')?.addEventListener('click', () => { sset('sc_pro_open', !proOpen); render(); });
@@ -938,7 +1244,7 @@
     const next = sget('sc_next', '#/');
     $view.innerHTML = h`<div class="wrap"><div class="authwrap"><div class="brandname">Scalecraft</div>
       ${sget('sc_limit_msg', null) ? raw(h`<div class="notice" style="margin-top:16px">${sget('sc_limit_msg', '')}</div>`) : ''}
-      <form class="card lightform" id="signinForm" novalidate><h2>Sign in</h2>
+      <form class="card lightform" id="signinForm" novalidate><h1>Sign in</h1>
         <div class="field"><label for="siEmail">Email</label><input id="siEmail" type="email" name="email" autocomplete="email" placeholder="you@email.com" value="${sget('sc_form', {}).email || ''}"></div>
         <div class="field"><div class="lblrow"><label for="siPass">Password</label><a href="#" data-action="forgot">Forgot?</a></div><input id="siPass" type="password" name="password" autocomplete="current-password" placeholder="••••••••••"></div>
         <div class="form-error" id="signinError" hidden></div>
@@ -963,11 +1269,13 @@
     renderHeader('signup');
     const next = sget('sc_next', '#/');
     $view.innerHTML = h`<div class="wrap"><div class="authwrap"><div class="brandname">Scalecraft</div>
-      <form class="card lightform" id="signupForm" novalidate><h2>Create account</h2>
+      <form class="card lightform" id="signupForm" novalidate><h1>Create account</h1>
         <div class="field"><label for="suName">Name or handle</label><input id="suName" type="text" name="company_name" placeholder="@yourhandle" autocapitalize="none"></div>
         <div class="field"><label for="suEmail">Email</label><input id="suEmail" type="email" name="email" autocomplete="email" placeholder="you@email.com" value="${sget('sc_form', {}).email || ''}"></div>
         <div class="field"><label for="suPass">Password</label><input id="suPass" type="password" name="password" autocomplete="new-password" placeholder="At least 8 characters"></div>
         <div class="field"><label for="suPass2">Confirm password</label><input id="suPass2" type="password" name="password_confirm" autocomplete="new-password" placeholder="••••••••••"></div>
+        <div class="field"><label for="suNiche">Your niche</label><div class="selwrap"><select id="suNiche" name="niche">${raw(NICHES.map(([k, n]) => h`<option value="${k}" ${k === (sget('sc_form', {}).category || 'fitness_creator') ? 'selected' : ''}>${n}</option>`).join(''))}</select></div></div>
+        <label class="check"><input type="checkbox" name="is_business" ${sget('sc_form', {}).is_business ? 'checked' : ''}> This is a business account</label>
         <label class="check"><input type="checkbox" name="consent"> I agree to the <a href="#/legal/terms">Terms</a> and <a href="#/legal/privacy">Privacy Policy</a>.</label>
         <div class="form-error" id="signupError" hidden></div>
         <button class="btn" type="submit">Create account</button>
@@ -983,7 +1291,7 @@
       if (!form.consent.checked) { err.textContent = 'Please agree to the Terms and Privacy Policy.'; err.hidden = false; return; }
       err.hidden = true; const btn = form.querySelector('button[type=submit]'); btn.disabled = true; btn.textContent = 'Creating…';
       try {
-        const res = await api('/auth/signup', { method: 'POST', body: JSON.stringify({ email, password: pass, company_name: name || null }) }, { allow401: true });
+        const res = await api('/auth/signup', { method: 'POST', body: JSON.stringify({ email, password: pass, ...(name ? { company_name: name } : {}), is_business: !!form.is_business?.checked, niche: form.niche?.value || undefined }) }, { allow401: true });
         const t = res.token || res.access_token; if (!t) throw new Error('No token in response');
         setToken(t); sessionStorage.removeItem('sc_next');
         const pendingUnlock = sget('sc_unlock_once', null);
@@ -1003,23 +1311,43 @@
     renderHeader('reports');
     if (!token()) { sset('sc_next', '#/reports'); go('#/signin'); return; }
     $view.innerHTML = h`<div class="center-msg">Loading your reports…</div>`;
-    let list, subn = null;
-    try { [list, subn] = await Promise.all([api('/account/reports'), api('/account/subscription-status').catch(() => null)]); } catch (e) { if (e.status === 401) return; $view.innerHTML = h`<div class="center-msg"><h2>Couldn’t load reports.</h2>${e.message}</div>`; return; }
+    let list, subn = null, refs = null, me;
+    try { [list, subn, refs, me] = await Promise.all([api('/account/reports'), api('/account/subscription-status').catch(() => null), api('/account/referrals').catch(() => null), api('/auth/me').catch(() => null)]); } catch (e) { if (e.status === 401) return; $view.innerHTML = h`<div class="center-msg"><h2>Couldn’t load reports.</h2>${e.message}</div>`; return; }
+    // Email preferences (spec 1.6): four toggles + pause all. Receipts, report-ready and password emails always send.
+    const PREF_LABELS = [['weekly_score', 'Weekly score', 'Your re-score and what changed'], ['monday_move', 'Plan check-ins and Monday move', 'Day-30/60 check-ins, the week\'s move'], ['post_reviews', 'Post reviews', 'Each new post, reviewed 48 hours in'], ['milestones', 'Milestones', 'Rank-ups and personal records'], ['product_news', 'Product news', 'What\'s new, occasionally']];
+    const emailPrefsHTML = prefs => {
+      const p = prefs || {};
+      return h`<div class="emailprefs"><div class="n">Email</div>
+        <label class="pausetog master"><input type="checkbox" data-pref="paused" ${p.paused ? 'checked' : ''}> Pause everything except receipts, report-ready and password emails</label>
+        <div class="prefgrid ${p.paused ? 'off' : ''}">${raw(PREF_LABELS.map(([k, t, d]) => h`<label class="pref"><input type="checkbox" data-pref="${k}" ${p[k] !== false ? 'checked' : ''} ${p.paused ? 'disabled' : ''}><span><b>${t}</b><small>${d}</small></span></label>`).join(''))}</div></div>`;
+    };
     const planCard = () => {
       if (!subn) return '';
       const free = subn.status === 'free';
       const pending = subn.status === 'cancel_pending';
-      return h`<div class="card plancard ${pending ? 'pending' : ''}"><div class="t"><div class="n">Your plan</div><h2>${subn.tier_name || 'Free Snapshot'}${free ? '' : raw(h` <span class="pr">· $${subn.monthly_price}/mo</span>`)}</h2>
-        <p>${free ? 'One free score per account. The Growth Plan writes the whole 90 days and re-scores you weekly.' : pending ? `Cancelled. You keep everything until ${fmtDate(subn.cancel_at)}, then the weekly refresh stops. Your reports stay.` : subn.billing_period_end ? `Renews ${fmtDate(subn.billing_period_end)}. Cancel any time — you keep the plan to the end of the period and every report after.` : 'Cancel any time — you keep the plan to the end of the period and every report after.'}</p></div>
-        <div class="acts">${free ? raw(h`<a class="btn" href="#/pricing">See the plan</a>`) : pending ? raw(h`<button type="button" class="btn green" data-action="resume-plan">Resume the plan</button>`) : raw(h`<button type="button" class="btn ghost" data-action="cancel-plan">Cancel plan</button>`)}</div>
-        ${free ? '' : raw(h`<label class="pausetog"><input type="checkbox" data-action="email-pause" ${subn.email_paused ? 'checked' : ''}> Pause check-in and score emails${subn.email_paused ? ' — paused' : ''}<span class="fine">Report-ready and password emails still send.</span></label>`)}</div>`;
+      const paused = subn.status === 'paused';
+      const maint = subn.current_tier === 'maintenance';
+      const shown = subn.price_cents != null && !free ? (subn.price_cents / 100) : subn.monthly_price;
+      const downg = subn.status === 'downgrade_pending';
+      return h`<div class="card plancard ${pending ? 'pending' : ''}"><div class="t"><div class="n">Your plan${subn.founder ? raw(h` <span class="tag act founder">FOUNDER</span>`) : ''}</div><h2>${subn.tier_name || 'Free Snapshot'}${free ? '' : raw(h` <span class="pr">· $${shown}${subn.billing_cycle === 'annual' ? '/yr' : '/mo'}${subn.founder ? ' locked' : ''}</span>`)}</h2>${downg ? raw(h`<p class="fine">Moving to ${subn.pending_tier === 'maintenance' ? 'Maintenance' : subn.pending_tier === 'growth_plan' ? 'Growth' : subn.pending_tier} on ${fmtDate(subn.pending_tier_at)} — everything you have stays until then, and Pro data is kept if you come back.</p>`) : ''}
+        <p>${free ? 'One free Snapshot per handle. The Growth Plan writes the whole 90 days and re-scores you every week.' : paused ? `Paused until ${fmtDate(subn.paused_until)}. Nothing is charged, nothing runs, and your history and streak are kept exactly as they are. Resume any time.` : maint ? 'Weekly rescore and score history only. Switch back whenever you want the plan, Monday moves and post writing again.' : pending ? `Cancelled. You keep everything until ${fmtDate(subn.cancel_at)}, then the weekly refresh stops. Your reports stay.` : subn.billing_period_end ? `Renews ${fmtDate(subn.billing_period_end)}. Cancel any time — you keep the plan to the end of the period and every report after.` : 'Cancel any time — you keep the plan to the end of the period and every report after.'}</p></div>
+        <div class="acts">${free ? raw(h`<a class="btn" href="#/pricing">See the plan</a>`) : paused ? raw(h`<button type="button" class="btn green" data-action="unpause-plan">Resume now</button>`) : pending ? raw(h`<button type="button" class="btn green" data-action="resume-plan">Resume the plan</button>`) : downg ? raw(h`<button type="button" class="btn green" data-action="keep-plan">Keep ${subn.tier_name || 'my plan'}</button><button type="button" class="btn ghost" data-action="cancel-plan">Cancel plan</button>`) : maint ? raw(h`<button type="button" class="btn" data-action="switch-growth">Back to the Growth Plan</button><button type="button" class="btn ghost" data-action="cancel-plan">Cancel</button>`) : raw(h`<button type="button" class="btn ghost" data-action="cancel-plan">Cancel plan</button>`)}</div>
+        ${raw(emailPrefsHTML(subn.email_prefs))}</div>`;
     };
     const reports = (list.reports || []).map(r => ({ id: r.reportId || r.report_id, tier: r.tier, at: r.generatedAt || r.generated_at, handle: r.business?.handle, platform: r.business?.platform, category: r.business?.category, overall: r.reportBody?.scores?.overall ?? null, known: r.reportBody?.scores?.niche_known !== false })).sort((a, b) => b.at - a.at);
     const byHandle = {}; for (const r of reports) (byHandle[`${r.platform}:${r.handle}`] ||= []).push(r);
+    // Goal progress reads the latest report; use the session copy when the report page cached it, else fetch it once.
+    let latestRep = reports[0] ? sget('sc_report_' + reports[0].id, null) : null;
+    if (reports[0] && !latestRep) { try { latestRep = normalizeReport(await api('/reports/' + encodeURIComponent(reports[0].id)), reports[0].id); } catch { latestRep = null; } }
     const unknownNiches = [...new Set(reports.filter(r => !r.known).map(r => nicheName(r.category)))];
     $view.innerHTML = h`<div class="wrap"><div class="history">
       <div class="ph"><h1>Your reports</h1><a class="btn pillbtn" href="#/" data-scroll="evalForm">Run a new evaluation</a></div>
       ${raw(planCard())}
+      ${raw((() => { const g = me && me.goal ? me.goal : sget('sc_goal', null)?.goal; const t = me && me.goal_target != null ? me.goal_target : sget('sc_goal', null)?.goal_target; const gp = g && latestRep ? goalProgress(g, t, latestRep) : null;
+        return h`<div class="card goalcard" id="goalCard"><div class="t"><div class="n">Your goal</div><h2>${g ? goalLabel(g) : 'Not set yet'}</h2></div>
+          ${gp ? raw(h`<div class="goalbar"><div class="t"><span class="v">${gp.label}</span></div><div class="bar"><div class="fill" style="width:${gp.pct}%"></div></div><div class="fine">${gp.sub}</div></div>`) : g ? raw('<p class="fine">Progress shows once a report is open in this session.</p>') : raw('<p class="fine">Pick one and the plan, Monday moves and post writing lean toward it.</p>')}
+          <div class="goaledit" ${g ? 'hidden' : ''}>${raw(goalPickerHTML(g || null, t || null, latestRep?.business?.followers || 0))}</div>
+          ${g ? raw('<div class="acts"><button type="button" class="btn ghost sm" data-action="edit-goal">Change goal</button></div>') : ''}</div>`; })())}
       ${reports.length ? raw(Object.values(byHandle).map((rs, gi) => { const asc = [...rs].reverse(); const series = asc.map(r => r.overall).filter(v => v != null); const latest = rs[0], first = asc[0]; const delta = series.length > 1 ? latest.overall - first.overall : null;
         return h`<details class="card hgroup" ${gi === 0 ? 'open' : ''}><summary>
             <div class="who"><div class="handle">@${latest.handle}</div><div class="ctx">${platName(latest.platform)} · ${nicheName(latest.category)} · ${rs.length} run${rs.length === 1 ? '' : 's'}</div></div>
@@ -1031,52 +1359,69 @@
         </details>`; }).join(''))
       : raw('<div class="center-msg"><h2>No reports yet.</h2>Run an evaluation while signed in and it will show up here.</div>')}
       ${unknownNiches.length ? raw(h`<div class="fine">Scored against all creators — we don't have enough ${unknownNiches.join(' / ')} accounts yet.</div>`) : ''}
+      ${refs && refs.ref_code ? raw(h`<div class="card refcard"><div class="n">Your referrals</div>
+        <div class="refrow"><div class="stat"><div class="n">${refs.signed_up}</div><div class="l">signed up</div></div><div class="stat"><div class="n">${refs.paid}</div><div class="l">started a plan</div></div>
+          <div class="reflink"><div class="l">Your link — every share card carries it too</div><div class="lk"><code>${refs.link}</code><button type="button" class="btn ghost sm" data-action="copy-ref">Copy</button></div></div></div>
+        <div class="fine">When someone scores their account from your link and later pays, it's counted here. Referral rewards are coming; the count starts now.</div></div>`) : ''}
       <div class="card settings"><div class="n">Settings · your data</div><p>Delete my account and reports — removes your account, every report we've written for you and your score history. Payment records we're required to keep are retained by Stripe.</p><button type="button" class="btn danger" data-action="delete-account">Delete my account</button></div>
     </div></div>${raw(footer())}`;
     $view.querySelector('[data-action=delete-account]').addEventListener('click', () => openDeleteDialog(reports.length));
+    $view.querySelector('[data-action=copy-ref]')?.addEventListener('click', async () => { try { await navigator.clipboard.writeText(refs.link); toast('Link copied.'); } catch { toast(refs.link); } });
+    { const gc = $view.querySelector('#goalCard'); if (gc) { const ed = gc.querySelector('.goaledit'); gc.querySelector('[data-action=edit-goal]')?.addEventListener('click', () => { ed.hidden = false; }); bindGoalPicker(ed, async (goal, target) => { try { const res = await api('/account/goal', { method: 'PUT', body: JSON.stringify({ goal, goal_target: target }) }); sset('sc_goal', { goal: res.goal, goal_target: res.goal_target }); track('goal_set', { goal }); toast('Goal saved.'); viewReports(); } catch (e) { toast('Could not save the goal: ' + e.message); } }); } }
     $view.querySelector('[data-action=cancel-plan]')?.addEventListener('click', () => openCancelDialog(subn));
-    $view.querySelector('[data-action=email-pause]')?.addEventListener('change', async e => {
-      const on = e.currentTarget.checked;
-      try { await api('/account/email/pause', { method: 'POST', body: JSON.stringify({ paused: on }) }); toast(on ? 'Paused. Your plan keeps running.' : 'Emails back on.'); }
+    $view.querySelector('[data-action=keep-plan]')?.addEventListener('click', async e => { e.currentTarget.disabled = true; try { await api('/billing/switch', { method: 'POST', body: JSON.stringify({ tier: subn.current_tier }) }); toast('Kept. Nothing changes at the end of the period.'); viewReports(); } catch (e2) { toast(e2.message); e.currentTarget.disabled = false; } });
+    $view.querySelector('[data-action=unpause-plan]')?.addEventListener('click', async e => { e.currentTarget.disabled = true; try { await api('/billing/unpause', { method: 'POST', body: '{}' }); toast('Resumed. The weekly rescore is back on.'); viewReports(); } catch (e2) { toast(e2.message); e.currentTarget.disabled = false; } });
+    $view.querySelector('[data-action=switch-growth]')?.addEventListener('click', async e => { e.currentTarget.disabled = true; try { await api('/billing/switch', { method: 'POST', body: JSON.stringify({ tier: 'growth_plan' }) }); toast('Back on the Growth Plan.'); viewReports(); } catch (e2) { toast(e2.message); e.currentTarget.disabled = false; } });
+    $view.querySelectorAll('[data-pref]').forEach(cb => cb.addEventListener('change', async e => {
+      const k = e.currentTarget.dataset.pref, on = e.currentTarget.checked;
+      try { const r = await api('/account/email-prefs', { method: 'PUT', body: JSON.stringify({ [k]: on }) }); subn.email_prefs = r.prefs; toast(k === 'paused' ? (on ? 'Paused. Your plan keeps running.' : 'Emails back on.') : 'Saved.'); if (k === 'paused') viewReports(); }
       catch (e2) { if (e2.status === 401) return; toast(e2.message); e.currentTarget.checked = !on; }
-    });
+    }));
     $view.querySelector('[data-action=resume-plan]')?.addEventListener('click', async e => {
       e.currentTarget.disabled = true;
       try { await api('/billing/resume', { method: 'POST', body: '{}' }); toast('Welcome back. The plan carries on.'); viewReports(); }
       catch (e2) { if (e2.status === 401) return; toast(e2.message); e.currentTarget.disabled = false; }
     });
   }
-  // Cancel is one confirm, no retention screens. Reason is optional and only logged.
-  function openCancelDialog(subn) {
+  // Cancel flow (spec 4.1–4.3): first what they'd lose plus pause / maintenance,
+  // then one optional exit question, then the cancel itself.
+  async function openCancelDialog(subn) {
+    let pv = null; try { pv = await api('/billing/cancel-preview'); } catch (e) { if (e.status === 401) return; }
+    const until = (pv && pv.ends_at) || subn?.billing_period_end; const untilTxt = until ? fmtDate(until) : 'the end of this billing period';
+    const lose = (pv && pv.lose) || {};
     const el = document.createElement('div'); el.className = 'sheet center';
-    const until = subn?.billing_period_end ? fmtDate(subn.billing_period_end) : 'the end of this billing period';
-    el.innerHTML = h`<div class="panel dialog" role="dialog" aria-label="Cancel plan">
-      <h3>Cancel the ${subn?.tier_name || 'Growth Plan'}?</h3>
-      <p>You keep everything until ${until} — moves, calendar, competitors, the weekly re-score. After that the plan stops refreshing and you're on the free tier. Every report stays yours.</p>
-      <input type="text" id="cancelWhy" placeholder="Why? (optional — one line)" autocomplete="off" maxlength="200">
+    const losses = [lose.runs > 1 ? `${lose.runs} scores of history since ${fmtShort(lose.first_run)}` : null, lose.streak_weeks ? `a ${lose.streak_weeks}-week streak` : null, lose.next_posts ? `${lose.next_posts} written posts` : null, lose.competitors ? `your competitor set` : null, lose.moves_done ? `${lose.moves_done} moves marked done` : null].filter(Boolean);
+    const stepOffers = () => h`<div class="panel dialog cancelflow" role="dialog" aria-label="Before you cancel">
+      <div class="eb">BEFORE YOU GO</div><h2>Keep what you've built?</h2>
+      ${losses.length ? raw(h`<p>Cancelling stops the weekly rescore. The plan keeps ${raw(losses.map(l => h`<b>${l}</b>`).join(', '))} — on the free tier those stop updating.</p>`) : raw(h`<p>Cancelling stops the weekly rescore. Your reports stay yours.</p>`)}
+      ${pv && pv.pause && subn.current_tier !== 'maintenance' ? raw(h`<div class="offer"><div class="t"><b>Pause instead</b><span>Nothing charged, nothing lost. Your streak is frozen, not reset.</span></div><div class="months">${raw(pv.pause.months.map(m => h`<button type="button" class="btn ghost sm" data-pause="${m}">${m} month${m === 1 ? '' : 's'}</button>`).join(''))}</div></div>`) : ''}
+      ${pv && pv.maintenance && subn.current_tier !== 'maintenance' ? raw(h`<div class="offer"><div class="t"><b>${pv.maintenance.name} · $${pv.maintenance.monthlyPrice}/mo</b><span>${pv.maintenance.description}</span></div><button type="button" class="btn ghost sm" data-switch="maintenance">Switch to ${pv.maintenance.name}</button></div>`) : ''}
+      <div class="row2"><button type="button" class="btn ghost" data-close>Keep my plan</button><button type="button" class="btn danger" data-next>Cancel anyway</button></div></div>`;
+    const stepWhy = () => h`<div class="panel dialog cancelflow" role="dialog" aria-label="Cancel plan">
+      <h2>One question before you go.</h2><p>Optional. It goes to the two of us building this, nowhere else.</p>
+      <div class="reasons">${raw(((pv && pv.reasons) || [['other', 'Other']]).map(([k, l]) => h`<label class="reason"><input type="radio" name="why" value="${k}"><span>${l}</span></label>`).join(''))}</div>
+      <input type="text" id="cancelWhy" placeholder="Anything else? (one line)" autocomplete="off" maxlength="300">
       <div class="row2"><button type="button" class="btn ghost" data-close>Keep my plan</button><button type="button" class="btn danger" data-cancel>Cancel the plan</button></div>
-      <div class="fine center">Changed your mind later? You can resume until ${until}.</div></div>`;
-    document.body.appendChild(el);
-    const close = () => el.remove();
-    el.addEventListener('click', e => { if (e.target === el) close(); });
-    el.querySelector('[data-close]').addEventListener('click', close);
-    el.querySelector('[data-cancel]').addEventListener('click', async e => {
-      e.currentTarget.disabled = true;
-      try { const r = await api('/billing/cancel', { method: 'POST', body: JSON.stringify({ reason: el.querySelector('#cancelWhy').value }) }); close(); toast(r.endsAt ? `Cancelled. Yours until ${fmtDate(r.endsAt)}.` : 'Cancelled.'); viewReports(); }
-      catch (e2) { if (e2.status === 401) return; toast(e2.message); e.currentTarget.disabled = false; }
+      <div class="fine center">You keep everything until ${untilTxt}, and you can resume until then.</div></div>`;
+    el.innerHTML = stepOffers();
+    const close = mountSheet(el, { label: 'Cancel plan' });
+    el.addEventListener('click', async e => {
+      if (e.target.closest('[data-close]')) return close();
+      const p = e.target.closest('[data-pause]'); if (p) { p.disabled = true; try { const r = await api('/billing/pause', { method: 'POST', body: JSON.stringify({ months: Number(p.dataset.pause) }) }); track('pause', { months: r.months }); close(); toast(`Paused until ${fmtDate(r.pausedUntil)}. Resume any time from this page.`); viewReports(); } catch (e2) { toast(e2.message); p.disabled = false; } return; }
+      const sw = e.target.closest('[data-switch]'); if (sw) { sw.disabled = true; try { await api('/billing/switch', { method: 'POST', body: JSON.stringify({ tier: sw.dataset.switch }) }); close(); toast('Switched. The weekly rescore keeps going; the plan is on hold.'); viewReports(); } catch (e2) { toast(e2.message); sw.disabled = false; } return; }
+      if (e.target.closest('[data-next]')) { el.innerHTML = stepWhy(); el.querySelector('input[name=why]')?.focus(); return; }
+      const c = e.target.closest('[data-cancel]'); if (c) { c.disabled = true; const code = el.querySelector('input[name=why]:checked')?.value || null; try { const r = await api('/billing/cancel', { method: 'POST', body: JSON.stringify({ reason_code: code, reason: el.querySelector('#cancelWhy').value }) }); close(); toast(r.endsAt ? `Cancelled. Yours until ${fmtDate(r.endsAt)}.` : 'Cancelled.'); viewReports(); } catch (e2) { if (e2.status === 401) return; toast(e2.message); c.disabled = false; } }
     });
   }
   function openDeleteDialog(n) {
     const el = document.createElement('div'); el.className = 'sheet center';
     el.innerHTML = h`<div class="panel dialog" role="dialog" aria-label="Delete account">
-      <h3>Delete your account and all ${n} report${n === 1 ? '' : 's'}?</h3>
+      <h2>Delete your account and all ${n} report${n === 1 ? '' : 's'}?</h2>
       <p>This can't be undone. Your scores, plans and calendars go with it. If you only want to stop paying, cancel the plan instead and keep the reports.</p>
       <input type="text" id="delConfirm" placeholder="Type DELETE to confirm" autocomplete="off">
       <div class="row2"><button type="button" class="btn ghost" data-close>Keep my account</button><button type="button" class="btn danger" data-del disabled>Delete everything</button></div>
       <div class="fine center">Or <a href="#/pricing">cancel the plan</a> and keep your reports.</div></div>`;
-    document.body.appendChild(el);
-    const close = () => el.remove();
-    el.addEventListener('click', e => { if (e.target === el) close(); });
+    const close = mountSheet(el, { label: 'Delete account' });
     el.querySelector('[data-close]').addEventListener('click', close);
     el.querySelector('#delConfirm').addEventListener('input', e => { el.querySelector('[data-del]').disabled = e.target.value.trim() !== 'DELETE'; });
     el.querySelector('[data-del]').addEventListener('click', async () => {
@@ -1090,7 +1435,7 @@
     renderHeader('signin');
     const last = sget('sc_forgot_email', '');
     $view.innerHTML = h`<div class="wrap"><div class="authwrap"><div class="brandname">Scalecraft</div><form class="card lightform" id="forgotForm" novalidate>
-        <h2>Reset your password</h2>
+        <h1>Reset your password</h1>
         <p class="sub">Type the email you signed up with. If it has an account, we'll send a link that works once, for an hour.</p>
         <div class="field"><label for="fgEmail">Email</label><input id="fgEmail" type="email" name="email" autocomplete="email" value="${last}" placeholder="you@example.com"></div>
         <button class="btn block" type="submit">Send the link</button>
@@ -1134,13 +1479,16 @@
     if (!token()) { sset('sc_next', '#/admin'); go('#/signin'); return; }
     $view.innerHTML = h`<div class="center-msg">Loading…</div>`;
     let ov, reports, failed;
-    try { [ov, reports, failed] = await Promise.all([api('/admin/overview'), api('/admin/reports?limit=50'), api('/admin/failed-jobs?limit=30')]); }
+    let funnel = null, costs = null;
+    try { [ov, reports, failed, funnel, costs] = await Promise.all([api('/admin/overview'), api('/admin/reports?limit=50'), api('/admin/failed-jobs?limit=30'), api('/admin/funnel?days=30').catch(() => null), api('/admin/costs?days=30').catch(() => null)]); }
     catch (e) {
       if (e.status === 401) return;
       if (e.status === 403 || e.status === 404) { lset('sc_admin', false); $view.innerHTML = h`<div class="center-msg"><h2>This account isn't an admin.</h2>Add your email to <code>ADMIN_EMAILS</code> on the server, then sign in again.</div>`; return; }
       $view.innerHTML = h`<div class="center-msg"><h2>Couldn't load admin.</h2>${e.message}</div>`; return;
     }
     lset('sc_admin', true);
+    const roastRej = await api('/admin/roast-rejections?limit=30').then(r => r.rejections || []).catch(() => []);
+    const sources = await api('/admin/sources').then(r => r.sources || []).catch(() => []);
     const t = ov.today, p = ov.people, caps = ov.caps;
     const spend = (t.free_scores + t.paid_runs + t.competitor_pulls) * ov.cost.instagram;
     const tierName = k => ({ social_snapshot: 'Free', growth_plan: 'Growth Plan', growth_plan_pro: 'Pro', business_growth: 'Business Growth', business_evaluator: 'Business Evaluator', agency: 'Agency' }[k] || k);
@@ -1172,6 +1520,23 @@
         ${ov.baselines ? raw(h`<div class="fine">Baselines: ${ov.baselines.total} accounts across ${Object.keys(ov.baselines.by_category || {}).length} niches.</div>`) : ''}
       </section>
 
+      ${funnel ? raw(h`<section class="card"><h2>Funnel <span class="fine">last ${funnel.days} days · distinct people</span></h2>
+        <div class="funnel">${raw(funnel.steps.map(st => h`<div class="fstep"><div class="n">${st.actors}</div><div class="l">${st.name.replace(/_/g, ' ')}</div>${st.from_previous != null ? raw(h`<div class="c">${Math.round(st.from_previous * 100)}% of previous</div>`) : raw('<div class="c">&nbsp;</div>')}</div>`).join(''))}</div>
+        <div class="fine">${Object.entries(funnel.other || {}).filter(([, v]) => v.actors).map(([k, v]) => `${k.replace(/_/g, ' ')} ${v.actors}`).join(' · ') || 'No other events yet.'}${funnel.retention_month_two?.cohort ? ` · Month-two retention: ${funnel.retention_month_two.retained} of ${funnel.retention_month_two.cohort} still paying (${Math.round(funnel.retention_month_two.rate * 100)}%)` : ' · Month-two retention: no cohort yet (needs subscribers 30+ days old)'}</div>
+        ${funnel.testing ? raw(h`<div class="alist" style="margin-top:10px"><div class="arow head"><span></span><span class="h">price variant</span><span class="t">saw pricing · paid</span><span class="e">conversion</span><span class="n">revenue</span></div>${raw((funnel.variants || []).map(v => { const b = (funnel.by_variant || {})[v.name] || { pricing_viewed: 0, subscribe: 0, unlock: 0, revenue_cents: 0 }; const paidN = b.subscribe + b.unlock; return h`<div class="arow"><span></span><span class="h">${v.name} · $${v.growth_plan / 100}/mo · $${v.plan_unlock / 100} once</span><span class="t">${b.pricing_viewed} · ${paidN}</span><span class="e">${b.pricing_viewed ? Math.round(paidN / b.pricing_viewed * 100) + '%' : '—'}</span><span class="n">${money(b.revenue_cents / 100)}</span></div>`; }).join(''))}</div>`) : ''}
+        ${Object.keys(funnel.by_ref || {}).length ? raw(h`<div class="alist" style="margin-top:10px">${raw(Object.entries(funnel.by_ref).map(([ref, v]) => h`<div class="arow promo"><span class="h">ref ${ref}</span><span class="t">${v.evaluate_started || 0} scored · ${v.signup || 0} signed up · ${v.subscribe || 0} paid</span><span class="e"></span><span class="n"></span></div>`).join(''))}</div>`) : ''}
+      </section>`) : ''}
+
+      ${costs ? raw(h`<section class="card"><h2>Costs <span class="fine">last ${costs.days} days · measured, not estimated</span></h2>
+        <div class="stats">
+          ${raw(stat(money(costs.total_cents / 100), 'total spend', `${costs.by_kind.map(k => `${k.key} ${money(k.cents / 100)}`).join(' · ') || '—'}`))}
+          ${raw(stat(money(costs.avg_cents_per_report / 100), 'avg per report', 'scrape + every LLM call'))}
+          ${raw(costs.by_feature.slice(0, 4).map(f => stat(money(f.cents / 100), f.key.replace(/_/g, ' '), `${f.n} calls`)).join(''))}
+        </div>
+        <div class="fine">By model: ${costs.by_model.filter(m => m.key).map(m => `${m.key} ${money(m.cents / 100)} (${fmtN(m.quantity)} ${/apify/.test(m.key) ? 'units' : 'tokens'})`).join(' · ') || 'nothing yet'}</div>
+        ${costs.users.length ? raw(h`<div class="alist" style="margin-top:10px"><div class="arow head"><span></span><span class="h">account</span><span class="t">cost · reports</span><span class="e">revenue</span><span class="n">margin</span></div>${raw(costs.users.slice(0, 15).map(u => { const m = u.revenue_cents - u.cost_cents; return h`<div class="arow"><span></span><span class="h">${u.email || u.account_id}</span><span class="t">${money(u.cost_cents / 100)} · ${u.reports} report${u.reports === 1 ? '' : 's'}</span><span class="e">${money(u.revenue_cents / 100)}</span><span class="n ${m < 0 ? 'neg' : ''}">${m < 0 ? '−' : ''}${money(Math.abs(m) / 100)}</span></div>`; }).join(''))}</div>`) : ''}
+      </section>`) : ''}
+
       <section class="card"><h2>Look up an account</h2>
         <form class="compform" id="adminFind"><input type="text" name="q" placeholder="email or @handle" autocomplete="off"><button class="btn dark" type="submit">Find</button></form>
         <div id="adminAccount"></div>
@@ -1193,15 +1558,33 @@
         <div class="fine">Share as a link: <code>${location.origin}/?promo=CODE</code> — it applies itself.</div>
       </section>
 
+      <section class="card"><h2>Phase 2 waitlist <span class="fine">accounts and reports flagged as a business</span></h2>
+        <div id="bizList" class="fine">Loading…</div>
+        <a class="btn ghost sm" id="bizCsv" href="#" style="margin-top:10px">Download CSV</a>
+      </section>
+
       <section class="card"><h2>Recent reports <span class="fine">last ${reports.reports.length}</span></h2>
         <div class="alist">${raw(reports.reports.map(reportRow).join('') || '<div class="fine">None yet.</div>')}</div>
       </section>
 
+      <section class="card"><h2>Sources <span class="fine">signups and paid accounts by marketing source (utm / src)</span></h2>
+        ${sources.length ? raw(h`<div class="tbl"><table><thead><tr><th>Source</th><th>Campaign</th><th>Signups</th><th>Paid</th></tr></thead><tbody>${raw(sources.map(r => h`<tr><td>${r.source}</td><td>${r.campaign || '—'}</td><td>${r.signups}</td><td>${r.paid}</td></tr>`).join(''))}</tbody></table></div>`) : raw('<p class="fine">No tagged signups yet. Links from the marketing site carry utm_* or ?src= — see docs/MARKETING_SITE.md.</p>')}
+      </section>
+      <section class="card"><h2>Rejected roasts <span class="fine">failed a guardrail · for review</span></h2>
+        ${roastRej.length ? raw(h`<div class="tbl"><table><thead><tr><th>When</th><th>Report</th><th>Heat</th><th>Reason</th><th>Flagged</th><th>Lines</th></tr></thead><tbody>${raw(roastRej.map(r => h`<tr><td>${fmtShort(r.created_at)}</td><td class="mono">${(r.report_id || '').slice(0, 12)}</td><td>${r.heat || ''}</td><td>${r.reason}</td><td>${r.flagged || ''}</td><td class="wrap">${(() => { try { return JSON.parse(r.text || '[]').map(l => l.text || l).join(' · ').slice(0, 300); } catch { return String(r.text || '').slice(0, 300); } })()}</td></tr>`).join(''))}</tbody></table></div>`) : raw('<p class="fine">None yet.</p>')}
+      </section>
       <section class="card"><h2>Failed jobs <span class="fine">last 24h and older</span></h2>
         <div class="alist">${raw(failed.jobs.map(j => h`<div class="arow fail"><span>${fmtDate(j.created_at)}</span><span class="h">@${j.handle || '—'}</span><span class="t">${platName(j.platform)} · ${tierName(j.tier)} · ${j.stage || ''}</span><span class="e">${j.email || ''}</span><span class="err">${j.error || ''}</span></div>`).join('') || '<div class="fine">No failures.</div>')}</div>
       </section>
     </div></div>${raw(footer())}`;
 
+    // business-flagged accounts (phase 2 waitlist)
+    api('/admin/business-accounts').then(d => { const el = $view.querySelector('#bizList'); el.textContent = `${d.users.length} account${d.users.length === 1 ? '' : 's'} · ${d.reports.length} report${d.reports.length === 1 ? '' : 's'} flagged`; }).catch(() => { });
+    $view.querySelector('#bizCsv').addEventListener('click', async e => {
+      e.preventDefault();
+      try { const res = await fetch(API + '/admin/business-accounts?format=csv', { headers: { Authorization: 'Bearer ' + token() } }); const blob = await res.blob(); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'business-accounts.csv'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); }
+      catch (e2) { toast(e2.message); }
+    });
     // promo list + create
     const kindLabel = p => p.kind === 'free_months' ? `${p.value} month${p.value === 1 ? '' : 's'} free` : p.kind === 'percent' ? `${p.value}% off` : p.kind === 'amount' ? `$${(p.value / 100).toFixed(p.value % 100 ? 2 : 0)} off` : 'free 60-day plan';
     const applyLabel = a => ({ any: 'any', growth_plan: 'Growth Plan', plan_unlock: '60-day' }[a] || a);
@@ -1256,18 +1639,22 @@
   // ------------------------------------------------------------ how the score works (batch 3)
   function viewHow() {
     renderHeader('how');
+    const minN = (LEVELS && LEVELS.min_n) || 10;
     const dims = [
-      ['Posting Consistency', 1, 'How often you post and how long you go quiet. We count your posts across the window, work out your weekly rate against a target of four to five, and look at your longest gap and how recently you last posted.', ['cadence 60', 'gaps 25', 'recency 15'], 'posting on fixed days, and never leaving a gap longer than a week.'],
-      ['Content Mix', 2, 'Whether you use enough video and enough different formats. We read the format of each post in the window, the share that is video against your niche target, and how much variety there is between reels, carousels and stills.', ['video share 50', 'format variety 25', 'caption depth 25'], 'adding a second format to a feed that only does one thing.'],
-      ['Engagement Quality', 3, 'Not just likes. We take likes and comments against your follower count for an engagement rate, measured against your niche goal, and then look at how much of that is comments rather than taps.', ['engagement rate 60', 'comment share 25', 'video reach 15'], 'captions that ask something answerable, and replying in the first hour.'],
-      ['Profile Clarity', 4, 'Whether a stranger knows what you do in five seconds. We read your bio for what you’re about, a working link and whether that link leads somewhere useful, a clear next step, and story highlights.', ['bio 25', 'link 20', 'link goes somewhere 25', 'next step 15', 'highlights 15'], 'one line saying who it’s for, and a link that goes straight to the thing.']
+      ['Posting Consistency', 1, 'Three parts. Cadence: your posts per week over the window against your niche’s target — full marks at the target, zero at none. Gaps: your longest silence — full marks at or under the niche’s gap limit (7 days for most creator niches), zero at four times it. Recency: days since your last post — full marks within a week, zero past 30 days.', ['cadence 60', 'gaps 25', 'recency 15'], 'posting on fixed days, and never leaving a gap longer than a week.'],
+      ['Content Mix', 2, 'On Instagram: Mix — how close your share of video is to the niche target (60% for travel, 90% for comedy and gaming, for example). Diversity — whether you use reels, carousels and stills, or only one. Substance — average caption length and how many captions are just a schedule or a promo. On TikTok: Variety of video kinds (short, standard, long, slideshow) 45, original sound 20, substance 35.', ['video share 50', 'format variety 25', 'caption depth 25'], 'adding a second format to a feed that only does one thing.'],
+      ['Engagement Quality', 3, 'On Instagram: Rate — likes plus comments per post against your follower count, against the niche target (roughly 2–4% depending on niche). Conversation — the share of interactions that are comments rather than likes. Reach — video views per post relative to your followers; neutral if you post no video. On TikTok: reach (plays per video vs followers) 40, keeping (shares and saves as a share of views) 35, conversation 25.', ['engagement rate 60', 'comment share 25', 'video reach 15'], 'captions that ask something answerable, and replying in the first hour.'],
+      ['Profile Clarity', 4, 'For creators, five checks with fixed points: a bio that says what you’re about, a link, a link that goes somewhere worth going (a channel, a shop, a newsletter, a booking page), a next step in the bio, and story highlights (not counted on TikTok). For businesses the checks are location, price or offer, a next step, a link, a booking link and highlights.', ['bio 25', 'link 20', 'link goes somewhere 25', 'next step 15', 'highlights 15'], 'one line saying who it’s for, and a link that goes straight to the thing.']
     ];
     $view.innerHTML = h`<div class="wrap"><div class="howpage">
       <h1>How the score works</h1>
-      <p class="lede">Your score out of 100 is the plain average of four dimensions. Nothing is weighted secretly at the top level — if one number is low, you can see exactly which one and why. Under 50 is Weak, 50 to 69 is Fair, 70 and up is Strong.</p>
+      <p class="lede">Your score is the plain average of four dimensions, each 0–100. Nothing is weighted secretly at the top: if the score is 61, you can see which of the four pulled it there. ${LEVELS ? raw(h`${LEVELS.levels.map(l => `${l.name} ${l.min}–${l.max}`).join(' · ')}.`) : 'Under 40 is Rookie, 40–54 Rising, 55–69 Consistent, 70–84 Established, 85+ Elite.'} The report also tags each number Weak, Fair or Strong.</p>
+      <p class="lede sm">The four numbers are computed by fixed rules from your public posts. The writing — the explanations, the moves, the calendar — is done by a language model that receives those numbers and your posts. It never sets or changes a number, and every fact it cites is checked against the data it was given.</p>
+      <div class="cannot"><div class="n">What we read</div><p>Your public profile and your most recent posts (30 on Instagram, fewer if the account has fewer; TikTok videos the same way). For each post: when it went up, its format, the caption, likes, comments and views where the platform shows them. From the profile: your bio, link, follower count and story highlights.</p></div>
       <div class="dimlist">${raw(dims.map(([l, hue, t, chips, moves]) => h`<div class="card dimx bd${hue}"><div class="n">${l}</div><p>${t}</p><div class="chips2">${raw(chips.map(c => h`<span class="pill tone">${c}</span>`).join(''))}</div><p class="mv">What moves it: ${moves}</p></div>`).join(''))}</div>
-      <div class="cannot"><div class="n">What we cannot see</div><p>We read public data only. That means no saves, no reach, no story views, no audience demographics, and nothing from a private account. A report is based on your last 12 posts within the window shown on it. If a number here disagrees with your own analytics, yours is the more complete one — ours is the one a stranger can see.</p></div>
-      <p class="lede sm">Your niche average appears once 20 accounts in that niche are scored. Until then the marker is the all-creator average and the report says so.</p>
+      <div class="cannot"><div class="n">What we cannot see</div><p>We read public data only. That means no saves, no reach, no story views, no audience demographics, and nothing from a private account. A report is based on your most recent public posts — usually 30, fewer on a newer account — within the window shown on it. If a number here disagrees with your own analytics, yours is the more complete one — ours is the one a stranger can see.</p></div>
+      <div class="cannot"><div class="n">Niche targets and the niche average</div><p>Each niche has a target set — posts per week, video share, engagement rate — that the dimensions score against. Those targets are working assumptions until enough accounts are scored to measure them. Separately, the niche average marker on your report is measured: it’s the average score of accounts we’ve scored in your niche, shown once the niche has at least ${minN} scored accounts. Below that the report says the average is pending and scores you against the general creator target. The same rule gates “what’s working in your niche” and the public benchmarks. “Scores higher than X% of accounts” uses the same gate; your history line compares you with you.</p></div>
+      <div class="cannot"><div class="n">What the score is not</div><p>It isn’t a prediction of reach, followers or income. It’s a measurement of habits the platforms reward, from what a stranger can see, plus the plan to change them. A high score with a bad product won’t sell; a low score with a good one leaves growth on the table.</p></div>
     </div></div>${raw(footer())}`;
   }
 
@@ -1358,7 +1745,8 @@
     if (act.dataset.action === 'signout') { e.preventDefault(); setToken(null); toast('Signed out.'); route(); }
     if (act.dataset.action === 'email-report') { e.preventDefault(); toast('This report is already on its way to your inbox.'); }
   });
+  loadLevels();
   window.addEventListener('hashchange', route);
-  if (CFG.useMock) { const b = document.createElement('div'); b.className = 'mockbadge'; b.textContent = 'Sample data'; document.body.appendChild(b); }
+  if (CFG.useMock) { const b = document.createElement('div'); b.className = 'mockbadge'; b.textContent = 'Sample data'; b.setAttribute('aria-hidden', 'true'); document.body.appendChild(b); }
   route();
 })();

@@ -17,6 +17,24 @@
 const geDb = require("./growth_engine_db_select");
 const mailer = require("./mailer");
 const billing = require("./growth_engine_billing");
+const thumbs = require("./growth_engine_thumbs");
+
+// Thumbnails for free reports older than THUMB_FREE_TTL_DAYS (90) are removed
+// and the report's image links cleared; the neutral tile takes over.
+async function cleanupThumbnails() {
+  const days = Number(process.env.THUMB_FREE_TTL_DAYS || 90);
+  const due = await geDb.listReportsForThumbCleanup(Date.now() - days * DAY, 50);
+  let n = 0;
+  for (const r of due) {
+    if (r.thumbPrefix) await thumbs.remove(r.thumbPrefix);
+    const rep = await geDb.getReport(r.reportId); const b = rep?.reportBody || {};
+    for (const p of b.posts || []) p.thumbnail_url = null;
+    for (const d of b.scores?.dimensions || []) for (const e of d.evidence_posts || []) e.thumbnail_url = null;
+    await geDb.patchReportBody(r.reportId, { posts: b.posts || [], scores: b.scores, thumbs_removed: true });
+    n++;
+  }
+  return n;
+}
 
 const DAY = 86400000;
 
@@ -83,11 +101,14 @@ async function sweep(jobQueue) {
       let tier = "social_snapshot";
       try { const ent = await (geDb.getEffectiveEntitlement || geDb.getOrCreateEntitlement)(r.accountId); tier = ent?.currentTier || ent?.current_tier || tier; } catch { /* treat as lapsed */ }
       if (tier === "social_snapshot") { await geDb.updateReportRefreshDue(r.reportId, null); skipped++; continue; }
-      const input = { handle: b.handle, platform: b.platform, category: b.category, email: r.reportBody?.email || null, scheduled: true, refresh_of: r.reportId };
-      const { jobId } = await geDb.createJob(r.accountId, "growth_plan", input);
+      // Paused (spec 4.1): nothing runs; the due date moves past the pause.
+      try { const ent = await geDb.getEffectiveEntitlement(r.accountId); if (ent?.pausedUntil && ent.pausedUntil > Date.now()) { await geDb.updateReportRefreshDue(r.reportId, ent.pausedUntil + 60 * 1000); skipped++; continue; } } catch { /* fine */ }
+      const input = { handle: b.handle, platform: b.platform, category: b.category, email: r.reportBody?.email || null, scheduled: true, refresh_of: r.reportId, tz: r.reportBody?.tz || null };
+      const jobTier = tier === "maintenance" ? "maintenance" : (tier === "growth_plan_pro" || tier === "business_evaluator") ? "growth_plan_pro" : "growth_plan";
+      const { jobId } = await geDb.createJob(r.accountId, jobTier, input);
       // Push the due date forward now so a slow job doesn't get picked up twice.
-      await geDb.updateReportRefreshDue(r.reportId, Date.now() + 7 * 24 * 60 * 60 * 1000);
-      jobQueue.processJob(jobId, r.accountId, "growth_plan", input).catch((err) => console.error(`[Refresh] job ${jobId} failed:`, err.message));
+      await geDb.updateReportRefreshDue(r.reportId, Date.now() + (require("./growth_engine_plans").limitFor(tier, "rescore_days") || 7) * 24 * 60 * 60 * 1000);
+      jobQueue.processJob(jobId, r.accountId, jobTier, input).catch((err) => console.error(`[Refresh] job ${jobId} failed:`, err.message));
       queued++;
     }
   } catch (err) {
@@ -95,8 +116,12 @@ async function sweep(jobQueue) {
   } finally {
     running = false;
   }
-  let emailed = 0;
+  let emailed = 0, cleaned = 0;
   try { emailed = await sendScheduledEmails(); } catch (err) { console.error("[Refresh] scheduled emails failed:", err.message); }
+  try { const n = await require("./growth_engine_monday").sendMondayMoves(); if (n) { emailed += n; console.log(`[Refresh] Monday moves sent: ${n}`); } } catch (err) { console.error("[Refresh] Monday moves failed:", err.message); }
+  try { await require("./growth_engine_post_reviews").checkPaidAccounts(); } catch (err) { console.error("[Refresh] post reviews failed:", err.message); }
+  try { const n = await require("./growth_engine_winback").checkLapsed(jobQueue); if (n) console.log(`[Refresh] win-back rescores queued: ${n}`); } catch (err) { console.error("[Refresh] win-back failed:", err.message); }
+  try { cleaned = await cleanupThumbnails(); if (cleaned) console.log(`[Refresh] removed thumbnails for ${cleaned} old free reports`); } catch (err) { console.error("[Refresh] thumbnail cleanup failed:", err.message); }
   if (queued || skipped || emailed) console.log(`[Refresh] queued ${queued}, skipped ${skipped}, emailed ${emailed} in ${Date.now() - started}ms`);
   return { queued, skipped };
 }
@@ -112,4 +137,4 @@ function start(jobQueue) {
 
 function stop() { if (timer) clearInterval(timer); timer = null; }
 
-module.exports = { start, stop, sweep, sendScheduledEmails };
+module.exports = { start, stop, sweep, sendScheduledEmails, cleanupThumbnails };
