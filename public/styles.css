@@ -871,3 +871,13 @@ p { margin: 0; }
 /* FINDING-005: header nav on phones — 44px hit areas, no orphan wrap */
 .nav a { padding: 11px 0; display: inline-block; }
 @media (max-width: 480px) { .nav { gap: 14px; font-size: 13px; } .nav a[href="#/business"] { display: none; } }
+
+/* FINDING-008: the report reads as layout, not a card mosaic — status tiles in one row, everything else an accordion section */
+.statusrow { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0 0 14px; }
+.statusrow:empty { display: none; }
+.statusrow > .goalbar, .statusrow > .questcard { margin: 0; }
+.statusrow > .questcard { padding: 12px 16px; }
+.statusrow > .questcard h3 { font-size: 16px; }
+.briefcard .body { padding-top: 4px; }
+.reviews .rlist { margin-top: 4px; }
+@media (max-width: 720px) { .statusrow { grid-template-columns: 1fr; } }
