@@ -872,3 +872,4 @@ p { margin: 0; }
   .ctxrow .chip, .ctxrow .chip.note { flex: 0 0 auto; white-space: nowrap; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
   .ctxrow .edit { flex: 0 0 auto; }
 }
+.soonlist { display: contents; }

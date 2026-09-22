@@ -258,7 +258,8 @@
                 <div class="hint" id="bizHint" ${last.is_business ? '' : 'hidden'}>Business plans are coming — you'll get the creator scoring today and a note when the business version is ready.</div></div>
               <div class="chips" role="radiogroup" aria-label="Platform">
                 ${raw(LIVE.map(([k, n]) => h`<button type="button" class="chip ${k === platform ? 'on' : ''}" data-platform="${k}" role="radio" aria-checked="${k === platform}">${n}</button>`).join(''))}
-                ${raw(SOON.map(([k, n]) => h`<button type="button" class="chip soon" data-soon="${k}">${n} · soon</button>`).join(''))}
+                <button type="button" class="chip soon more" data-soon-more aria-expanded="false">More platforms · soon</button>
+                <span class="soonlist" hidden>${raw(SOON.map(([k, n]) => h`<button type="button" class="chip soon" data-soon="${k}">${n} · soon</button>`).join(''))}</span>
               </div>
               <div id="waitSlot"></div>
               <div class="optq"><div class="ql">Your next 90 days <span>optional</span></div>
@@ -300,6 +301,7 @@
     drawShareCard($view.querySelector('#promoCard'), hero, 'story');
 
     const form = $view.querySelector('#evalForm');
+    $view.querySelector('[data-soon-more]')?.addEventListener('click', e => { const b = e.currentTarget; const l = $view.querySelector('.soonlist'); l.hidden = false; b.hidden = true; });
     let chosenPlatform = platform;
     let chosenHorizon = last.horizon || null;
     let chosenBiz = !!last.is_business;
