@@ -21,6 +21,7 @@ let jobQueue = new JobQueue();
   try {
     await jobQueue.start();
     console.log("[Growth Engine] Job queue started");
+    require("../growth_engine_refresh").start(jobQueue);
   } catch (err) {
     console.error("[Growth Engine] Failed to start job queue:", err);
   }
@@ -181,7 +182,7 @@ async function evaluationTierFor(accountId) {
   try {
     const ent = await geDb.getOrCreateEntitlement(accountId);
     const t = ent?.current_tier || ent?.currentTier || "social_snapshot";
-    if (t === "growth_plan" || t === "business_evaluator" || t === "agency") return "growth_plan";
+    if (t && t !== "social_snapshot") return "growth_plan"; // every paid tier runs the plan pipeline today
   } catch (err) {
     console.warn("[Growth Engine] Entitlement lookup failed, defaulting to snapshot:", err.message);
   }
@@ -200,19 +201,45 @@ router.post("/evaluate/social-snapshot", optionalAuth, validateEvaluationRequest
     const accountId = req.user?.id || "demo-account";
     const tier = await evaluationTierFor(accountId);
 
-    // The free Social Snapshot is one per email. Paid accounts are unlimited.
-    if (tier === "social_snapshot") {
-      const limit = Number(process.env.FREE_SNAPSHOTS_PER_EMAIL || 1);
-      const used = await geDb.countFreeSnapshotsByEmail(email);
+    // (2) Paid on-demand runs are metered per day; the weekly refresh is scheduled
+    // and doesn't count. Every run is a fresh Apify pull (cached 24h) plus five
+    // LLM calls, so an unmetered "run again" button is an open tab on the bill.
+    if (tier !== "social_snapshot" && !req.body.scheduled) {
+      const limit = Number(process.env.PAID_RUNS_PER_DAY || 5);
+      const used = await geDb.getUsage(accountId, "eval");
       if (used >= limit) {
+        return res.status(429).json({ error: `You've run ${used} evaluations today. The plan refreshes itself weekly — or try again tomorrow.`, code: "RUN_LIMIT_REACHED", status: 429, used, limit });
+      }
+      await geDb.bumpUsage(accountId, "eval");
+    }
+    // Global free-tier ceiling so a share-card spike can't run up the bill overnight.
+    if (tier === "social_snapshot") {
+      const cap = Number(process.env.FREE_RUNS_PER_DAY_GLOBAL || 500);
+      const used = await geDb.getUsage("__global__", "free_eval");
+      if (used >= cap) {
+        return res.status(503).json({ error: "We've hit today's limit for free scores. Try again tomorrow, or sign in for a plan.", code: "GLOBAL_CAP", status: 503 });
+      }
+      await geDb.bumpUsage("__global__", "free_eval");
+    }
+
+    // The free Snapshot is one per account (handle + platform), not per email —
+    // an email is free to invent, a handle is the thing that costs us money.
+    // If it's already been scored we point at that report instead of a wall.
+    if (tier === "social_snapshot" && process.env.FREE_SNAPSHOTS_PER_EMAIL !== "unlimited") {
+      const existing = await geDb.findFreeSnapshotForHandle(handle, platform);
+      if (existing && existing.reportId) {
         return res.status(402).json({
-          error: "You've used your free evaluation for this email. Sign in and start a Growth Plan for unlimited audits.",
+          error: `@${handle} has already been scored for free. Open that report, or start a Growth Plan to score it again and watch it change.`,
           code: "FREE_LIMIT_REACHED",
           status: 402,
-          used,
-          limit,
+          report_id: existing.reportId,
+          generated_at: existing.generatedAt,
           upgrade_tier: "growth_plan",
         });
+      }
+      if (existing && existing.jobId) {
+        // Same account is being scored right now — hand back that job.
+        return res.json({ job_id: existing.jobId, status: "queued", tier, deduplicated: true });
       }
     }
 
@@ -237,9 +264,12 @@ router.get("/job/:jobId", async (req, res) => {
     const job = await geDb.getJob(req.params.jobId);
     if (!job) return res.status(404).json({ error: "Job not found" });
 
+    const stageMatch = /^(finding|reading|scoring|writing):(\d)$/.exec(job.stage || "");
     const response = {
       status: job.status,
-      stage: job.stage || job.status,
+      stage: stageMatch ? stageMatch[1] : (job.stage || job.status),
+      step: stageMatch ? Number(stageMatch[2]) : (job.status === "running" ? 1 : null),
+      total_steps: 4,
       created_at: job.created_at,
       updated_at: job.updated_at,
       error: job.error,
@@ -293,6 +323,12 @@ router.post("/reports/:reportId/competitors", authMiddleware, async (req, res) =
     if (!access.hasAccess) return res.status(402).json({ error: "Competitor comparison is part of the Growth Plan.", code: "UPGRADE_REQUIRED", required_tier: "growth_plan", status: 402 });
     const handles = Array.isArray(req.body.handles) ? req.body.handles : [];
     if (!handles.length || handles.length > MAX_COMPETITORS) return sendError(res, 400, "INVALID_HANDLES", `Provide 1–${MAX_COMPETITORS} competitor handles`);
+    // (8) Competitor pulls are metered per day; the 24h profile cache means
+    // re-running the same set is free, so this only bites on churning handles.
+    const climit = Number(process.env.COMPETITOR_PULLS_PER_DAY || 15);
+    const cused = await geDb.getUsage(req.user.id, "competitor");
+    if (cused + handles.length > climit) return res.status(429).json({ error: `That's ${cused + handles.length} competitor pulls today; the limit is ${climit}. Try again tomorrow.`, code: "COMPETITOR_LIMIT_REACHED", status: 429 });
+    await geDb.bumpUsage(req.user.id, "competitor", handles.length);
     const comparison = await compareCompetitors({
       handle: report.business.handle, platform: report.business.platform, category: report.business.category, handles,
     });
@@ -322,6 +358,76 @@ router.get("/account/history", authMiddleware, async (req, res) => {
   }
 });
 
+// One-time unlock: the full plan for one report, no subscription.
+// Runs the plan pipeline once for the report's handle; the result is a new
+// growth_plan-tier report with refresh_due_at cleared and unlock metadata.
+router.post("/reports/:reportId/unlock", authMiddleware, async (req, res) => {
+  try {
+    const report = await geDb.getReport(req.params.reportId);
+    if (!report) return sendError(res, 404, "REPORT_NOT_FOUND", "Report not found");
+    // A free report is anonymous until adopted; adopt-on-signup covers most
+    // cases, and an explicit unlock from the owner's email covers the rest.
+    if (report.accountId !== req.user.id && report.accountId !== "demo-account") return sendError(res, 403, "NOT_YOUR_REPORT", "This report belongs to another account");
+    if (report.tier && report.tier !== "social_snapshot") return res.json({ already_unlocked: true, report_id: report.reportId });
+
+    const payment = await billingManager.purchaseOneTime(req.user.id, "plan_unlock");
+    if (payment.status !== "succeeded" && !payment.mock) return res.status(402).json({ error: "Payment did not complete", code: "PAYMENT_INCOMPLETE", status: 402, payment });
+
+    const b = report.business || {};
+    const input = { handle: b.handle, platform: b.platform, category: b.category, email: req.user.email || null, one_time_unlock: true, unlock_of: report.reportId, payment_id: payment.paymentId };
+    const { jobId } = await geDb.createJob(req.user.id, "growth_plan", input);
+    jobQueue.processJob(jobId, req.user.id, "growth_plan", input).catch((err) => console.error(`[Unlock] job ${jobId} failed:`, err.message));
+    res.json({ job_id: jobId, status: "queued", tier: "growth_plan", one_time: true, payment: { id: payment.paymentId, amount: payment.amountFormatted } });
+  } catch (err) {
+    sendError(res, 500, "UNLOCK_ERROR", err.message);
+  }
+});
+
+// Delete account + everything written for it (settings → "Delete my account")
+router.delete("/account", authMiddleware, async (req, res) => {
+  try {
+    res.json(await geDb.deleteAccount(req.user.id));
+  } catch (err) {
+    sendError(res, 500, "DELETE_ERROR", err.message);
+  }
+});
+
+// Coming-soon platform waitlist
+router.post("/waitlist", async (req, res) => {
+  try {
+    const email = String(req.body.email || "").trim().toLowerCase();
+    const platform = String(req.body.platform || "").trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return sendError(res, 400, "INVALID_EMAIL", "Email is required");
+    if (!/^[a-z]{1,30}$/.test(platform)) return sendError(res, 400, "INVALID_PLATFORM", "Platform is required");
+    await geDb.addWaitlist(email, platform);
+    res.json({ ok: true, platform });
+  } catch (err) {
+    sendError(res, 500, "WAITLIST_ERROR", err.message);
+  }
+});
+
+// Mark a move done / not done on a report the caller owns
+router.post("/reports/:reportId/moves", authMiddleware, async (req, res) => {
+  try {
+    const report = await geDb.getReport(req.params.reportId);
+    if (!report) return sendError(res, 404, "REPORT_NOT_FOUND", "Report not found");
+    if (report.accountId !== req.user.id) return sendError(res, 403, "NOT_YOUR_REPORT", "This report belongs to another account");
+    const key = String(req.body.key || "");
+    if (!/^[a-z0-9_-]{1,40}$/i.test(key)) return sendError(res, 400, "INVALID_MOVE", "key is required");
+    const done = { ...(report.reportBody?.moves_done || {}) };
+    if (req.body.done) done[key] = Date.now(); else delete done[key];
+    await geDb.patchReportBody(report.reportId, { moves_done: done });
+    res.json({ moves_done: done });
+  } catch (err) {
+    sendError(res, 500, "MOVE_ERROR", err.message);
+  }
+});
+
+// Does doing the moves move the score? Aggregate only — no handles.
+router.get("/outcomes", async (req, res) => {
+  try { res.json(await geDb.getOutcomeSummary()); } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // Category baseline status (public; powers the "N profiles scored" copy)
 router.get("/baselines", async (req, res) => {
   try {
@@ -332,7 +438,7 @@ router.get("/baselines", async (req, res) => {
 });
 router.get("/baselines/:category", async (req, res) => {
   try {
-    const base = await geDb.getCategoryBaseline(req.params.category);
+    const base = await geDb.getCategoryBaseline(req.params.category, { platform: req.query.platform || null });
     res.json(base || { n: 0, min_n: 20, ready: false });
   } catch (err) {
     res.status(500).json({ error: err.message });

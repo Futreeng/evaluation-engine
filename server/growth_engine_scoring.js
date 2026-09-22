@@ -19,7 +19,42 @@ const TARGETS = {
   retail:                { posts_per_week: 4.5, max_gap_days: 7, video_share: 0.3, engagement_rate: 1.5, comment_share: 0.03, profile: { location: 20, price: 15, cta: 15, link: 10, booking_link: 30, highlights: 10 } },
   professional_services: { posts_per_week: 2.5, max_gap_days: 10, video_share: 0.4, engagement_rate: 1.2, comment_share: 0.05, profile: { location: 20, price: 10, cta: 25, link: 10, booking_link: 25, highlights: 10 } },
 };
-const DEFAULT_TARGET = TARGETS.fitness;
+
+// Creator niches. Profile Clarity is creator-shaped: what you're about, who
+// it's for, and a link that goes somewhere worth going — not location/price.
+const CREATOR = (posts_per_week, video_share, engagement_rate, comment_share = 0.04) => ({
+  posts_per_week, max_gap_days: 7, video_share, engagement_rate, comment_share,
+  creator: true,
+  profile: { substance: 25, link: 20, destination_link: 25, cta: 15, highlights: 15 },
+});
+const CREATOR_NICHES = {
+  fitness_creator:  CREATOR(4.5, 0.7, 3.0),
+  food_cooking:     CREATOR(4.0, 0.6, 2.5),
+  fashion:          CREATOR(4.5, 0.5, 2.0),
+  beauty_skincare:  CREATOR(4.0, 0.6, 2.4),
+  travel:           CREATOR(3.5, 0.6, 2.8),
+  comedy_entertainment: CREATOR(5.0, 0.9, 4.0, 0.06),
+  education_howto:  CREATOR(3.5, 0.7, 2.2, 0.05),
+  lifestyle_vlog:   CREATOR(4.0, 0.7, 2.6),
+  music:            CREATOR(3.5, 0.8, 3.0),
+  gaming:           CREATOR(4.5, 0.9, 3.5, 0.06),
+  tech_gadgets:     CREATOR(3.0, 0.7, 2.0, 0.05),
+  finance_business: CREATOR(3.0, 0.5, 1.8, 0.05),
+  parenting_family: CREATOR(4.0, 0.6, 2.6),
+  art_design:       CREATOR(3.5, 0.5, 3.2),
+  sports:           CREATOR(4.5, 0.8, 3.0),
+  pets:             CREATOR(4.5, 0.8, 4.0),
+  other:            CREATOR(4.0, 0.6, 2.5),
+};
+Object.assign(TARGETS, CREATOR_NICHES);
+const DEFAULT_TARGET = TARGETS.other;
+
+// Anything not in TARGETS (a typed "Other" niche) scores against the general
+// creator target and the report says so.
+function targetFor(category) {
+  const key = String(category || "").toLowerCase().trim();
+  return { target: TARGETS[key] || DEFAULT_TARGET, known: !!TARGETS[key] };
+}
 
 const clamp01 = (x) => Math.max(0, Math.min(1, Number.isFinite(x) ? x : 0));
 const pct = (x) => Math.round(clamp01(x) * 100);
@@ -50,9 +85,26 @@ function scorePostingConsistency(pf, t) {
   };
 }
 
-function scoreContentMix(content, posts, t) {
+function scoreContentMix(content, posts, t, platform) {
   const total = num(content.video_posts) + num(content.carousel_posts) + num(content.static_posts);
   if (!total) return { label: "Content Mix", score: 0, evidence: "no posts to classify", parts: {} };
+  if (platform === "tiktok") {
+    // Everything is video here. Variety = a spread of lengths, some slideshows,
+    // original sound; substance = captions that say something.
+    const short = num(content.short_videos_under_15s), long = num(content.long_videos_over_60s), slides = num(content.slideshow_posts);
+    const kinds = (short > 0 ? 1 : 0) + (total - short - long - slides > 0 ? 1 : 0) + (long > 0 ? 1 : 0) + (slides > 0 ? 1 : 0);
+    const variety = kinds >= 3 ? 1 : kinds === 2 ? 0.7 : 0.35;                                                  // 45
+    const original = clamp01(num(content.original_sound_share));                                                 // 20
+    const captions = Array.isArray(posts) ? posts.map((p) => p.caption || "") : [];
+    const promoShare = captions.length ? captions.filter((c) => PROMO_RE.test(c)).length / captions.length : 0;
+    const substance = ramp(num(content.avg_caption_length), 60, 5) * 0.5 + (1 - promoShare) * 0.5;               // 35
+    const score = pct(variety * 0.45 + original * 0.2 + substance * 0.35);
+    return {
+      label: "Content Mix", score,
+      evidence: `${kinds} of 4 video kinds in use (short / standard / long / slideshow); ${Math.round(original * 100)}% original sound; avg caption ${num(content.avg_caption_length)} chars; avg length ${num(content.avg_duration_s)}s`,
+      parts: { variety: pct(variety), original: pct(original), substance: pct(substance) },
+    };
+  }
   const videoShare = num(content.video_posts) / total;
   const closeness = 1 - clamp01(Math.abs(videoShare - t.video_share) / Math.max(t.video_share, 1 - t.video_share)); // 50
   const formats = ["video_posts", "carousel_posts", "static_posts"].filter((k) => num(content[k]) > 0).length;
@@ -68,7 +120,28 @@ function scoreContentMix(content, posts, t) {
   };
 }
 
-function scoreEngagementQuality(eng, aud, content, t) {
+function scoreEngagementQuality(eng, aud, content, t, platform) {
+  if (platform === "tiktok") {
+    // Reach on TikTok is mostly non-followers, so rate-vs-followers is not the
+    // signal it is on Instagram. Use views per follower, share+save rate on
+    // views, and comment share.
+    const followers = num(aud.followers);
+    const plays = num(eng.avg_plays_per_video);
+    const likes = num(eng.total_likes), comments = num(eng.total_comments), shares = num(eng.total_shares), saves = num(eng.total_saves);
+    const totalPlays = num(eng.total_video_views);
+    const viewsPerFollower = followers > 0 ? plays / followers : 0;
+    const reach = ramp(Math.log10(Math.max(0.01, viewsPerFollower)), 1, -1);          // 40: 10× followers → full, 0.1× → zero
+    const keep = totalPlays > 0 ? (shares + saves) / totalPlays : 0;
+    const keeping = ramp(keep, 0.02, 0);                                               // 35: 2% of viewers share or save → full
+    const commentShare = likes + comments > 0 ? comments / (likes + comments) : 0;
+    const conversation = ramp(commentShare, t.comment_share, 0);                       // 25
+    const score = pct(reach * 0.4 + keeping * 0.35 + conversation * 0.25);
+    return {
+      label: "Engagement Quality", score,
+      evidence: `avg ${Math.round(plays).toLocaleString()} plays per video (${viewsPerFollower.toFixed(1)}× followers); ${(keep * 100).toFixed(2)}% of viewers share or save; comments are ${(commentShare * 100).toFixed(1)}% of interactions`,
+      parts: { reach: pct(reach), keeping: pct(keeping), conversation: pct(conversation) },
+    };
+  }
   const er = num(eng.engagement_rate_percent);
   const likes = num(eng.total_likes), comments = num(eng.total_comments);
   const commentShare = likes + comments > 0 ? comments / (likes + comments) : 0;
@@ -91,6 +164,20 @@ function scoreProfileClarity(pc, t) {
   let s = 0;
   const hits = [], misses = [];
   const check = (ok, key, name) => { if (ok) { s += w[key]; hits.push(name); } else misses.push(name); };
+  if (t.creator) {
+    if (pc.highlight_count === 0 && t.platform_no_highlights) w.highlights = 0;
+    check(num(pc.bio_length) >= 40, "substance", "a bio that says what you're about");
+    check(!!pc.external_url, "link", "a link");
+    check(!!pc.external_url_is_booking || /youtu|tiktok|spotify|substack|beacons|linktr|stan\.store|patreon|gumroad|shop|newsletter|podcast|discord|twitch/i.test(pc.external_url || ""), "destination_link", "a link that goes somewhere worth going");
+    check(!!pc.bio_has_cta || /\b(follow|subscribe|watch|listen|join|dm|new (video|drop|episode))\b/i.test(pc.bio_text || ""), "cta", "a next step in your bio");
+    if (w.highlights > 0) check(num(pc.highlight_count) >= 1, "highlights", "story highlights");
+    const total = Object.values(w).reduce((a, b) => a + b, 0);
+    return {
+      label: "Profile Clarity", score: pct(s / total),
+      evidence: `has: ${hits.join(", ") || "none"}; missing: ${misses.join(", ") || "nothing"}`,
+      parts: { substance: num(pc.bio_length) >= 40 ? w.substance : 0, link: pc.external_url ? w.link : 0 },
+    };
+  }
   check(!!pc.bio_mentions_location, "location", "location in bio");
   check(!!pc.bio_mentions_price, "price", "price or offer in bio");
   check(!!pc.bio_has_cta, "cta", "a next step in bio");
@@ -115,17 +202,19 @@ function scoreProfile(realData, category) {
   // evaluator's formatted view of it ({ metrics, recent_activity }).
   const m = realData && (realData.analysis || realData.metrics);
   if (!m || !m.posting_frequency || !m.engagement || !m.content) return null;
-  const t = TARGETS[category] || DEFAULT_TARGET;
+  const { target: t, known } = targetFor(category);
   const pc = m.profile_clarity || {};
   const posts = (realData.recent_posts || realData.recent_activity || []).map((p) => ({ caption: p.caption ?? p.caption_preview ?? "" }));
+  const platform = String(realData.platform || realData.source || "").includes("tiktok") ? "tiktok" : "instagram";
+  const tt = platform === "tiktok" ? { ...t, posts_per_week: Math.max(t.posts_per_week, 5), max_gap_days: 5, platform_no_highlights: true, profile: { ...t.profile, highlights: 0 } } : t;
   const dims = [
-    scorePostingConsistency(m.posting_frequency, t),
-    scoreContentMix(m.content, posts, t),
-    scoreEngagementQuality(m.engagement, m.audience || { followers: realData.follower_count }, m.content, t),
+    scorePostingConsistency(m.posting_frequency, tt),
+    scoreContentMix(m.content, posts, tt, platform),
+    scoreEngagementQuality(m.engagement, m.audience || { followers: realData.follower_count }, m.content, tt, platform),
     scoreProfileClarity(pc, t),
   ];
   const overall = Math.round(dims.reduce((a, d) => a + d.score, 0) / dims.length);
-  return { overall, dimensions: dims, targets: t, method: "deterministic-v1" };
+  return { overall, dimensions: dims, targets: tt, method: "deterministic-v1", niche_known: known, creator: !!t.creator, platform };
 }
 
 /**
@@ -181,4 +270,4 @@ function rankPosts(posts, { top = 3, bottom = 3 } = {}) {
   };
 }
 
-module.exports = { scoreProfile, rankPosts, TARGETS };
+module.exports = { scoreProfile, rankPosts, targetFor, TARGETS, CREATOR_NICHES };

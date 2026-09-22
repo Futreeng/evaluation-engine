@@ -116,6 +116,26 @@ async function initSchema() {
     await client.query(`ALTER TABLE entitlements ALTER COLUMN current_tier SET DEFAULT 'social_snapshot'`);
 
     await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_outcomes (
+        id TEXT PRIMARY KEY, account_id TEXT NOT NULL, handle TEXT NOT NULL, platform TEXT NOT NULL, category TEXT,
+        moves_done INTEGER NOT NULL, score_delta INTEGER NOT NULL, follower_delta INTEGER, days INTEGER, created_at BIGINT NOT NULL
+      )`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_profile_cache (
+        id TEXT PRIMARY KEY, platform TEXT NOT NULL, handle TEXT NOT NULL, data JSONB NOT NULL, fetched_at BIGINT NOT NULL
+      )`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_usage (
+        id TEXT PRIMARY KEY, account_id TEXT NOT NULL, kind TEXT NOT NULL, day TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0
+      )`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_waitlist (
+        id TEXT PRIMARY KEY,
+        email TEXT NOT NULL,
+        platform TEXT NOT NULL,
+        created_at BIGINT NOT NULL
+      )`);
+    await client.query(`
       CREATE TABLE IF NOT EXISTS growth_engine_tier_history (
         id TEXT PRIMARY KEY,
         account_id TEXT NOT NULL,
@@ -206,6 +226,64 @@ async function updateJobStatus(jobId, status, updates = {}) {
   return getJob(jobId);
 }
 
+async function recordOutcome({ accountId, handle, platform, category, movesDone, scoreDelta, followerDelta, days }) {
+  await q(`INSERT INTO growth_engine_outcomes (id, account_id, handle, platform, category, moves_done, score_delta, follower_delta, days, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+    ["oc_" + uid(), accountId, String(handle).toLowerCase(), platform, category || null, movesDone, scoreDelta, followerDelta ?? null, days ?? null, Date.now()]);
+}
+async function getOutcomeSummary() {
+  const r = await q(`SELECT CASE WHEN moves_done >= 3 THEN 'did_3_plus' WHEN moves_done >= 1 THEN 'did_some' ELSE 'did_none' END AS bucket,
+    COUNT(*) AS n, AVG(score_delta) AS sd, AVG(follower_delta) AS fd FROM growth_engine_outcomes GROUP BY bucket`);
+  const out = {};
+  for (const row of r.rows) out[row.bucket] = { n: Number(row.n), avg_score_delta: +Number(row.sd).toFixed(1), avg_follower_delta: row.fd == null ? null : Math.round(Number(row.fd)) };
+  return out;
+}
+
+async function getCachedProfile(platform, handle, maxAgeMs) {
+  const r = await q(`SELECT data, fetched_at FROM growth_engine_profile_cache WHERE id = $1`, [`${platform}|${String(handle).toLowerCase()}`]);
+  const row = r.rows[0];
+  if (!row || Date.now() - Number(row.fetched_at) > maxAgeMs) return null;
+  return { data: parseJson(row.data), fetchedAt: Number(row.fetched_at) };
+}
+async function putCachedProfile(platform, handle, data) {
+  await q(`INSERT INTO growth_engine_profile_cache (id, platform, handle, data, fetched_at) VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, fetched_at = EXCLUDED.fetched_at`,
+    [`${platform}|${String(handle).toLowerCase()}`, platform, String(handle).toLowerCase(), JSON.stringify(data), Date.now()]);
+}
+const dayKey = () => new Date().toISOString().slice(0, 10);
+async function getUsage(accountId, kind) {
+  const r = await q(`SELECT count FROM growth_engine_usage WHERE id = $1`, [`${accountId}|${kind}|${dayKey()}`]);
+  return Number(r.rows[0]?.count || 0);
+}
+async function bumpUsage(accountId, kind, n = 1) {
+  const id = `${accountId}|${kind}|${dayKey()}`;
+  const r = await q(`INSERT INTO growth_engine_usage (id, account_id, kind, day, count) VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (id) DO UPDATE SET count = growth_engine_usage.count + $5 RETURNING count`, [id, accountId, kind, dayKey(), n]);
+  return Number(r.rows[0]?.count || n);
+}
+
+async function findFreeSnapshotForHandle(handle, platform) {
+  const r = await q(`SELECT report_id, generated_at, created_at FROM growth_engine_reports
+     WHERE tier = 'social_snapshot' AND lower(handle) = $1 AND platform = $2 ORDER BY created_at DESC LIMIT 1`, [String(handle).toLowerCase(), platform]);
+  if (r.rows[0]) return { reportId: r.rows[0].report_id, generatedAt: Number(r.rows[0].generated_at || r.rows[0].created_at) };
+  const j = await q(`SELECT job_id FROM growth_engine_jobs WHERE tier = 'social_snapshot' AND status IN ('queued','running')
+     AND lower(input_params->>'handle') = $1 AND input_params->>'platform' = $2 ORDER BY created_at DESC LIMIT 1`, [String(handle).toLowerCase(), platform]);
+  if (j.rows[0]) return { jobId: j.rows[0].job_id };
+  return null;
+}
+
+async function adoptAnonymousReports(accountId, email) {
+  const e = String(email).trim().toLowerCase();
+  const now = Date.now();
+  const jobs = await q(`SELECT job_id, result_payload FROM growth_engine_jobs WHERE account_id = 'demo-account' AND lower(input_params->>'email') = $1`, [e]);
+  let adopted = 0;
+  for (const row of jobs.rows) {
+    await q(`UPDATE growth_engine_jobs SET account_id = $1, updated_at = $2 WHERE job_id = $3`, [accountId, now, row.job_id]);
+    const rid = parseJson(row.result_payload)?.report_id;
+    if (rid) { const u = await q(`UPDATE growth_engine_reports SET account_id = $1, updated_at = $2 WHERE report_id = $3 AND account_id = 'demo-account'`, [accountId, now, rid]); adopted += u.rowCount || 0; }
+  }
+  return { adopted };
+}
+
 // Free-tier quota: non-failed snapshot jobs for an email.
 async function countFreeSnapshotsByEmail(email) {
   const r = await q(
@@ -272,9 +350,9 @@ async function listScoreHistory(accountId, handle, platform) {
   );
   return r.rows
     .map((row) => {
-      const sc = parseJson(row.report_body)?.scores;
+      const body = parseJson(row.report_body) || {}; const sc = body.scores;
       return sc && Number.isFinite(sc.overall)
-        ? { report_id: row.report_id, tier: row.tier, generated_at: Number(row.generated_at || row.created_at), overall: sc.overall, dimensions: (sc.dimensions || []).map((d) => ({ label: d.label, score: d.score })) }
+        ? { report_id: row.report_id, tier: row.tier, generated_at: Number(row.generated_at || row.created_at), overall: sc.overall, followers: body.business?.followers ?? null, dimensions: (sc.dimensions || []).map((d) => ({ label: d.label, score: d.score })) }
         : null;
     })
     .filter(Boolean);
@@ -329,6 +407,21 @@ async function getTierHistory(accountId) {
   return r.rows.map((row) => ({ accountId: row.account_id, fromTier: row.from_tier, toTier: row.to_tier, changedAt: Number(row.changed_at) }));
 }
 
+async function deleteAccount(accountId) {
+  const n = await q(`SELECT COUNT(*) AS n FROM growth_engine_reports WHERE account_id = $1`, [accountId]);
+  await q(`DELETE FROM growth_engine_reports WHERE account_id = $1`, [accountId]);
+  await q(`DELETE FROM growth_engine_jobs WHERE account_id = $1`, [accountId]);
+  await q(`DELETE FROM growth_engine_tier_history WHERE account_id = $1`, [accountId]);
+  await q(`DELETE FROM entitlements WHERE user_id = $1`, [accountId]);
+  await q(`DELETE FROM users WHERE user_id = $1`, [accountId]);
+  return { deleted: true, reports: Number(n.rows[0]?.n || 0) };
+}
+
+async function addWaitlist(email, platform) {
+  await q(`INSERT INTO growth_engine_waitlist (id, email, platform, created_at) VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO NOTHING`,
+    [`${platform}|${email}`, email, platform, Date.now()]);
+}
+
 // ===================== CATEGORY BASELINES =====================
 
 async function recordBaseline({ category, platform, handle, overall, dimensions }) {
@@ -343,8 +436,10 @@ async function recordBaseline({ category, platform, handle, overall, dimensions 
     [key, category, platform, String(handle).toLowerCase(), Math.round(overall), JSON.stringify(dims), Date.now()]
   );
 }
-async function getCategoryBaseline(category, { minN = 20 } = {}) {
-  const r = await q(`SELECT overall, dimensions FROM growth_engine_baselines WHERE category = $1`, [category]);
+async function getCategoryBaseline(category, { minN = 20, platform = null } = {}) {
+  const r = platform
+    ? await q(`SELECT overall, dimensions FROM growth_engine_baselines WHERE category = $1 AND platform = $2`, [category, platform])
+    : await q(`SELECT overall, dimensions FROM growth_engine_baselines WHERE category = $1`, [category]);
   const rows = r.rows;
   if (!rows.length) return null;
   if (rows.length < minN) return { n: rows.length, min_n: minN, ready: false };
@@ -361,11 +456,11 @@ async function getCategoryBaseline(category, { minN = 20 } = {}) {
   };
 }
 async function getBaselineSummary() {
-  const r = await q(`SELECT category, COUNT(*) AS n FROM growth_engine_baselines GROUP BY category`);
-  const by_category = {};
+  const r = await q(`SELECT category, platform, COUNT(*) AS n FROM growth_engine_baselines GROUP BY category, platform`);
+  const by_category = {}; const by_platform = {};
   let total = 0;
-  for (const row of r.rows) { by_category[row.category] = Number(row.n); total += Number(row.n); }
-  return { total, by_category };
+  for (const row of r.rows) { by_category[row.category] = (by_category[row.category] || 0) + Number(row.n); by_platform[`${row.category}:${row.platform}`] = Number(row.n); total += Number(row.n); }
+  return { total, by_category, by_platform };
 }
 // Aliases for the first Postgres draft's names.
 async function createBaseline(category, platform, handle, overall, dimensions) {
@@ -389,6 +484,16 @@ module.exports = {
   getJob,
   updateJobStatus,
   countFreeSnapshotsByEmail,
+  findFreeSnapshotForHandle,
+  adoptAnonymousReports,
+  getCachedProfile,
+  putCachedProfile,
+  recordOutcome,
+  getOutcomeSummary,
+  getUsage,
+  bumpUsage,
+  addWaitlist,
+  deleteAccount,
   // Reports
   createReport,
   getReport,

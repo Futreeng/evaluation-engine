@@ -8,3 +8,4 @@ reports/
 # runtime state — never commit
 server/data/
 server.log
+.gstack/

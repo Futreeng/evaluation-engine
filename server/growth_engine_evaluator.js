@@ -3,6 +3,8 @@ const db = require("./db");
 const { analyzeTwitterAccount } = require("./twitter_fetcher");
 const { analyzeInstagramAccount } = require("./instagram_fetcher");
 const { analyzeInstagramAccountViaApify } = require("./instagram_apify_fetcher");
+const { TIER_PRICING, ONE_TIME_PRICING } = require("./growth_engine_billing");
+const { analyzeTikTokAccountViaApify } = require("./tiktok_apify_fetcher");
 const { scoreProfile, rankPosts } = require("./growth_engine_scoring");
 
 // Persona prompts for each tier
@@ -177,8 +179,17 @@ async function getRealPostData(handle, platform, category) {
     }
   }
 
-  // Add TikTok, LinkedIn, etc. here
-  throw new Error(`Platform '${platform}' not yet supported. Available: 'twitter' (x), 'instagram' (ig).`);
+  if (platform === "tiktok") {
+    try {
+      const data = await analyzeTikTokAccountViaApify(handle);
+      return formatInstagramDataForAnalysis({ ...data, platform: "tiktok" });
+    } catch (err) {
+      console.error("[Growth Engine] TikTok fetch failed:", err.message);
+      throw new Error(`Could not fetch TikTok data for @${handle}: ${err.message}`);
+    }
+  }
+
+  throw new Error(`Platform '${platform}' not yet supported. Available: 'instagram', 'tiktok', 'x'.`);
 }
 
 function formatTwitterDataForAnalysis(twitterData) {
@@ -205,7 +216,7 @@ function formatInstagramDataForAnalysis(instagramData) {
   // Convert Instagram API response into analysis-friendly format
   return {
     handle: instagramData.handle,
-    platform: "instagram",
+    platform: instagramData.platform || "instagram",
     follower_count: instagramData.follower_count,
     following_count: instagramData.following_count,
     post_count: instagramData.post_count,
@@ -217,8 +228,11 @@ function formatInstagramDataForAnalysis(instagramData) {
       engagement: (p.like_count || 0) + (p.comments_count || 0),
       likes: p.like_count || 0,
       comments: p.comments_count || 0,
-      media_type: p.is_reel ? "REEL" : p.media_type,
+      media_type: p.is_reel ? (instagramData.platform === "tiktok" ? "VIDEO" : "REEL") : (instagramData.platform === "tiktok" ? "SLIDESHOW" : p.media_type),
       video_views: p.video_view_count || undefined,
+      shares: p.share_count || undefined,
+      saves: p.save_count || undefined,
+      duration_s: p.duration || undefined,
       location: p.location || undefined,
       caption_preview: p.caption ? p.caption.substring(0, 100) : "",
     })),
@@ -475,18 +489,21 @@ function clampScore(n) {
 // Pull the trailing ```json block out of a merged report.
 function splitStructuredBlock(text) {
   const src = String(text || "");
-  const m = /```json\s*([\s\S]*?)```\s*$/i.exec(src) || /```json\s*([\s\S]*?)```/i.exec(src);
+  // Closed fence, or an opening fence the model ran out of budget before closing.
+  const m = /```json\s*([\s\S]*?)```\s*$/i.exec(src) || /```json\s*([\s\S]*?)```/i.exec(src) || /```json\s*([\s\S]*)$/i.exec(src);
   if (!m) return { narrative: src.trim(), structured: null };
   let structured = null;
   try {
     structured = JSON.parse(m[1]);
   } catch (err) {
-    console.warn("[Growth Engine] Structured block did not parse:", err.message);
+    structured = parseJsonLoose(m[1]); // repairs a truncated document at the last complete element
+    if (!structured) console.warn("[Growth Engine] Structured block did not parse:", err.message);
+    else console.warn("[Growth Engine] Structured block was truncated; repaired");
   }
   return { narrative: src.replace(m[0], "").trim(), structured };
 }
 
-async function runSnapshot(accountId, inputParams) {
+async function runSnapshot(accountId, inputParams, onStage = () => {}) {
   const { claudeKey, claudeWorkspaceId, geminiKey, groqKey } = getDecryptedKeys(accountId);
   const openaiKey = process.env.OPENAI_API_KEY;
   if (!claudeKey && !geminiKey && !groqKey && !openaiKey) {
@@ -499,8 +516,12 @@ async function runSnapshot(accountId, inputParams) {
   let postSummary;
   let computed = null;
   let postInsights = null;
+  let followers = null;
   try {
+    await onStage("finding", 1);
     const realData = await getRealPostData(handle, platform, category);
+    await onStage("reading", 2);
+    followers = Number.isFinite(realData.follower_count) ? realData.follower_count : null;
     postSummary = JSON.stringify(realData); // compact: every token counts against free-tier TPM caps
     computed = scoreProfile(realData, category); // null for fetchers without the metric shape (Twitter)
     postInsights = rankPosts(realData.recent_activity || realData.recent_posts);
@@ -511,6 +532,7 @@ async function runSnapshot(accountId, inputParams) {
     // instead of a "best practices" report that scores nothing real.
     throw err;
   }
+  await onStage("scoring", 3);
   const benchmarks = CATEGORY_BENCHMARKS[category] || CATEGORY_BENCHMARKS.fitness;
 
   const templateVars = {
@@ -562,10 +584,11 @@ async function runSnapshot(accountId, inputParams) {
     PERSONA_B_RESPONSE: personaBResponse,
   };
 
+  await onStage("writing", 4);
   const mergePrompt = interpolateTemplate(PERSONA_PROMPTS.tier0.merge, mergeTemplateVars);
 
   // Merge: Claude → Gemini → Groq → OpenAI
-  const mergedReport = await withOutputTokens(4096, () => callWithQuadFallback(
+  const mergedReport = await withOutputTokens(6144, () => callWithQuadFallback(
     () => callClaudeNonStreaming(claudeKey, claudeWorkspaceId, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt),
     () => callGeminiNonStreaming(geminiKey, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt),
     () => callGroqNonStreaming(groqKey, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt),
@@ -586,6 +609,7 @@ async function runSnapshot(accountId, inputParams) {
       platform,
       category,
       business_name: null,
+      followers,
     },
     generated_at: Date.now(),
     refresh_due_at: null,
@@ -628,6 +652,8 @@ async function runSnapshot(accountId, inputParams) {
           summary: typeof structured?.summary === "string" ? structured.summary : overallLine,
           dimensions: computed.dimensions.map((d) => ({ label: d.label, score: d.score, explanation: findExpl(d.label) || d.evidence, evidence: d.evidence, parts: d.parts })),
           method: computed.method,
+          niche_known: computed.niche_known,
+          creator: computed.creator,
         }
       : { ...llmScores, category_avg: null, summary: typeof structured?.summary === "string" ? structured.summary : null, method: "llm" };
     const phases = Array.isArray(structured?.phases) ? structured.phases : [];
@@ -654,20 +680,23 @@ async function runSnapshot(accountId, inputParams) {
       cta_label: "Unlock your full Growth Plan",
       target_tier: "growth_plan",
       unlock_count: phases.reduce((n, p) => n + (Number(p?.locked?.count) || 4), 0) || 12,
+      monthly_price: TIER_PRICING.growth_plan / 100,
+      one_time_price: ONE_TIME_PRICING.plan_unlock / 100,
     };
   }
 
   return { reportBody, structured, postSummary, benchmarks, keys: { claudeKey, claudeWorkspaceId, geminiKey, groqKey, openaiKey } };
 }
 
-async function evaluateTier0(accountId, inputParams) {
-  const { reportBody } = await runSnapshot(accountId, inputParams);
+async function evaluateTier0(accountId, inputParams, onStage) {
+  const { reportBody } = await runSnapshot(accountId, inputParams, onStage);
   return reportBody;
 }
 
-async function evaluateTier1(accountId, inputParams) {
+async function evaluateTier1(accountId, inputParams, onStage = () => {}) {
   // Tier 1: Growth Plan — the free snapshot plus every locked item, from the same data.
-  const { reportBody, structured, postSummary, benchmarks, keys } = await runSnapshot(accountId, inputParams);
+  const { reportBody, structured, postSummary, benchmarks, keys } = await runSnapshot(accountId, inputParams, onStage);
+  await onStage("writing", 4);
   const { handle, platform, category } = inputParams;
   const { claudeKey, claudeWorkspaceId, geminiKey, groqKey, openaiKey } = keys;
 
@@ -753,7 +782,7 @@ async function evaluateTier1(accountId, inputParams) {
   planPhases = planPhases.map((ph) => ({ ...ph, range: normRange(ph.range), moves: Array.isArray(ph.moves) ? ph.moves : [] }));
 
   reportBody.tier = "growth_plan";
-  reportBody.refresh_due_at = Date.now() + (reportBody.plan_incomplete ? 1 : 7) * 24 * 60 * 60 * 1000;
+  reportBody.refresh_due_at = inputParams.one_time_unlock ? null : Date.now() + (reportBody.plan_incomplete ? 1 : 7) * 24 * 60 * 60 * 1000;
   if (!reportBody.growth_path) reportBody.growth_path = { phases: [] };
   reportBody.growth_path.phases = reportBody.growth_path.phases.map((p, i) => {
     const extra = planPhases.find((x) => x.range === normRange(p.range)) || planPhases[i] || { moves: [] };
