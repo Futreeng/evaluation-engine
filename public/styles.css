@@ -823,3 +823,12 @@ p { margin: 0; }
 .reviews .rv .cap { font-size: 13px; color: var(--body); margin: 0 0 8px; }
 .reviews .rv p { margin: 0 0 6px; font-size: 14px; line-height: 1.5; }
 .reviews-soon { margin: 0 0 14px; }
+
+/* ---- cancel flow (4.1–4.3) ---- */
+.cancelflow .eb { font-size: 11px; font-weight: 700; letter-spacing: .1em; color: var(--act); margin-bottom: 6px; }
+.cancelflow .offer { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 14px; border: 1.5px solid var(--line); border-radius: 12px; margin: 10px 0; }
+.cancelflow .offer .t { display: grid; gap: 2px; font-size: 13px; } .cancelflow .offer .t span { color: var(--muted); }
+.cancelflow .months { display: flex; gap: 6px; flex-wrap: wrap; }
+.cancelflow .reasons { display: grid; gap: 6px; margin: 10px 0; }
+.cancelflow .reason { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1.5px solid var(--line); border-radius: 10px; font-size: 14px; cursor: pointer; }
+.cancelflow .reason:has(input:checked) { border-color: var(--act); background: var(--ground); }

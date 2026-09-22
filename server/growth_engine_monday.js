@@ -85,7 +85,7 @@ async function sendMondayMoves({ now = Date.now(), force = false } = {}) {
     if (paid) {
       // Lapsed subscribers stop getting Mondays; one-time buyers stop at day 60.
       if (body.one_time_unlock && (now - (body.plan_started_at || r.generatedAt)) / DAY > (body.plan_days || 60)) continue;
-      if (!body.one_time_unlock && r.accountId) { try { const ent = await (geDb.getEffectiveEntitlement || geDb.getOrCreateEntitlement)(r.accountId); const tier = ent?.currentTier || ent?.current_tier; if (!tier || tier === "social_snapshot") continue; } catch { continue; } }
+      if (!body.one_time_unlock && r.accountId) { try { const ent = await (geDb.getEffectiveEntitlement || geDb.getOrCreateEntitlement)(r.accountId); const tier = ent?.currentTier || ent?.current_tier; if (!tier || tier === "social_snapshot" || tier === "maintenance") continue; if (ent.pausedUntil && ent.pausedUntil > now) continue; } catch { continue; } }
     }
     const move = pickMove(body, paid);
     let kind;

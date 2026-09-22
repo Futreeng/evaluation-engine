@@ -136,6 +136,14 @@ async function initSchema() {
         created_at BIGINT NOT NULL
       )`);
     await client.query(`ALTER TABLE entitlements ADD COLUMN IF NOT EXISTS cancel_at BIGINT`);
+    await client.query(`ALTER TABLE entitlements ADD COLUMN IF NOT EXISTS paused_until BIGINT`);
+    await client.query(`ALTER TABLE entitlements ADD COLUMN IF NOT EXISTS pause_started_at BIGINT`);
+    await client.query(`ALTER TABLE entitlements ADD COLUMN IF NOT EXISTS pause_ended_at BIGINT`);
+    await client.query(`ALTER TABLE entitlements ADD COLUMN IF NOT EXISTS lapsed_at BIGINT`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_cancel_reasons (
+        id TEXT PRIMARY KEY, account_id TEXT NOT NULL, tier TEXT, action TEXT NOT NULL, reason_code TEXT, reason_text TEXT, created_at BIGINT NOT NULL
+      )`);
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_paused BOOLEAN DEFAULT FALSE`);
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_business BOOLEAN DEFAULT FALSE`);
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS goal TEXT`);
@@ -547,6 +555,7 @@ function entRow(row) {
         billingPeriodEnd: row.billing_period_end ? Number(row.billing_period_end) : null, billing_period_end: row.billing_period_end ? Number(row.billing_period_end) : null,
         stripeSubscriptionId: row.stripe_subscription_id || null,
         cancelAt: row.cancel_at ? Number(row.cancel_at) : null, cancel_at: row.cancel_at ? Number(row.cancel_at) : null,
+        pausedUntil: row.paused_until ? Number(row.paused_until) : null, pauseStartedAt: row.pause_started_at ? Number(row.pause_started_at) : null, pauseEndedAt: row.pause_ended_at ? Number(row.pause_ended_at) : null, lapsedAt: row.lapsed_at ? Number(row.lapsed_at) : null,
       }
     : null;
 }
@@ -554,10 +563,28 @@ async function getEffectiveEntitlement(accountId) {
   const ent = await getOrCreateEntitlement(accountId);
   if (ent.cancelAt && ent.cancelAt <= Date.now() && ent.currentTier !== "social_snapshot") {
     await upgradeTier(accountId, "social_snapshot");
-    await q(`UPDATE entitlements SET cancel_at = NULL, updated_at = $1 WHERE user_id = $2`, [Date.now(), accountId]);
+    await q(`UPDATE entitlements SET cancel_at = NULL, lapsed_at = $1, updated_at = $2 WHERE user_id = $3`, [ent.cancelAt, Date.now(), accountId]);
+    return getEntitlement(accountId);
+  }
+  if (ent.pausedUntil && ent.pausedUntil <= Date.now()) {
+    await q(`UPDATE entitlements SET paused_until = NULL, pause_ended_at = $1, updated_at = $2 WHERE user_id = $3`, [ent.pausedUntil, Date.now(), accountId]);
     return getEntitlement(accountId);
   }
   return ent;
+}
+async function setPause(accountId, until) {
+  await getOrCreateEntitlement(accountId);
+  if (until) await q(`UPDATE entitlements SET paused_until = $1, pause_started_at = $2, pause_ended_at = NULL, cancel_at = NULL, updated_at = $2 WHERE user_id = $3`, [until, Date.now(), accountId]);
+  else await q(`UPDATE entitlements SET paused_until = NULL, pause_ended_at = $1, updated_at = $1 WHERE user_id = $2`, [Date.now(), accountId]);
+  return getEntitlement(accountId);
+}
+async function insertCancelReason(r) {
+  await q(`INSERT INTO growth_engine_cancel_reasons (id, account_id, tier, action, reason_code, reason_text, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7)`, ["cr_" + uid(), r.accountId, r.tier || null, r.action, r.reasonCode || null, r.reasonText ? String(r.reasonText).slice(0, 300) : null, Date.now()]);
+}
+async function listCancelReasons(limit = 200) { return (await q(`SELECT * FROM growth_engine_cancel_reasons ORDER BY created_at DESC LIMIT $1`, [limit])).rows.map((r) => ({ ...r, created_at: Number(r.created_at) })); }
+async function listLapsedEntitlements(fromTs, toTs) {
+  const r = await q(`SELECT user_id, lapsed_at FROM entitlements WHERE lapsed_at IS NOT NULL AND lapsed_at >= $1 AND lapsed_at <= $2 AND current_tier = 'social_snapshot'`, [fromTs, toTs]);
+  return r.rows.map((x) => ({ accountId: x.user_id, lapsedAt: Number(x.lapsed_at) }));
 }
 async function setCancelAt(accountId, cancelAt) {
   await getOrCreateEntitlement(accountId);
@@ -904,6 +931,10 @@ module.exports = {
   insertRoastRejection,
   listRoastRejections,
   setGoal,
+  setPause,
+  insertCancelReason,
+  listCancelReasons,
+  listLapsedEntitlements,
   listReportsWithEmailSince,
   listReportsByCategorySince,
   getNicheBrief,

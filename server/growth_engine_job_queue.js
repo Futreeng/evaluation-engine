@@ -83,6 +83,7 @@ class JobQueue {
   }
 
   async processJob(jobId, accountId, tier, inputParams) {
+    const hasPlan = tier !== "social_snapshot" && tier !== "maintenance"; // plan-only features (moves, posts, streak, competitors)
     const feature = inputParams.scheduled ? "rescore" : inputParams.rerun_of ? "rerun" : inputParams.one_time_unlock ? "unlock" : tier === "social_snapshot" ? "free_report" : "paid_report";
     return costs.run({ accountId: accountId !== "demo-account" ? accountId : null, jobId, feature }, () => this._processJob(jobId, accountId, tier, inputParams));
   }
@@ -108,7 +109,8 @@ class JobQueue {
       const onStage = async (stage, step) => {
         try { await geDb.updateJobStatus(jobId, "running", { stage: `${stage}:${step}` }); } catch { /* cosmetic */ }
       };
-      if (tier === "social_snapshot") {
+      if (tier === "social_snapshot" || tier === "maintenance") {
+        // Maintenance (spec 4.2): weekly score + history only, no plan.
         reportBody = await evaluator.evaluateTier0(accountId, inputParams, onStage);
       } else if (tier === "growth_plan") {
         reportBody = await evaluator.evaluateTier1(accountId, inputParams, onStage);
@@ -154,7 +156,7 @@ class JobQueue {
       }
       // When a plan started: a refresh or re-run inherits the original start
       // so day-30/60 check-ins and the 60-day end are measured from purchase.
-      if (tier !== "social_snapshot") {
+      if (hasPlan) {
         let started = Date.now();
         if (inputParams.refresh_of || inputParams.rerun_of) {
           try { const src = await geDb.getReport(inputParams.refresh_of || inputParams.rerun_of); if (src?.reportBody?.plan_started_at) started = src.reportBody.plan_started_at; } catch { /* keep now */ }
@@ -195,7 +197,7 @@ class JobQueue {
                 if (prevReport?.reportBody?.moments_seen) reportBody.moments_seen = prevReport.reportBody.moments_seen;
               }
               // Weekly streak (spec 2.3) — paid plans only; carried and evaluated at each rescore.
-              if (tier !== "social_snapshot") reportBody.streak = moments.computeStreak(reportBody, prevReport?.reportBody || null);
+              if (hasPlan) { let pause = null; try { const ent = await geDb.getEffectiveEntitlement(accountId); pause = ent?.pauseEndedAt ? { ended_at: ent.pauseEndedAt } : null; } catch { /* fine */ } reportBody.streak = moments.computeStreak(reportBody, prevReport?.reportBody || null, { pause }); }
               // Rank-ups, milestones, records (spec 2.2, 2.4, 2.5): only when a rescore shows the change.
               const found = moments.detectMoments(reportBody, prevReport?.reportBody || null);
               if (found.length) {
@@ -235,7 +237,7 @@ class JobQueue {
       const wanted = Array.isArray(inputParams.competitors) ? inputParams.competitors : [];
       if (wanted.length) {
         reportBody.competitor_handles = wanted;
-        if (tier !== "social_snapshot") {
+        if (hasPlan) {
           try {
             await geDb.updateJobStatus(jobId, "running", { stage: "comparing competitors" });
             const comparison = await compareCompetitors({ handle: inputParams.handle, platform: inputParams.platform, category: inputParams.category, handles: wanted });
@@ -268,7 +270,7 @@ class JobQueue {
       if (!reportBody.goal && reportBody.plan_context?.goal) { reportBody.goal = reportBody.plan_context.goal; reportBody.goal_target = reportBody.plan_context.goal_target ?? null; }
       // Level is just a name for the score band — always attached (spec 2.2).
       if (reportBody.scores && Number.isFinite(reportBody.scores.overall)) reportBody.scores.level = moments.levelFor(reportBody.scores.overall);
-      if (tier !== "social_snapshot" && !reportBody.streak) reportBody.streak = moments.computeStreak(reportBody, null);
+      if (hasPlan && !reportBody.streak) reportBody.streak = moments.computeStreak(reportBody, null);
 
       // Emails: report ready on a fresh run; score changed on a weekly refresh.
       try {
@@ -285,7 +287,7 @@ class JobQueue {
             await mailer.scoreChanged({ to, userId: accountId, handle: inputParams.handle, reportId, oldScore: h.previous.overall, newScore: reportBody.scores.overall, dimension: biggest?.label || "Overall", delta: biggest?.delta ?? h.delta_overall, movesDone: (h.moves_done_since || []).length, nudge: reportBody.nudge || null, brief });
           }
         } else if (!inputParams.rerun_of && reportBody.scores) {
-          await mailer.reportReady({ to, handle: inputParams.handle, reportId, overall: reportBody.scores.overall, grade, summary: reportBody.scores.summary, firstMove, paid: tier !== "social_snapshot" });
+          await mailer.reportReady({ to, handle: inputParams.handle, reportId, overall: reportBody.scores.overall, grade, summary: reportBody.scores.summary, firstMove, paid: hasPlan });
         }
       } catch (err) {
         console.warn("[JobQueue] email failed:", err.message);

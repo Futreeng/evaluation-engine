@@ -17,6 +17,7 @@ const crypto = require("crypto");
 // Tier pricing (in cents, monthly)
 const TIER_PRICING = {
   social_snapshot: 0, // Free
+  maintenance: Number(process.env.MAINTENANCE_PRICE_CENTS || 500), // $5/month — weekly rescore + history only (spec 4.2)
   growth_plan: 1200, // $12/month — creators
   growth_plan_pro: 2900, // $29/month — creators, every platform scored together
   business_growth: 3900, // $39/month — businesses (phase 2)
@@ -215,6 +216,55 @@ class BillingManager {
     return { status: "cancel_pending", currentTier: ent.currentTier, endsAt };
   }
 
+  /**
+   * Pause instead of cancel (spec 4.1): 1–3 months, collection paused, tier
+   * kept, history and streak kept (the streak is frozen while paused).
+   * Stripe: pause_collection with resumes_at; mock: paused_until on the entitlement.
+   */
+  async pauseSubscription(accountId, months) {
+    const m = Math.max(1, Math.min(Number(process.env.PAUSE_MAX_MONTHS || 3), Math.round(Number(months) || 1)));
+    const ent = await geDb.getOrCreateEntitlement(accountId);
+    if (!ent || ent.currentTier === "social_snapshot") return { status: "none", currentTier: "social_snapshot" };
+    const until = Date.now() + m * 30 * 24 * 60 * 60 * 1000;
+    if (this.isProduction && this.stripe && ent.stripeSubscriptionId) {
+      await this.stripe.subscriptions.update(ent.stripeSubscriptionId, { pause_collection: { behavior: "void", resumes_at: Math.floor(until / 1000) }, cancel_at_period_end: false });
+    }
+    const sub = await this.getSubscription(accountId);
+    if (sub) { sub.cancelAtPeriodEnd = false; sub.pausedUntil = until; mockSubscriptions.set(sub.subscriptionId, sub); }
+    await geDb.setPause(accountId, until);
+    console.log(`[Billing] Paused ${accountId} for ${m} month(s) until ${new Date(until).toISOString()}`);
+    return { status: "paused", currentTier: ent.currentTier, pausedUntil: until, months: m };
+  }
+  async unpauseSubscription(accountId) {
+    const ent = await geDb.getOrCreateEntitlement(accountId);
+    if (!ent.pausedUntil) return { status: ent.currentTier === "social_snapshot" ? "none" : "active", currentTier: ent.currentTier };
+    if (this.isProduction && this.stripe && ent.stripeSubscriptionId) {
+      await this.stripe.subscriptions.update(ent.stripeSubscriptionId, { pause_collection: "" });
+    }
+    const sub = await this.getSubscription(accountId);
+    if (sub) { delete sub.pausedUntil; mockSubscriptions.set(sub.subscriptionId, sub); }
+    await geDb.setPause(accountId, null);
+    return { status: "active", currentTier: ent.currentTier };
+  }
+  /**
+   * Move a subscriber between growth_plan and the maintenance tier (spec 4.2).
+   * Stripe: swap the subscription item's price (Joe wires the price ids);
+   * mock: a fresh mock subscription at the new price.
+   */
+  async switchTier(accountId, tier) {
+    if (!["maintenance", "growth_plan"].includes(tier)) throw new Error("Only maintenance and growth_plan can be switched to");
+    const ent = await geDb.getOrCreateEntitlement(accountId);
+    if (ent.currentTier === "social_snapshot") throw new Error("Start a plan first");
+    if (ent.currentTier === tier) return { status: "active", currentTier: tier, unchanged: true };
+    if (this.isProduction && this.stripe && ent.stripeSubscriptionId) {
+      throw new Error("[Stripe] Tier switch not wired yet: update the subscription item to the maintenance/growth_plan price id");
+    }
+    const r = await this._createMockSubscription(accountId, tier, TIER_PRICING[tier], "monthly");
+    await geDb.setCancelAt(accountId, null);
+    console.log(`[Billing] ${accountId} switched ${ent.currentTier} → ${tier}`);
+    return { ...r, status: "active", currentTier: tier, from: ent.currentTier };
+  }
+
   /** Undo a pending cancellation before the period ends. */
   async resumeSubscription(accountId) {
     const ent = await geDb.getOrCreateEntitlement(accountId);
@@ -236,7 +286,7 @@ class BillingManager {
     const ent = await (geDb.getEffectiveEntitlement || geDb.getOrCreateEntitlement)(accountId);
 
     // Tier hierarchy: social_snapshot < growth_plan < business_evaluator < agency
-    const tierHierarchy = ["social_snapshot", "growth_plan", "growth_plan_pro", "business_growth", "business_evaluator", "agency"];
+    const tierHierarchy = ["social_snapshot", "maintenance", "growth_plan", "growth_plan_pro", "business_growth", "business_evaluator", "agency"];
     const requiredIndex = tierHierarchy.indexOf(requiredTier);
     const currentIndex = tierHierarchy.indexOf(ent.currentTier);
 
@@ -301,6 +351,9 @@ class BillingManager {
     const yr = (cents) => Math.floor((cents * 12 * (1 - ANNUAL_DISCOUNT)) / 100);
     return {
       audience: "creators",
+      // Offered on the cancel screen only (spec 4.1, 4.2).
+      pause: { months: Array.from({ length: Number(process.env.PAUSE_MAX_MONTHS || 3) }, (_, i) => i + 1) },
+      maintenance: { tier: "maintenance", name: "Maintenance", monthlyPrice: TIER_PRICING.maintenance / 100, description: "Keep the weekly rescore and your score history. No plan, no post writing.", features: ["Re-scored every week", "Score history and trend", "Streak and milestones kept", "No moves, calendar or posts"] },
       tiers: [
         {
           tier: "social_snapshot",

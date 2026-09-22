@@ -90,13 +90,15 @@ function fmtN(n) { return Number(n || 0).toLocaleString("en-US"); }
 // least the planned number of days in the last 7. Hidden until the first
 // on-plan week; a freeze covers a missed week automatically; no punishing
 // language anywhere — the object just says what happened.
-function computeStreak(reportBody, prevBody) {
+function computeStreak(reportBody, prevBody, { pause = null } = {}) {
   const prev = prevBody?.streak || null;
   const now = Date.now();
   const planned = (reportBody.calendar?.posting_days || []).length || 3;
   if (!prev) return { weeks: 0, best: 0, freezes: STREAK.start_freezes, planned_days: planned, posted_days: null, visible: false, evaluated_at: now, history: [] };
   // Only one evaluation per week even if the account is rescored more often.
   if (now - (prev.evaluated_at || 0) < 6 * 86400000) return { ...prev, planned_days: planned };
+  // First evaluation after a pause (spec 4.1): the paused weeks are frozen, not missed.
+  if (pause?.ended_at && (prev.evaluated_at || 0) < pause.ended_at) return { ...prev, planned_days: planned, evaluated_at: now, last: "paused", history: [...(prev.history || []), { at: now, status: "paused" }].slice(-12) };
   const days = new Set((reportBody.posts || []).filter((p) => { const t = Date.parse(p.posted_at || 0); return t > now - 7 * 86400000 && t <= now; }).map((p) => String(p.posted_at).slice(0, 10)));
   const onPlan = days.size >= planned;
   let weeks = prev.weeks || 0, freezes = prev.freezes ?? STREAK.start_freezes, status;

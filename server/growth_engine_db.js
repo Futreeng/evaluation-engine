@@ -165,6 +165,23 @@ function initSchema() {
 
   // Cancel-at-period-end: tier stays until this timestamp, then reads as free.
   try { db.run(`ALTER TABLE entitlements ADD COLUMN cancel_at INTEGER`); } catch { /* exists */ }
+  // Pause instead of cancel (spec 4.1) + when a cancellation actually took effect (4.4 win-back).
+  try { db.run(`ALTER TABLE entitlements ADD COLUMN paused_until INTEGER`); } catch { /* exists */ }
+  try { db.run(`ALTER TABLE entitlements ADD COLUMN pause_started_at INTEGER`); } catch { /* exists */ }
+  try { db.run(`ALTER TABLE entitlements ADD COLUMN pause_ended_at INTEGER`); } catch { /* exists */ }
+  try { db.run(`ALTER TABLE entitlements ADD COLUMN lapsed_at INTEGER`); } catch { /* exists */ }
+  // Exit answers from the cancel screen (spec 4.3).
+  db.run(`
+    CREATE TABLE IF NOT EXISTS growth_engine_cancel_reasons (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      tier TEXT,
+      action TEXT NOT NULL,
+      reason_code TEXT,
+      reason_text TEXT,
+      created_at INTEGER NOT NULL
+    )
+  `);
   // "Pause these emails": check-ins, score changes and plan-ended stop; reset + report-ready still send.
   try { db.run(`ALTER TABLE users ADD COLUMN email_paused INTEGER DEFAULT 0`); } catch { /* exists */ }
   // Phase-2 signals (spec 1.9): business flag + confirmed niche on the account
@@ -1240,6 +1257,10 @@ async function getEntitlement(accountId) {
     billingPeriodStart: row[columns.indexOf("billing_period_start")],
     billingPeriodEnd: row[columns.indexOf("billing_period_end")],
     cancelAt: columns.includes("cancel_at") ? row[columns.indexOf("cancel_at")] || null : null,
+    pausedUntil: columns.includes("paused_until") ? row[columns.indexOf("paused_until")] || null : null,
+    pauseStartedAt: columns.includes("pause_started_at") ? row[columns.indexOf("pause_started_at")] || null : null,
+    pauseEndedAt: columns.includes("pause_ended_at") ? row[columns.indexOf("pause_ended_at")] || null : null,
+    lapsedAt: columns.includes("lapsed_at") ? row[columns.indexOf("lapsed_at")] || null : null,
     createdAt: row[columns.indexOf("created_at")],
     updatedAt: row[columns.indexOf("updated_at")],
   };
@@ -1251,7 +1272,13 @@ async function getEffectiveEntitlement(accountId) {
   const ent = await getOrCreateEntitlement(accountId);
   if (ent.cancelAt && ent.cancelAt <= Date.now() && ent.currentTier !== "social_snapshot") {
     await upgradeTier(accountId, "social_snapshot");
-    db.run(`UPDATE entitlements SET cancel_at = NULL, updated_at = ? WHERE account_id = ?`, [Date.now(), accountId]);
+    db.run(`UPDATE entitlements SET cancel_at = NULL, lapsed_at = ?, updated_at = ? WHERE account_id = ?`, [ent.cancelAt, Date.now(), accountId]);
+    saveDb();
+    return getEntitlement(accountId);
+  }
+  // A pause that ran out resumes on its own; the streak module reads pause_ended_at.
+  if (ent.pausedUntil && ent.pausedUntil <= Date.now()) {
+    db.run(`UPDATE entitlements SET paused_until = NULL, pause_ended_at = ?, updated_at = ? WHERE account_id = ?`, [ent.pausedUntil, Date.now(), accountId]);
     saveDb();
     return getEntitlement(accountId);
   }
@@ -1263,6 +1290,28 @@ async function setCancelAt(accountId, cancelAt) {
   db.run(`UPDATE entitlements SET cancel_at = ?, updated_at = ? WHERE account_id = ?`, [cancelAt || null, Date.now(), accountId]);
   saveDb();
   return getEntitlement(accountId);
+}
+async function setPause(accountId, until) {
+  if (!db) throw new Error("Database not initialized");
+  await getOrCreateEntitlement(accountId);
+  if (until) db.run(`UPDATE entitlements SET paused_until = ?, pause_started_at = ?, pause_ended_at = NULL, cancel_at = NULL, updated_at = ? WHERE account_id = ?`, [until, Date.now(), Date.now(), accountId]);
+  else db.run(`UPDATE entitlements SET paused_until = NULL, pause_ended_at = ?, updated_at = ? WHERE account_id = ?`, [Date.now(), Date.now(), accountId]);
+  saveDb();
+  return getEntitlement(accountId);
+}
+async function insertCancelReason(r) {
+  if (!db) throw new Error("Database not initialized");
+  db.run(`INSERT INTO growth_engine_cancel_reasons (id, account_id, tier, action, reason_code, reason_text, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, ["cr_" + uid(), r.accountId, r.tier || null, r.action, r.reasonCode || null, r.reasonText ? String(r.reasonText).slice(0, 300) : null, Date.now()]);
+  saveDb();
+}
+async function listCancelReasons(limit = 200) {
+  if (!db) throw new Error("Database not initialized");
+  return rowsOf(`SELECT * FROM growth_engine_cancel_reasons ORDER BY created_at DESC LIMIT ?`, [limit]).map((r) => ({ ...r, created_at: Number(r.created_at) }));
+}
+// Accounts whose cancellation took effect in a window (win-back, spec 4.4).
+async function listLapsedEntitlements(fromTs, toTs) {
+  if (!db) throw new Error("Database not initialized");
+  return rowsOf(`SELECT * FROM entitlements WHERE lapsed_at IS NOT NULL AND lapsed_at >= ? AND lapsed_at <= ? AND current_tier = 'social_snapshot'`, [fromTs, toTs]).map((r) => ({ accountId: r.account_id, lapsedAt: Number(r.lapsed_at) }));
 }
 async function setBillingPeriod(accountId, start, end) {
   if (!db) throw new Error("Database not initialized");
@@ -1566,6 +1615,10 @@ module.exports = {
   insertRoastRejection,
   listRoastRejections,
   setGoal,
+  setPause,
+  insertCancelReason,
+  listCancelReasons,
+  listLapsedEntitlements,
   listReportsWithEmailSince,
   listReportsByCategorySince,
   getNicheBrief,

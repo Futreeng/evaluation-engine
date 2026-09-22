@@ -140,7 +140,7 @@ async function checkPaidAccounts({ now = Date.now(), limit = Number(process.env.
     if (!r.accountId || r.accountId === "demo-account" || !b.business?.handle) continue;
     if (now - (b.post_check_at || r.generatedAt) < CHECK_HOURS * H) continue;
     if (b.one_time_unlock && (now - (b.plan_started_at || r.generatedAt)) / DAY > (b.plan_days || 60)) continue;
-    try { const ent = await (geDb.getEffectiveEntitlement || geDb.getOrCreateEntitlement)(r.accountId); const tier = ent?.currentTier || ent?.current_tier; if (!b.one_time_unlock && (!tier || tier === "social_snapshot")) continue; } catch { continue; }
+    try { const ent = await (geDb.getEffectiveEntitlement || geDb.getOrCreateEntitlement)(r.accountId); const tier = ent?.currentTier || ent?.current_tier; if (!b.one_time_unlock && (!tier || tier === "social_snapshot" || tier === "maintenance")) continue; if (ent?.pausedUntil && ent.pausedUntil > now) continue; } catch { continue; }
     try {
       const n = (await costs.run({ accountId: r.accountId, reportId: r.reportId, feature: "post_review" }, () => reviewReport(r, { now }))).length;
       done++; if (n) console.log(`[PostReview] @${b.business.handle}: ${n} review${n === 1 ? "" : "s"}`);

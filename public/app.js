@@ -1249,9 +1249,11 @@
       if (!subn) return '';
       const free = subn.status === 'free';
       const pending = subn.status === 'cancel_pending';
+      const paused = subn.status === 'paused';
+      const maint = subn.current_tier === 'maintenance';
       return h`<div class="card plancard ${pending ? 'pending' : ''}"><div class="t"><div class="n">Your plan</div><h2>${subn.tier_name || 'Free Snapshot'}${free ? '' : raw(h` <span class="pr">· $${subn.monthly_price}/mo</span>`)}</h2>
-        <p>${free ? 'One free score per account. The Growth Plan writes the whole 90 days and re-scores you weekly.' : pending ? `Cancelled. You keep everything until ${fmtDate(subn.cancel_at)}, then the weekly refresh stops. Your reports stay.` : subn.billing_period_end ? `Renews ${fmtDate(subn.billing_period_end)}. Cancel any time — you keep the plan to the end of the period and every report after.` : 'Cancel any time — you keep the plan to the end of the period and every report after.'}</p></div>
-        <div class="acts">${free ? raw(h`<a class="btn" href="#/pricing">See the plan</a>`) : pending ? raw(h`<button type="button" class="btn green" data-action="resume-plan">Resume the plan</button>`) : raw(h`<button type="button" class="btn ghost" data-action="cancel-plan">Cancel plan</button>`)}</div>
+        <p>${free ? 'One free score per account. The Growth Plan writes the whole 90 days and re-scores you weekly.' : paused ? `Paused until ${fmtDate(subn.paused_until)}. Nothing is charged, nothing runs, and your history and streak are kept exactly as they are. Resume any time.` : maint ? 'Weekly rescore and score history only. Switch back whenever you want the plan, Monday moves and post writing again.' : pending ? `Cancelled. You keep everything until ${fmtDate(subn.cancel_at)}, then the weekly refresh stops. Your reports stay.` : subn.billing_period_end ? `Renews ${fmtDate(subn.billing_period_end)}. Cancel any time — you keep the plan to the end of the period and every report after.` : 'Cancel any time — you keep the plan to the end of the period and every report after.'}</p></div>
+        <div class="acts">${free ? raw(h`<a class="btn" href="#/pricing">See the plan</a>`) : paused ? raw(h`<button type="button" class="btn green" data-action="unpause-plan">Resume now</button>`) : pending ? raw(h`<button type="button" class="btn green" data-action="resume-plan">Resume the plan</button>`) : maint ? raw(h`<button type="button" class="btn" data-action="switch-growth">Back to the Growth Plan</button><button type="button" class="btn ghost" data-action="cancel-plan">Cancel</button>`) : raw(h`<button type="button" class="btn ghost" data-action="cancel-plan">Cancel plan</button>`)}</div>
         ${raw(emailPrefsHTML(subn.email_prefs))}</div>`;
     };
     const reports = (list.reports || []).map(r => ({ id: r.reportId || r.report_id, tier: r.tier, at: r.generatedAt || r.generated_at, handle: r.business?.handle, platform: r.business?.platform, category: r.business?.category, overall: r.reportBody?.scores?.overall ?? null, known: r.reportBody?.scores?.niche_known !== false })).sort((a, b) => b.at - a.at);
@@ -1289,6 +1291,8 @@
     $view.querySelector('[data-action=copy-ref]')?.addEventListener('click', async () => { try { await navigator.clipboard.writeText(refs.link); toast('Link copied.'); } catch { toast(refs.link); } });
     { const gc = $view.querySelector('#goalCard'); if (gc) { const ed = gc.querySelector('.goaledit'); gc.querySelector('[data-action=edit-goal]')?.addEventListener('click', () => { ed.hidden = false; }); bindGoalPicker(ed, async (goal, target) => { try { const res = await api('/account/goal', { method: 'PUT', body: JSON.stringify({ goal, goal_target: target }) }); sset('sc_goal', { goal: res.goal, goal_target: res.goal_target }); track('goal_set', { goal }); toast('Goal saved.'); viewReports(); } catch (e) { toast('Could not save the goal: ' + e.message); } }); } }
     $view.querySelector('[data-action=cancel-plan]')?.addEventListener('click', () => openCancelDialog(subn));
+    $view.querySelector('[data-action=unpause-plan]')?.addEventListener('click', async e => { e.currentTarget.disabled = true; try { await api('/billing/unpause', { method: 'POST', body: '{}' }); toast('Resumed. The weekly rescore is back on.'); viewReports(); } catch (e2) { toast(e2.message); e.currentTarget.disabled = false; } });
+    $view.querySelector('[data-action=switch-growth]')?.addEventListener('click', async e => { e.currentTarget.disabled = true; try { await api('/billing/switch', { method: 'POST', body: JSON.stringify({ tier: 'growth_plan' }) }); toast('Back on the Growth Plan.'); viewReports(); } catch (e2) { toast(e2.message); e.currentTarget.disabled = false; } });
     $view.querySelectorAll('[data-pref]').forEach(cb => cb.addEventListener('change', async e => {
       const k = e.currentTarget.dataset.pref, on = e.currentTarget.checked;
       try { const r = await api('/account/email-prefs', { method: 'PUT', body: JSON.stringify({ [k]: on }) }); subn.email_prefs = r.prefs; toast(k === 'paused' ? (on ? 'Paused. Your plan keeps running.' : 'Emails back on.') : 'Saved.'); if (k === 'paused') viewReports(); }
@@ -1300,24 +1304,35 @@
       catch (e2) { if (e2.status === 401) return; toast(e2.message); e.currentTarget.disabled = false; }
     });
   }
-  // Cancel is one confirm, no retention screens. Reason is optional and only logged.
-  function openCancelDialog(subn) {
+  // Cancel flow (spec 4.1–4.3): first what they'd lose plus pause / maintenance,
+  // then one optional exit question, then the cancel itself.
+  async function openCancelDialog(subn) {
+    let pv = null; try { pv = await api('/billing/cancel-preview'); } catch (e) { if (e.status === 401) return; }
+    const until = (pv && pv.ends_at) || subn?.billing_period_end; const untilTxt = until ? fmtDate(until) : 'the end of this billing period';
+    const lose = (pv && pv.lose) || {};
     const el = document.createElement('div'); el.className = 'sheet center';
-    const until = subn?.billing_period_end ? fmtDate(subn.billing_period_end) : 'the end of this billing period';
-    el.innerHTML = h`<div class="panel dialog" role="dialog" aria-label="Cancel plan">
-      <h3>Cancel the ${subn?.tier_name || 'Growth Plan'}?</h3>
-      <p>You keep everything until ${until} — moves, calendar, competitors, the weekly re-score. After that the plan stops refreshing and you're on the free tier. Every report stays yours.</p>
-      <input type="text" id="cancelWhy" placeholder="Why? (optional — one line)" autocomplete="off" maxlength="200">
+    const losses = [lose.runs > 1 ? `${lose.runs} scores of history since ${fmtShort(lose.first_run)}` : null, lose.streak_weeks ? `a ${lose.streak_weeks}-week streak` : null, lose.next_posts ? `${lose.next_posts} written posts` : null, lose.competitors ? `your competitor set` : null, lose.moves_done ? `${lose.moves_done} moves marked done` : null].filter(Boolean);
+    const stepOffers = () => h`<div class="panel dialog cancelflow" role="dialog" aria-label="Before you cancel">
+      <div class="eb">BEFORE YOU GO</div><h3>Keep what you've built?</h3>
+      ${losses.length ? raw(h`<p>Cancelling stops the weekly rescore. The plan keeps ${raw(losses.map(l => h`<b>${l}</b>`).join(', '))} — on the free tier those stop updating.</p>`) : raw(h`<p>Cancelling stops the weekly rescore. Your reports stay yours.</p>`)}
+      ${pv && pv.pause && subn.current_tier !== 'maintenance' ? raw(h`<div class="offer"><div class="t"><b>Pause instead</b><span>Nothing charged, nothing lost. Your streak is frozen, not reset.</span></div><div class="months">${raw(pv.pause.months.map(m => h`<button type="button" class="btn ghost sm" data-pause="${m}">${m} month${m === 1 ? '' : 's'}</button>`).join(''))}</div></div>`) : ''}
+      ${pv && pv.maintenance && subn.current_tier !== 'maintenance' ? raw(h`<div class="offer"><div class="t"><b>${pv.maintenance.name} · $${pv.maintenance.monthlyPrice}/mo</b><span>${pv.maintenance.description}</span></div><button type="button" class="btn ghost sm" data-switch="maintenance">Switch to ${pv.maintenance.name}</button></div>`) : ''}
+      <div class="row2"><button type="button" class="btn ghost" data-close>Keep my plan</button><button type="button" class="btn danger" data-next>Cancel anyway</button></div></div>`;
+    const stepWhy = () => h`<div class="panel dialog cancelflow" role="dialog" aria-label="Cancel plan">
+      <h3>One question before you go.</h3><p>Optional. It goes to the two of us building this, nowhere else.</p>
+      <div class="reasons">${raw(((pv && pv.reasons) || [['other', 'Other']]).map(([k, l]) => h`<label class="reason"><input type="radio" name="why" value="${k}"><span>${l}</span></label>`).join(''))}</div>
+      <input type="text" id="cancelWhy" placeholder="Anything else? (one line)" autocomplete="off" maxlength="300">
       <div class="row2"><button type="button" class="btn ghost" data-close>Keep my plan</button><button type="button" class="btn danger" data-cancel>Cancel the plan</button></div>
-      <div class="fine center">Changed your mind later? You can resume until ${until}.</div></div>`;
+      <div class="fine center">You keep everything until ${untilTxt}, and you can resume until then.</div></div>`;
+    el.innerHTML = stepOffers();
     document.body.appendChild(el);
     const close = () => el.remove();
-    el.addEventListener('click', e => { if (e.target === el) close(); });
-    el.querySelector('[data-close]').addEventListener('click', close);
-    el.querySelector('[data-cancel]').addEventListener('click', async e => {
-      e.currentTarget.disabled = true;
-      try { const r = await api('/billing/cancel', { method: 'POST', body: JSON.stringify({ reason: el.querySelector('#cancelWhy').value }) }); close(); toast(r.endsAt ? `Cancelled. Yours until ${fmtDate(r.endsAt)}.` : 'Cancelled.'); viewReports(); }
-      catch (e2) { if (e2.status === 401) return; toast(e2.message); e.currentTarget.disabled = false; }
+    el.addEventListener('click', async e => {
+      if (e.target === el || e.target.closest('[data-close]')) return close();
+      const p = e.target.closest('[data-pause]'); if (p) { p.disabled = true; try { const r = await api('/billing/pause', { method: 'POST', body: JSON.stringify({ months: Number(p.dataset.pause) }) }); track('pause', { months: r.months }); close(); toast(`Paused until ${fmtDate(r.pausedUntil)}. Resume any time from this page.`); viewReports(); } catch (e2) { toast(e2.message); p.disabled = false; } return; }
+      const sw = e.target.closest('[data-switch]'); if (sw) { sw.disabled = true; try { await api('/billing/switch', { method: 'POST', body: JSON.stringify({ tier: sw.dataset.switch }) }); close(); toast('Switched. The weekly rescore keeps going; the plan is on hold.'); viewReports(); } catch (e2) { toast(e2.message); sw.disabled = false; } return; }
+      if (e.target.closest('[data-next]')) { el.innerHTML = stepWhy(); return; }
+      const c = e.target.closest('[data-cancel]'); if (c) { c.disabled = true; const code = el.querySelector('input[name=why]:checked')?.value || null; try { const r = await api('/billing/cancel', { method: 'POST', body: JSON.stringify({ reason_code: code, reason: el.querySelector('#cancelWhy').value }) }); close(); toast(r.endsAt ? `Cancelled. Yours until ${fmtDate(r.endsAt)}.` : 'Cancelled.'); viewReports(); } catch (e2) { if (e2.status === 401) return; toast(e2.message); c.disabled = false; } }
     });
   }
   function openDeleteDialog(n) {

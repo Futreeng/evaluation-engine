@@ -155,6 +155,10 @@ const assert = require("assert");
   await db.upsertNicheBrief({ category: "retail", platform: "instagram", week: "2026-W39", n: 12, body: { ready: true, lines: ["x"] } });
   assert.equal((await db.getNicheBrief("retail", "instagram", "2026-W39")).lines[0], "x");
   assert.ok(Array.isArray(await db.listReportsByCategorySince("retail", "instagram", 0)));
+  { const pe = await db.setPause(u.userId, Date.now() + 30 * 86400000); assert.ok(pe.pausedUntil > Date.now()); const un = await db.setPause(u.userId, null); assert.equal(un.pausedUntil, null); assert.ok(un.pauseEndedAt); }
+  await db.insertCancelReason({ accountId: u.userId, tier: "growth_plan", action: "cancel", reasonCode: "price", reasonText: "too much" });
+  assert.equal((await db.listCancelReasons(5))[0].reason_code, "price");
+  assert.ok(Array.isArray(await db.listLapsedEntitlements(0, Date.now())));
   await db.insertRoastRejection({ reportId: "r1", accountId: "a1", heat: "medium", reason: "blocklist", flagged: "[2]", text: "[]" });
   assert.equal((await db.listRoastRejections(5))[0].reason, "blocklist");
 

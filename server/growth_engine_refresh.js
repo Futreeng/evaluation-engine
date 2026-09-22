@@ -101,11 +101,14 @@ async function sweep(jobQueue) {
       let tier = "social_snapshot";
       try { const ent = await (geDb.getEffectiveEntitlement || geDb.getOrCreateEntitlement)(r.accountId); tier = ent?.currentTier || ent?.current_tier || tier; } catch { /* treat as lapsed */ }
       if (tier === "social_snapshot") { await geDb.updateReportRefreshDue(r.reportId, null); skipped++; continue; }
+      // Paused (spec 4.1): nothing runs; the due date moves past the pause.
+      try { const ent = await geDb.getEffectiveEntitlement(r.accountId); if (ent?.pausedUntil && ent.pausedUntil > Date.now()) { await geDb.updateReportRefreshDue(r.reportId, ent.pausedUntil + 60 * 1000); skipped++; continue; } } catch { /* fine */ }
       const input = { handle: b.handle, platform: b.platform, category: b.category, email: r.reportBody?.email || null, scheduled: true, refresh_of: r.reportId, tz: r.reportBody?.tz || null };
-      const { jobId } = await geDb.createJob(r.accountId, "growth_plan", input);
+      const jobTier = tier === "maintenance" ? "maintenance" : "growth_plan";
+      const { jobId } = await geDb.createJob(r.accountId, jobTier, input);
       // Push the due date forward now so a slow job doesn't get picked up twice.
       await geDb.updateReportRefreshDue(r.reportId, Date.now() + 7 * 24 * 60 * 60 * 1000);
-      jobQueue.processJob(jobId, r.accountId, "growth_plan", input).catch((err) => console.error(`[Refresh] job ${jobId} failed:`, err.message));
+      jobQueue.processJob(jobId, r.accountId, jobTier, input).catch((err) => console.error(`[Refresh] job ${jobId} failed:`, err.message));
       queued++;
     }
   } catch (err) {

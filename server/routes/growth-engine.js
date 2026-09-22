@@ -220,7 +220,7 @@ router.get("/account/subscription-status", authMiddleware, async (req, res) => {
   try {
     const ent = await geDb.getEffectiveEntitlement(req.user.id);
     const pricing = billingManager.getPricing();
-    const tierInfo = [...(pricing.tiers || []), ...(pricing.business || [])].find((t) => t.tier === ent.currentTier) || null;
+    const tierInfo = [...(pricing.tiers || []), ...(pricing.business || []), ...(pricing.maintenance ? [pricing.maintenance] : [])].find((t) => t.tier === ent.currentTier) || null;
     res.json({
       user_id: req.user.id,
       current_tier: ent.currentTier,
@@ -230,7 +230,8 @@ router.get("/account/subscription-status", authMiddleware, async (req, res) => {
       billing_period_start: ent.billingPeriodStart,
       billing_period_end: ent.billingPeriodEnd,
       cancel_at: ent.cancelAt || null,
-      status: ent.currentTier === "social_snapshot" ? "free" : ent.cancelAt ? "cancel_pending" : "active",
+      paused_until: ent.pausedUntil || null,
+      status: ent.currentTier === "social_snapshot" ? "free" : ent.pausedUntil ? "paused" : ent.cancelAt ? "cancel_pending" : "active",
       email_paused: !!(await geDb.getUserById(req.user.id))?.emailPaused,
       email_prefs: await require("../growth_engine_email").prefsFor(req.user.id),
     });
@@ -331,13 +332,60 @@ router.post("/account/email/pause", authMiddleware, async (req, res) => {
 });
 
 // Cancel at period end — one call, no questions. Reports and history stay.
+// Cancel screen (spec 4.3): what they'd lose, plus the pause and maintenance offers.
+router.get("/billing/cancel-preview", authMiddleware, async (req, res) => {
+  try {
+    const ent = await geDb.getEffectiveEntitlement(req.user.id);
+    const reports = await geDb.listReportsByAccount(req.user.id);
+    const latest = reports[0] || null; const b = latest?.reportBody || {};
+    const pricing = billingManager.getPricing();
+    res.json({
+      current_tier: ent.currentTier, ends_at: ent.cancelAt || ent.billingPeriodEnd || null, paused_until: ent.pausedUntil || null,
+      lose: { runs: reports.length, first_run: reports.length ? reports[reports.length - 1].generatedAt : null, streak_weeks: b.streak?.visible ? b.streak.weeks : 0, next_posts: (b.next_posts || []).length, competitors: (b.competitor_handles || []).length, moves_done: Object.keys(b.moves_done || {}).length, level: b.scores?.level?.name || null },
+      pause: pricing.pause, maintenance: pricing.maintenance,
+      reasons: CANCEL_REASONS,
+    });
+  } catch (err) { sendError(res, 500, "CANCEL_ERROR", err.message); }
+});
+const CANCEL_REASONS = [["price", "Too expensive"], ["not_using", "I wasn't using it"], ["no_results", "It didn't move my score"], ["missing", "Missing something I need"], ["break", "Taking a break from posting"], ["other", "Other"]];
 router.post("/billing/cancel", authMiddleware, async (req, res) => {
   try {
+    const ent = await geDb.getEffectiveEntitlement(req.user.id);
     const r = await billingManager.cancelSubscription(req.user.id);
-    if (req.body && typeof req.body.reason === "string" && req.body.reason.trim()) console.log(`[Billing] cancel reason from ${req.user.id}: ${req.body.reason.trim().slice(0, 200)}`);
-    events.track("cancel", { ...events.attribution(req), props: { reason: (req.body?.reason || "").slice(0, 200) || null, status: r.status } });
+    const code = CANCEL_REASONS.some(([k]) => k === req.body?.reason_code) ? req.body.reason_code : null;
+    const text = typeof req.body?.reason === "string" ? req.body.reason.trim().slice(0, 300) : "";
+    if (code || text) { try { await geDb.insertCancelReason({ accountId: req.user.id, tier: ent.currentTier, action: "cancel", reasonCode: code, reasonText: text || null }); } catch { /* fine */ } }
+    events.track("cancel", { ...events.attribution(req), props: { reason_code: code, reason: text || null, status: r.status } });
     res.json(r);
   } catch (err) { sendError(res, 500, "CANCEL_ERROR", err.message); }
+});
+// Pause instead of cancel (spec 4.1).
+router.post("/billing/pause", authMiddleware, async (req, res) => {
+  try {
+    const ent = await geDb.getEffectiveEntitlement(req.user.id);
+    const r = await billingManager.pauseSubscription(req.user.id, req.body?.months);
+    if (r.status === "paused") { try { await geDb.insertCancelReason({ accountId: req.user.id, tier: ent.currentTier, action: `pause_${r.months}m`, reasonCode: CANCEL_REASONS.some(([k]) => k === req.body?.reason_code) ? req.body.reason_code : null, reasonText: null }); } catch { /* fine */ } }
+    events.track("pause", { ...events.attribution(req), props: { months: r.months || null, status: r.status } });
+    res.json(r);
+  } catch (err) { sendError(res, 500, "PAUSE_ERROR", err.message); }
+});
+router.post("/billing/unpause", authMiddleware, async (req, res) => {
+  try { const r = await billingManager.unpauseSubscription(req.user.id); events.track("unpause", events.attribution(req)); res.json(r); }
+  catch (err) { sendError(res, 500, "PAUSE_ERROR", err.message); }
+});
+// Maintenance tier (spec 4.2) and back.
+router.post("/billing/switch", authMiddleware, async (req, res) => {
+  try {
+    const tier = String(req.body?.tier || "");
+    const ent = await geDb.getEffectiveEntitlement(req.user.id);
+    const r = await billingManager.switchTier(req.user.id, tier);
+    if (!r.unchanged) { try { await geDb.insertCancelReason({ accountId: req.user.id, tier: ent.currentTier, action: `switch_${tier}`, reasonCode: CANCEL_REASONS.some(([k]) => k === req.body?.reason_code) ? req.body.reason_code : null, reasonText: null }); } catch { /* fine */ } }
+    events.track("tier_switch", { ...events.attribution(req), props: { from: ent.currentTier, to: tier } });
+    res.json(r);
+  } catch (err) { sendError(res, 400, "SWITCH_ERROR", err.message); }
+});
+router.get("/admin/cancel-reasons", requireAdmin, async (req, res) => {
+  try { res.json({ reasons: await geDb.listCancelReasons(Math.min(500, Number(req.query.limit) || 200)), codes: CANCEL_REASONS }); } catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
 });
 router.post("/billing/resume", authMiddleware, async (req, res) => {
   try { const r = await billingManager.resumeSubscription(req.user.id); events.track("resume", events.attribution(req)); res.json(r); }
