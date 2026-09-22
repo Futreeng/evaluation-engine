@@ -48,7 +48,7 @@ const scoreRow = (oldS, newS) => `<div style="margin-top:20px;font-family:'Brico
 
 // All sending goes through the email service (preferences, footer, log).
 // `tag` is the template name; `type` the preference bucket.
-const TYPE_OF = { report_ready: "transactional", password_reset: "transactional", checkin: "monday_move", monday_move: "monday_move", score_changed: "weekly_score", plan_ended: "weekly_score", moment: "milestones" };
+const TYPE_OF = { report_ready: "transactional", password_reset: "transactional", checkin: "monday_move", monday_move: "monday_move", score_changed: "weekly_score", plan_ended: "weekly_score", moment: "milestones", post_review: "post_reviews" };
 async function send({ to, userId = null, subject, html, tag, devLink, optOutUrl = null }) {
   let uid = userId;
   if (!uid && to) { try { uid = (await geDb.getUserByEmail(String(to).toLowerCase()))?.userId || null; } catch { /* anonymous recipient */ } }
@@ -110,6 +110,19 @@ function mondayMove({ to, userId, handle, reportId, paid, kind, move, doneUrl, o
   return send({ to, userId, subject, html: layout("Monday move", inner, { userId }), tag: "monday_move", optOutUrl: oo });
 }
 
+// 48-hour post review (spec 3.1). Pref: post_reviews.
+function postReview({ to, userId, handle, reportId, review: r }) {
+  const url = reportUrl(reportId);
+  const m = r.metrics || {}; const v = r.review || {};
+  const inner = h2(`Your ${esc(r.type || "post")} from ${esc(new Date(r.posted_at).toLocaleDateString("en-GB", { day: "numeric", month: "short" }))}, 48 hours in.`)
+    + (r.caption ? `<div style="margin:0 0 14px;padding:12px 16px;background:#FFF6E9;border-radius:12px;font-size:14px;line-height:1.5;color:#5B4C3B">“${esc(r.caption.slice(0, 120))}${r.caption.length > 120 ? "…" : ""}”</div>` : "")
+    + `<div style="font-size:14px;line-height:1.6;color:#2A2118"><b>How it did.</b> ${esc(v.performance)}${m.vs_avg != null ? ` <span style="color:#7A6A57">(${esc(m.likes)} likes · ${esc(m.comments)} comments · ${esc(m.vs_avg)}× your average)</span>` : ""}</div>`
+    + `<div style="margin-top:10px;font-size:14px;line-height:1.6;color:#2A2118"><b>Likely why.</b> ${esc(v.likely_reason)}</div>`
+    + `<div style="margin-top:10px;font-size:14px;line-height:1.6;color:#2A2118"><b>Next post.</b> ${esc(v.next)}</div>`
+    + button(`${url}?review=${encodeURIComponent(r.post_id)}`, "See all reviews") + (r.permalink ? ghost(r.permalink, "Open the post") : "");
+  return send({ to, userId, subject: `@${handle}: your ${r.type || "post"} at 48 hours — ${m.vs_avg != null ? `${m.vs_avg}× your average` : "reviewed"}`, html: layout("Post review", inner, { userId }), tag: "post_review" });
+}
+
 // Rank-up or milestone after a rescore (spec 2.2, 2.5). Pref: milestones.
 function moment({ to, userId, handle, reportId, moment: m }) {
   const url = reportUrl(reportId);
@@ -136,4 +149,4 @@ function passwordReset({ to, resetUrl }) {
   return send({ to, subject: "Reset your Scalecraft password", html: layout("Reset your password", inner), tag: "password_reset", devLink: resetUrl });
 }
 
-module.exports = { send, reportReady, checkin, scoreChanged, planEnded, passwordReset, moment, mondayMove, moveDoneUrl, optOutUrl, reportUrl, pauseSig, layout, configured: () => email.configured() };
+module.exports = { send, reportReady, checkin, scoreChanged, planEnded, passwordReset, moment, mondayMove, postReview, moveDoneUrl, optOutUrl, reportUrl, pauseSig, layout, configured: () => email.configured() };

@@ -754,6 +754,12 @@
         ${goalNow && !showGoalAsk && !isSample ? raw((() => { const gp = goalProgress(goalNow, report.goal_target || sget('sc_goal', null)?.goal_target || null, report); return gp ? h`<div class="goalbar"><div class="t"><span class="l">${goalLabel(goalNow)}</span><span class="v">${gp.label}</span></div><div class="bar"><div class="fill" style="width:${gp.pct}%"></div></div><div class="fine">${gp.sub}</div></div>` : ''; })()) : ''}
         <div class="roastwrap" id="roastWrap" hidden></div>
         <div class="brief" id="briefWrap" hidden></div>
+        ${paid && !isSample && (report.post_reviews || []).length ? raw(h`<details class="card reviews" open><summary>Your posts, 48 hours in <span class="fine">${report.post_reviews.length} reviewed</span></summary>
+          <div class="rlist">${raw(report.post_reviews.map(r => h`<div class="rv" id="rv-${r.post_id}"><div class="h"><span class="when">${fmtDate(r.posted_at)} · ${String(r.type || '').toUpperCase()}</span><span class="vs ${r.metrics?.vs_avg >= 1.05 ? 'up' : r.metrics?.vs_avg < 0.8 ? 'down' : ''}">${r.metrics?.vs_avg != null ? `${r.metrics.vs_avg}× your average` : ''}</span></div>
+            ${r.caption ? raw(h`<div class="cap">“${r.caption.slice(0, 120)}${r.caption.length > 120 ? '…' : ''}”</div>`) : ''}
+            <p><b>How it did.</b> ${r.review?.performance || ''}</p><p><b>Likely why.</b> ${r.review?.likely_reason || ''}</p><p><b>Next post.</b> ${r.review?.next || ''}</p>
+            <div class="fine">${fmtN(r.metrics?.likes)} likes · ${fmtN(r.metrics?.comments)} comments${r.metrics?.views ? ` · ${fmtN(r.metrics.views)} views` : ''}${r.permalink ? raw(h` · <a href="${r.permalink}" target="_blank" rel="noopener">Open the post</a>`) : ''}</div></div>`).join(''))}</div>
+          <div class="fine">We re-read your profile every couple of days; each new post gets a review about 48 hours after it goes up.</div></details>`) : paid && !isSample ? raw(h`<div class="fine reviews-soon">New posts get a 48-hour review here — how each one did against your own average, and what to repeat.</div>`) : ''}
         <div class="report">
           <div class="toprow">
             <div class="card scorebox">
@@ -960,6 +966,7 @@
     $view.querySelectorAll('[data-nudge]').forEach(b => b.addEventListener('click', () => answer(b, { nudge: b.dataset.nudge, changed: b.dataset.changed === '1' }, 'Kept as is.')));
     if (subscriber && qs.get('checkin') && qs.get('changed') === '0' && !checkins['p' + qs.get('checkin')]) { const b = $view.querySelector('[data-checkin]'); if (b) b.click(); else answer({ disabled: false }, { phase: Number(qs.get('checkin')), changed: false }, 'Carrying on.'); }
     if (qs.get('nudge')) document.getElementById('nudge')?.scrollIntoView({ behavior: 'smooth' });
+    if (qs.get('review')) document.getElementById('rv-' + qs.get('review'))?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     if (qs.get('done')) { const k = qs.get('done'); toast(k === 'invalid' ? "That link didn't work — mark the move done on the report." : 'Marked done. It counts toward your next rescore.'); const row = $view.querySelector(`[data-row="${k}"]`); if (row) { row.classList.add('on'); row.scrollIntoView({ behavior: 'smooth', block: 'center' }); } }
     // next posts: copy fields, regenerate one
     $view.querySelectorAll('.npost [data-copy]').forEach(b => b.addEventListener('click', async () => {
@@ -1231,7 +1238,7 @@
     let list, subn = null, refs = null, me;
     try { [list, subn, refs, me] = await Promise.all([api('/account/reports'), api('/account/subscription-status').catch(() => null), api('/account/referrals').catch(() => null), api('/auth/me').catch(() => null)]); } catch (e) { if (e.status === 401) return; $view.innerHTML = h`<div class="center-msg"><h2>Couldn’t load reports.</h2>${e.message}</div>`; return; }
     // Email preferences (spec 1.6): four toggles + pause all. Receipts, report-ready and password emails always send.
-    const PREF_LABELS = [['weekly_score', 'Weekly score', 'Your re-score and what changed'], ['monday_move', 'Plan check-ins and Monday move', 'Day-30/60 check-ins, the week\'s move'], ['milestones', 'Milestones', 'Rank-ups and personal records'], ['product_news', 'Product news', 'What\'s new, occasionally']];
+    const PREF_LABELS = [['weekly_score', 'Weekly score', 'Your re-score and what changed'], ['monday_move', 'Plan check-ins and Monday move', 'Day-30/60 check-ins, the week\'s move'], ['post_reviews', 'Post reviews', 'Each new post, reviewed 48 hours in'], ['milestones', 'Milestones', 'Rank-ups and personal records'], ['product_news', 'Product news', 'What\'s new, occasionally']];
     const emailPrefsHTML = prefs => {
       const p = prefs || {};
       return h`<div class="emailprefs"><div class="n">Email</div>

@@ -12,6 +12,7 @@
  *   weekly_score   weekly re-score results, plan ended
  *   monday_move    plan check-ins and the Monday move
  *   milestones     rank-ups, records, milestone cards (wave 2)
+ *   post_reviews   48-hour reviews of new posts (3.1, paid)
  *   product_news   product updates
  * users.email_paused stays as the master switch (everything but transactional).
  * Every send is logged to growth_engine_email_log with type, user, status and
@@ -20,9 +21,9 @@
 const crypto = require("crypto");
 const geDb = require("./growth_engine_db_select");
 
-const TYPES = ["transactional", "weekly_score", "monday_move", "milestones", "product_news"];
+const TYPES = ["transactional", "weekly_score", "monday_move", "milestones", "post_reviews", "product_news"];
 const PREF_TYPES = TYPES.filter((t) => t !== "transactional");
-const DEFAULT_PREFS = { weekly_score: true, monday_move: true, milestones: true, product_news: true };
+const DEFAULT_PREFS = { weekly_score: true, monday_move: true, milestones: true, post_reviews: true, product_news: true };
 const APP = (process.env.APP_URL || "http://localhost:3005").replace(/\/$/, "");
 const FROM = process.env.MAIL_FROM || "Scalecraft <onboarding@resend.dev>";
 const POSTAL = process.env.EMAIL_POSTAL_ADDRESS || "";

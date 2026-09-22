@@ -283,7 +283,7 @@ router.get("/email/unsubscribe", async (req, res) => {
   const ok = emailSvc.verifyUnsub(u, t, s) && (t === "all" || emailSvc.PREF_TYPES.includes(t));
   if (ok) { try { if (t === "all") await geDb.setEmailPaused(u, true); else { const cur = await emailSvc.prefsFor(u); const next = {}; for (const k of emailSvc.PREF_TYPES) next[k] = cur[k] !== false; next[t] = false; await geDb.setEmailPrefs(u, next); } } catch { /* fall through */ } }
   const app = (process.env.APP_URL || "").replace(/\/$/, "") || "";
-  const label = { weekly_score: "weekly score emails", monday_move: "plan check-ins and Monday moves", milestones: "milestone emails", product_news: "product news" }[t] || "all emails except receipts";
+  const label = { weekly_score: "weekly score emails", monday_move: "plan check-ins and Monday moves", milestones: "milestone emails", post_reviews: "post review emails", product_news: "product news" }[t] || "all emails except receipts";
   res.type("html").send(`<!DOCTYPE html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Scalecraft</title>
 <body style="margin:0;background:#FFF6E9;font-family:Helvetica,Arial,sans-serif;color:#2A2118"><div style="max-width:520px;margin:48px auto;padding:28px;background:#FFFDF8;border:1px solid #EADFCB;border-radius:24px">
 <h1 style="margin:0;font-size:26px">${ok ? "Unsubscribed." : "That link didn't work."}</h1>
