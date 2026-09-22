@@ -25,6 +25,15 @@ Demo (mock data, no backend): `scalecraft-demo.vercel.app`, deployed with `scrip
 
 New tables (both backends create them on boot): `growth_engine_events`, `_costs`, `_move_log`, `_move_outcomes`, `_shares`, `_referrals`, `_email_log`, `_roast_rejections`, `_niche_briefs`, `_cancel_reasons`, plus columns on `users` (email prefs, niche, is_business, price_variant, ref_code, goal, goal_target, utm) and `entitlements` (cancel_at, paused_until, pause_started_at, pause_ended_at, lapsed_at). No migrations to run by hand.
 
+## What's on the `feat/path` PR
+
+The plan generator now writes phases in order with a dedupe validator and one fixed
+posting schedule, and there is a new Path screen (`#/path/:report`) that walks the plan
+one step at a time with verification at each rescore. Spec in `docs/PATH_SPEC.md`, the
+list in `docs/WHAT_WE_BUILT.md` under "The Path". Nothing new for Render env. The shipped
+sample was cleaned by the deterministic rules; regenerate it from a fresh paid run when
+LLM quota allows (`docs/PATH_SPEC.md`, "Not in this build").
+
 ## Your part
 
 1. **Merge #5 and #6** → Render redeploys → set the env below → `SMOKE_BASE=https://scalecraft.onrender.com node scripts/smoke.js` (expect 20/20 once the Stripe placeholder is gone).
