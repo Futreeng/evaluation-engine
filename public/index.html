@@ -15,9 +15,11 @@
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+<a class="skip" href="#view">Skip to content</a>
 <div class="shell">
   <header id="header"></header>
-  <main id="view" class="page"></main>
+  <main id="view" class="page" tabindex="-1"></main>
+  <div id="toastLive" class="sr-only" aria-live="polite" aria-atomic="true"></div>
 </div>
 <script src="config.js?v=6"></script>
 <script src="sample-report.js?v=6"></script>

@@ -148,7 +148,8 @@
   function toast(msg) {
     let el = document.querySelector('.toast');
     if (!el) { el = document.createElement('div'); el.className = 'toast'; document.body.appendChild(el); }
-    el.textContent = msg; el.hidden = false;
+    el.textContent = msg; el.hidden = false; el.setAttribute('role', 'status');
+    const live = document.getElementById('toastLive'); if (live) { live.textContent = ''; setTimeout(() => { live.textContent = msg; }, 50); }
     clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, 3200);
   }
 
@@ -249,8 +250,8 @@
             <form class="darkform" id="evalForm" novalidate>
               <div class="ql formlead">Score your account. See exactly why. Get the plan.</div>
               <div class="row">
-                <div class="field"><div class="handle"><span>@</span><input type="text" name="handle" placeholder="yourhandle" autocomplete="off" autocapitalize="none" spellcheck="false" value="${CFG.useMock && !last.handle ? 'humansofny' : (last.handle || '')}" aria-label="Your handle"></div></div>
-                <div class="field selwrap"><select name="category" aria-label="Niche">${raw(NICHES.map(([k, n]) => h`<option value="${k}" ${k === niche ? 'selected' : ''}>${n}</option>`).join(''))}</select></div>
+                <div class="field"><label class="flabel" for="evHandle">Your handle</label><div class="handle"><span>@</span><input id="evHandle" type="text" name="handle" placeholder="yourhandle" autocomplete="off" autocapitalize="none" spellcheck="false" value="${CFG.useMock && !last.handle ? 'humansofny' : (last.handle || '')}" aria-label="Your handle"></div></div>
+                <div class="field selwrap"><label class="flabel" for="evNiche">Your niche</label><select id="evNiche" name="category" aria-label="Niche">${raw(NICHES.map(([k, n]) => h`<option value="${k}" ${k === niche ? 'selected' : ''}>${n}</option>`).join(''))}</select></div>
               </div>
               <div class="field" id="otherWrap" ${niche === 'other' ? '' : 'hidden'}><input type="text" name="other" placeholder="Your niche, in a word or two" value="${last.other || ''}" aria-label="Your niche"></div>
               <div class="optq bizq"><div class="ql">Is this a business account?</div>
@@ -265,7 +266,7 @@
               <div class="optq"><div class="ql">Your next 90 days <span>optional</span></div>
                 <div class="chips" role="radiogroup" aria-label="Your next 90 days">${raw([['usual', 'Business as usual'], ['fewer_shoots', 'Fewer new shoots'], ['launch', 'Something launching']].map(([k, n]) => h`<button type="button" class="chip ${last.horizon === k ? 'on' : ''}" data-horizon="${k}" role="radio" aria-checked="${last.horizon === k}">${n}</button>`).join(''))}</div>
                 <div class="hint">Shapes your first three moves. The Growth Plan asks four more so the whole plan fits.</div></div>
-              <div class="field"><input type="email" name="email" placeholder="you@email.com — where to send it" autocomplete="email" value="${last.email || ''}" aria-label="Email"></div>
+              <div class="field"><label class="flabel" for="evEmail">Email — where we send the report</label><input id="evEmail" type="email" name="email" placeholder="you@email.com" autocomplete="email" value="${last.email || ''}" aria-label="Email"></div>
               <div class="form-error" id="formError" hidden></div>
               <div class="cta">
                 <button class="btn" type="submit">Score my account — free</button>
@@ -287,13 +288,13 @@
         </section>
 
         <section class="founders" id="founders">
-          <div class="t"><h3>Founders pricing</h3><p>${(() => { const f = sget('sc_pricing', null)?.founders; return f ? `${fmtN(f.left)} of ${fmtN(f.cap)} spots left — Growth at $${f.monthlyPrice}/mo, locked in for as long as you stay. Leave your email for the launch note.` : 'The first subscribers lock Growth at the launch price for as long as they stay. Leave your email for the launch note.'; })()} <a href="#/pricing">See pricing →</a></p></div>
+          <div class="t"><h2>Founders pricing</h2><p>${(() => { const f = sget('sc_pricing', null)?.founders; return f ? `${fmtN(f.left)} of ${fmtN(f.cap)} spots left — Growth at $${f.monthlyPrice}/mo, locked in for as long as you stay. Leave your email for the launch note.` : 'The first subscribers lock Growth at the launch price for as long as they stay. Leave your email for the launch note.'; })()} <a href="#/pricing">See pricing →</a></p></div>
           <form id="foundersForm"><input type="email" name="email" placeholder="you@email.com" aria-label="Email"><button class="btn light" type="submit">Count me in</button></form>
         </section>
 
         <section class="card sharepromo">
           <div class="mini"><canvas id="promoCard" width="1080" height="1920"></canvas></div>
-          <div class="t"><h3>Post your score</h3><p>Creators post their number. Then they post the one six weeks later.</p></div>
+          <div class="t"><h2>Post your score</h2><p>Creators post their number. Then they post the one six weeks later.</p></div>
         </section>
       </div>
       ${raw(footer())}`;
@@ -557,6 +558,28 @@
   }
   function roundRect(ctx, x, y, w, hh, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + hh, r); ctx.arcTo(x + w, y + hh, x, y + hh, r); ctx.arcTo(x, y + hh, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
 
+  // Modal sheets (WCAG 2.1.2 / 2.4.3): trap Tab inside, Escape closes, focus goes back where it came from.
+  function mountSheet(el, { label, onClose } = {}) {
+    const opener = document.activeElement;
+    const panel = el.querySelector('.panel') || el;
+    panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-modal', 'true'); if (label) panel.setAttribute('aria-label', label);
+    document.body.appendChild(el);
+    const focusables = () => [...panel.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')].filter(x => !x.disabled && x.offsetParent !== null);
+    const first = focusables()[0]; (first || panel).focus?.();
+    if (!first) { panel.tabIndex = -1; panel.focus(); }
+    const key = e => {
+      if (e.key === 'Escape') { e.preventDefault(); close(); return; }
+      if (e.key !== 'Tab') return;
+      const f = focusables(); if (!f.length) return;
+      const i = f.indexOf(document.activeElement);
+      if (e.shiftKey && (i <= 0)) { e.preventDefault(); f[f.length - 1].focus(); }
+      else if (!e.shiftKey && (i === f.length - 1 || i === -1)) { e.preventDefault(); f[0].focus(); }
+    };
+    document.addEventListener('keydown', key);
+    const close = () => { document.removeEventListener('keydown', key); el.remove(); if (onClose) onClose(); if (opener && opener.focus && document.contains(opener)) opener.focus(); };
+    el.addEventListener('click', e => { if (e.target === el) close(); });
+    return close;
+  }
   function drawMomentCard(canvas, s, size, m) {
     const W = 1080, H = size === 'square' ? 1080 : 1920, P = 84; canvas.width = W; canvas.height = H;
     const ctx = canvas.getContext('2d'); const cs = getComputedStyle(document.documentElement);
@@ -579,15 +602,16 @@
     el.innerHTML = h`<div class="panel" role="dialog" aria-label="Share your score"><div class="grab"></div>
       <div class="row">
         <div class="preview"><canvas id="shareCanvas"></canvas></div>
-        <div class="opts"><h3>${moment ? (moment.kind === 'roast' ? 'Post the roast' : moment.title) : 'Post your score'}</h3>
+        <div class="opts"><h2>${moment ? (moment.kind === 'roast' ? 'Post the roast' : moment.title) : 'Post your score'}</h2>
           <div class="sizes"><button type="button" class="pill dark" data-size="story">Story 1080×1920</button><button type="button" class="pill" data-size="square">Square</button></div>
           ${!moment && prev != null && prev !== s.overall ? raw(h`<label class="check"><input type="checkbox" id="thenNow" checked> Show ${prev} → ${s.overall}</label>`) : ''}
           <button type="button" class="btn" data-share="post">Post your score</button>
           <button type="button" class="btn ghost" data-share="save">Save image</button>
           <button type="button" class="btn ghost" data-share="copy">Copy link</button>
         </div></div></div>`;
-    document.body.appendChild(el);
+    const close = mountSheet(el, { label: moment ? (moment.kind === 'roast' ? 'Post the roast' : moment.title) : 'Share your score' });
     const canvas = el.querySelector('#shareCanvas');
+    canvas.setAttribute('role', 'img'); canvas.setAttribute('aria-label', moment ? `${moment.title} card for @${s.handle}` : `Score card: @${s.handle} scored ${s.overall} out of 100`);
     let size = 'story';
     // Server-rendered card (spec 1.7) with a public share page; the client
     // canvas stays as the fallback (mock mode, sample, or the call failing).
@@ -606,8 +630,6 @@
     redraw();
     el.querySelectorAll('[data-size]').forEach(b => b.addEventListener('click', () => { size = b.dataset.size; el.querySelectorAll('[data-size]').forEach(x => x.classList.toggle('dark', x === b)); redraw(); }));
     el.querySelector('#thenNow')?.addEventListener('change', () => { share = null; redraw(); });
-    const close = () => el.remove();
-    el.addEventListener('click', e => { if (e.target === el) close(); });
     const toBlob = async () => { if (share) { try { const r = await fetch(share.png[size]); if (r.ok) return await r.blob(); } catch { } } return new Promise(r => canvas.toBlob(r, 'image/png')); };
     el.querySelector('[data-share=save]').addEventListener('click', async () => {
       if (report.report_id !== 'sample') track('card_downloaded', { size }, report.report_id);
@@ -767,14 +789,14 @@
       <div class="wrap">
         ${isSample ? raw(h`<div class="samplebar"><b>Sample report.</b> A real Growth Plan for a real account, scored ${fmtDate(report.created_at)}. Yours is written from your own posts. <a href="#/" data-scroll="evalForm">Score my account →</a></div>`) : ''}
         <div class="rhead">
-          <div class="l"><span class="h">@${biz.handle || ''}</span><span class="ctx">${platName(biz.platform)} · ${niche} · ${fmtDate(report.created_at)}</span>${paid ? raw(h`<span class="tag dark">${once ? '60-DAY PLAN' : 'GROWTH PLAN'}</span>`) : ''}</div>
+          <div class="l"><h1 class="h">@${biz.handle || ''}</h1><span class="ctx">${platName(biz.platform)} · ${niche} · ${fmtDate(report.created_at)}</span>${paid ? raw(h`<span class="tag dark">${once ? '60-DAY PLAN' : 'GROWTH PLAN'}</span>`) : ''}</div>
           <div class="r">${isSample ? '' : raw(h`<button class="btn ghost sm" data-action="email-report">Email me this report</button>`)}${isSample || !CFG.roast ? '' : raw(h`<button class="btn sm roastbtn" data-action="roast">${report.roast ? 'See my roast' : 'Roast me'} 🔥</button>`)}<button class="btn dark sm" data-action="share">${isSample ? 'Share this sample' : 'Share my score'}</button></div>
         </div>
         ${paid ? raw(h`<div class="ctxrow">${ctx ? raw(contextChips(ctx) + (ctx.notes ? h`<span class="chip note">“${ctx.notes}”</span>` : '')) : raw(h`<span class="chip empty">Written without your answers</span>`)}${isSample ? '' : once ? '' : raw(h`<a class="edit" href="#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=edit">${ctx ? 'Plans changed? Update' : 'Tell us about your next 90 days'} →</a>`)}</div>`)
         : raw(h`<div class="ctxrow free">${ctx && ctx.horizon ? raw(h`<span class="chip">${ctxLabel('horizon', ctx.horizon)}</span><span class="ex">Your three first moves were written around this. The Growth Plan asks four more — time, goal, how you make content — so every move and calendar slot fits.</span>`) : raw(h`<span class="chip empty">Written as business as usual</span><span class="ex">The Growth Plan asks four short questions — your next 90 days, time, goal, how you make content — so every move and calendar slot fits your life.</span>`)}</div>`)}
-        ${duePhase ? raw(h`<div class="checkin"><div class="t"><div class="eb">DAY ${Math.round(ageDays)} · CHECK-IN</div><h3>Phase ${duePhase} starts. Anything change?</h3><p>The next 30 days were written when you started. If your time, goal or next few weeks changed, the plan is rewritten tonight.</p></div><div class="acts"><button class="btn green" data-checkin="${duePhase}" data-changed="0">Nothing changed</button><a class="btn ghost" href="#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=checkin&phase=${duePhase}">Something changed</a></div></div>`) : ''}
-        ${nudge ? raw(h`<div class="checkin nudge" id="nudge"><div class="t"><div class="eb">FROM THIS WEEK'S RE-SCORE</div><h3>${nudge.title}</h3><p>${nudge.text}</p></div><div class="acts"><button class="btn" data-nudge="${nudge.key}" data-changed="1">${nudge.cta}</button><button class="btn ghost" data-nudge="${nudge.key}" data-changed="0">Keep the plan as is</button></div></div>`) : ''}
-        ${raw(momentsToShow.slice(0, 1).map(m => h`<div class="moment ${m.kind}" data-moment="${m.key}"><div class="t"><div class="eb">${m.kind === 'rank_up' ? 'RANK UP' : m.kind === 'record' ? 'PERSONAL RECORD' : m.kind === 'badge' ? 'BADGE' : 'MILESTONE'} · FROM THIS RE-SCORE</div><h3>${m.title}</h3><p>${m.line}</p></div><div class="acts"><button class="btn dark" data-moment-share="${m.key}">Share the card</button><button class="btn ghost" data-moment-dismiss="${m.key}">Later</button></div></div>`).join(''))}
+        ${duePhase ? raw(h`<div class="checkin"><div class="t"><div class="eb">DAY ${Math.round(ageDays)} · CHECK-IN</div><h2>Phase ${duePhase} starts. Anything change?</h2><p>The next 30 days were written when you started. If your time, goal or next few weeks changed, the plan is rewritten tonight.</p></div><div class="acts"><button class="btn green" data-checkin="${duePhase}" data-changed="0">Nothing changed</button><a class="btn ghost" href="#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=checkin&phase=${duePhase}">Something changed</a></div></div>`) : ''}
+        ${nudge ? raw(h`<div class="checkin nudge" id="nudge"><div class="t"><div class="eb">FROM THIS WEEK'S RE-SCORE</div><h2>${nudge.title}</h2><p>${nudge.text}</p></div><div class="acts"><button class="btn" data-nudge="${nudge.key}" data-changed="1">${nudge.cta}</button><button class="btn ghost" data-nudge="${nudge.key}" data-changed="0">Keep the plan as is</button></div></div>`) : ''}
+        ${raw(momentsToShow.slice(0, 1).map(m => h`<div class="moment ${m.kind}" data-moment="${m.key}"><div class="t"><div class="eb">${m.kind === 'rank_up' ? 'RANK UP' : m.kind === 'record' ? 'PERSONAL RECORD' : m.kind === 'badge' ? 'BADGE' : 'MILESTONE'} · FROM THIS RE-SCORE</div><h2>${m.title}</h2><p>${m.line}</p></div><div class="acts"><button class="btn dark" data-moment-share="${m.key}">Share the card</button><button class="btn ghost" data-moment-dismiss="${m.key}">Later</button></div></div>`).join(''))}
         <div class="report">
           <div class="toprow">
             <div class="card scorebox">
@@ -794,16 +816,16 @@
               <p class="a">${thisWeek.action}</p>
               ${thisWeek.detail ? raw(h`<p class="w">${thisWeek.detail}</p>`) : ''}
               ${paid && thisWeek.opener ? raw(moveDetailHTML(thisWeek.opener, true)) : ''}
-              <button class="done ${isDone('p1m1') ? 'on' : ''}" data-move="p1m1"><span class="box">${isDone('p1m1') ? '✓' : ''}</span>Mark this move done</button>
+              <button class="done ${isDone('p1m1') ? 'on' : ''}" data-move="p1m1" aria-pressed="${isDone('p1m1') ? 'true' : 'false'}"><span class="box" aria-hidden="true">${isDone('p1m1') ? '✓' : ''}</span>Mark this move done</button>
               ${nextPhase ? raw(h`<div class="next">Next: Day 31 — ${nextPhase.label}</div>`) : ''}
             </div>`) : ''}
           </div>
 
-        ${showGoalAsk ? raw(h`<div class="card goalcard ask" id="goalAsk"><div class="eb">ONE QUESTION</div><h3>What do you want from this?</h3><p>The plan, your Monday move and the posts we write all lean toward it. Change it any time on your reports page.</p>${raw(goalPickerHTML(null, null, followers, { first: true }))}</div>`) : ''}
+        ${showGoalAsk ? raw(h`<div class="card goalcard ask" id="goalAsk"><div class="eb">ONE QUESTION</div><h2>What do you want from this?</h2><p>The plan, your Monday move and the posts we write all lean toward it. Change it any time on your reports page.</p>${raw(goalPickerHTML(null, null, followers, { first: true }))}</div>`) : ''}
         <div class="roastwrap" id="roastWrap" hidden></div>
         <div class="statusrow">
         ${goalNow && !showGoalAsk && !isSample ? raw((() => { const gp = goalProgress(goalNow, report.goal_target || sget('sc_goal', null)?.goal_target || null, report); return gp ? h`<div class="goalbar"><div class="t"><span class="l">${goalLabel(goalNow)}</span><span class="v">${gp.label}</span></div><div class="bar"><div class="fill" style="width:${gp.pct}%"></div></div><div class="fine">${gp.sub}</div></div>` : ''; })()) : ''}
-        ${paid && !isSample && report.quest ? raw(h`<div class="card questcard"><div class="eb">THIS WEEK'S QUEST${report.quest.week ? raw(h` · WEEK ${report.quest.week}`) : ''}</div><h3>${report.quest.title}</h3><div class="bar"><div class="fill" style="width:${clamp(Math.round((report.quest.progress || 0) / Math.max(1, report.quest.target?.n || 1) * 100), 0, 100)}%"></div></div><div class="fine">${report.quest.done ? 'Done — counted at your rescore.' : `${report.quest.progress || 0} of ${report.quest.target?.n || '?'} so far · ends ${fmtShort(report.quest.ends_at)} · checked at your next rescore`}</div>${(report.quest_history || []).length ? raw(h`<div class="qh">${raw(report.quest_history.slice(-4).reverse().map(q => h`<span class="${q.done ? 'ok' : ''}">${q.done ? '✓' : '·'} ${q.title} (${q.progress}/${q.n})</span>`).join(''))}</div>`) : ''}</div>`) : ''}
+        ${paid && !isSample && report.quest ? raw(h`<div class="card questcard"><div class="eb">THIS WEEK'S QUEST${report.quest.week ? raw(h` · WEEK ${report.quest.week}`) : ''}</div><h2>${report.quest.title}</h2><div class="bar"><div class="fill" style="width:${clamp(Math.round((report.quest.progress || 0) / Math.max(1, report.quest.target?.n || 1) * 100), 0, 100)}%"></div></div><div class="fine">${report.quest.done ? 'Done — counted at your rescore.' : `${report.quest.progress || 0} of ${report.quest.target?.n || '?'} so far · ends ${fmtShort(report.quest.ends_at)} · checked at your next rescore`}</div>${(report.quest_history || []).length ? raw(h`<div class="qh">${raw(report.quest_history.slice(-4).reverse().map(q => h`<span class="${q.done ? 'ok' : ''}">${q.done ? '✓' : '·'} ${q.title} (${q.progress}/${q.n})</span>`).join(''))}</div>`) : ''}</div>`) : ''}
         </div>
         <div class="brief" id="briefWrap" hidden></div>
         ${paid && !isSample && (report.post_reviews || []).length ? raw(h`<details class="card acc reviews"><summary>Your posts, 48 hours in <span class="fine">${report.post_reviews.length} reviewed</span></summary>
@@ -812,7 +834,7 @@
             <p><b>How it did.</b> ${r.review?.performance || ''}</p><p><b>Likely why.</b> ${r.review?.likely_reason || ''}</p><p><b>Next post.</b> ${r.review?.next || ''}</p>
             <div class="fine">${fmtN(r.metrics?.likes)} likes · ${fmtN(r.metrics?.comments)} comments${r.metrics?.views ? ` · ${fmtN(r.metrics.views)} views` : ''}${r.permalink ? raw(h` · <a href="${r.permalink}" target="_blank" rel="noopener">Open the post</a>`) : ''}</div></div>`).join(''))}</div>
           <div class="fine">We re-read your profile every couple of days; each new post gets a review about 48 hours after it goes up.</div></details>`) : paid && !isSample ? raw(h`<div class="fine reviews-soon">New posts get a 48-hour review here — how each one did against your own average, and what to repeat.</div>`) : ''}
-        ${paid && !isSample && report.offers && report.offers.annual && !sget('sc_annual_dismissed', false) ? raw(h`<div class="card offercard" id="annualOffer"><div class="eb">YOUR FIRST RISE · ANNUAL PLAN</div><h3>Lock in a year for $${report.offers.annual.annual}.</h3><p>Instead of $${report.offers.annual.monthly * 12} month by month — $${report.offers.annual.saves} off, the same plan, nothing changes in what runs weekly.</p><div class="acts"><button type="button" class="btn dark" data-action="take-annual">Switch to annual</button><button type="button" class="btn ghost" data-action="dismiss-annual">Not now</button></div></div>`) : ''}
+        ${paid && !isSample && report.offers && report.offers.annual && !sget('sc_annual_dismissed', false) ? raw(h`<div class="card offercard" id="annualOffer"><div class="eb">YOUR FIRST RISE · ANNUAL PLAN</div><h2>Lock in a year for $${report.offers.annual.annual}.</h2><p>Instead of $${report.offers.annual.monthly * 12} month by month — $${report.offers.annual.saves} off, the same plan, nothing changes in what runs weekly.</p><div class="acts"><button type="button" class="btn dark" data-action="take-annual">Switch to annual</button><button type="button" class="btn ghost" data-action="dismiss-annual">Not now</button></div></div>`) : ''}
 
           <details class="card acc" open>
             <summary>The four dimensions</summary>
@@ -853,9 +875,9 @@
               return h`<div class="phase">
                 <div class="ph" style="background:${raw(tone)}"><span>${p.days} · ${p.label}</span>${paid && p.not_included ? raw(h`<span class="prog" style="color:${raw(toneT)}">Growth Plan only</span>`) : paid && p.moves.length ? raw(h`<span class="prog" style="color:${raw(toneT)}">${doneN} of ${total} done</span>`) : ''}</div>
                 <div class="pb">
-                  ${paid && p.opener ? raw(h`<div class="mvrow opener ${isSample || i === 0 ? 'open' : ''} ${isDone(p.key + 'm1') ? 'on' : ''}" data-row="${p.key}m1"><button class="box" data-move="${p.key}m1" aria-label="Mark move 01 done">${isDone(p.key + 'm1') ? '✓' : ''}</button><div class="b"><div class="t">01 · ${p.label}</div><p>${p.action}</p>${p.detail ? raw(h`<p class="w">${p.detail}</p>`) : ''}${raw(moveDetailHTML(p.opener))}<span class="more" aria-hidden="true"></span></div></div>`)
+                  ${paid && p.opener ? raw(h`<div class="mvrow opener ${isSample || i === 0 ? 'open' : ''} ${isDone(p.key + 'm1') ? 'on' : ''}" data-row="${p.key}m1"><button class="box" aria-label="Mark move done" aria-pressed="${isDone(p.key + 'm1') ? 'true' : 'false'}" data-move="${p.key}m1" aria-label="Mark move 01 done">${isDone(p.key + 'm1') ? '✓' : ''}</button><div class="b"><div class="t">01 · ${p.label}</div><p>${p.action}</p>${p.detail ? raw(h`<p class="w">${p.detail}</p>`) : ''}${raw(moveDetailHTML(p.opener))}<span class="more" aria-hidden="true"></span></div></div>`)
                   : raw(h`<div class="move"><span class="n">01</span><p>${p.action}</p></div>`)}
-                  ${paid && !p.not_included ? raw(p.moves.map(m => h`<div class="mvrow ${isSample || i === 0 ? 'open' : ''} ${isDone(p.key + 'm' + m.n) ? 'on' : ''}" data-row="${p.key}m${m.n}"><button class="box" data-move="${p.key}m${m.n}" aria-label="Mark move ${m.n} done">${isDone(p.key + 'm' + m.n) ? '✓' : ''}</button><div class="b"><div class="t">${String(m.n).padStart(2, '0')} · ${m.title || ''}</div><p>${m.action}</p>${m.why ? raw(h`<p class="w">Why: ${m.why}</p>`) : ''}${raw(moveDetailHTML(m))}<span class="more" aria-hidden="true"></span></div></div>`).join(''))
+                  ${paid && !p.not_included ? raw(p.moves.map(m => h`<div class="mvrow ${isSample || i === 0 ? 'open' : ''} ${isDone(p.key + 'm' + m.n) ? 'on' : ''}" data-row="${p.key}m${m.n}"><button class="box" aria-label="Mark move done" aria-pressed="${isDone(p.key + 'm' + m.n) ? 'true' : 'false'}" data-move="${p.key}m${m.n}" aria-label="Mark move ${m.n} done">${isDone(p.key + 'm' + m.n) ? '✓' : ''}</button><div class="b"><div class="t">${String(m.n).padStart(2, '0')} · ${m.title || ''}</div><p>${m.action}</p>${m.why ? raw(h`<p class="w">Why: ${m.why}</p>`) : ''}${raw(moveDetailHTML(m))}<span class="more" aria-hidden="true"></span></div></div>`).join(''))
                   : raw(h`<div class="locked"><div class="rows">${raw((p.teasers.length ? p.teasers : Array.from({ length: p.count }, () => 'Written from your posts when you unlock')).slice(0, 4).map((t, k) => h`<div>${String(p.firstLocked + k).padStart(2, '0')} · ${t.replace(/^MOVE \d+\s*·?\s*/i, '')}${/…$/.test(t) ? '' : '…'}</div>`).join(''))}
                       <div class="grid">${raw(Array.from({ length: 28 }, (_, k) => `<span style="${[0, 2, 4, 6].includes(k % 7) ? `background:var(--c${(Math.floor(k / 7) % 4) + 1})` : ''}"></span>`).join(''))}</div></div>
                     <div class="lk"><i>🔒</i>${p.lockedHeader}</div></div>`)}
@@ -894,12 +916,12 @@
           <div class="datawindow">${report.data_window || `Based on your last ${pi?.sample || 12} posts. We can't see saves, reach or story views.`}</div>
 
           ${!paid && sget('sc_limit_msg', null) ? raw(h`<div class="notice">${sget('sc_limit_msg', '')} <a href="#/pricing">See the plan →</a></div>`) : ''}
-          ${isSample ? raw(h`<div class="refresh"><div class="t"><h3>This is what $${price} a month gets you</h3><p>Every move with the reason behind it, a 12-week calendar written from the account's own posts, competitors scored the same way, and a fresh score every week. Yours starts with a free Snapshot.</p></div><a class="btn green" href="#/" data-scroll="evalForm">Score my account free</a></div>`)
-          : paid && once ? raw(h`<div class="notin"><div class="hd"><h3>Not in your 60-day plan</h3><p>Yours to keep, as bought. This is what the Growth Plan adds, for $${price} a month — less than the $${oneTime} you paid once.</p></div>
+          ${isSample ? raw(h`<div class="refresh"><div class="t"><h2>This is what $${price} a month gets you</h2><p>Every move with the reason behind it, a 12-week calendar written from the account's own posts, competitors scored the same way, and a fresh score every week. Yours starts with a free Snapshot.</p></div><a class="btn green" href="#/" data-scroll="evalForm">Score my account free</a></div>`)
+          : paid && once ? raw(h`<div class="notin"><div class="hd"><h2>Not in your 60-day plan</h2><p>Yours to keep, as bought. This is what the Growth Plan adds, for $${price} a month — less than the $${oneTime} you paid once.</p></div>
               <div class="rows">${raw(['Days 61–90 — phase 3, moves 10 through 13', 'Re-scored every week, with what each move changed', 'Day-30 and day-60 check-ins that reshape the plan', 'Up to 5 competitors, scored the same way', 'Score and follower history', 'A fresh plan every 90 days'].map(t => h`<div><i>🔒</i>${t}</div>`).join(''))}</div>
               <button class="btn green" data-action="unlock">Start the plan · $${price}/mo</button></div>`)
-          : paid ? raw(h`<div class="refresh"><div class="t"><h3>This plan refreshes weekly</h3><p>${Object.keys(done).length ? `You did ${Object.keys(done).length} move${Object.keys(done).length === 1 ? '' : 's'} — we'll re-score you and tell you what changed.` : 'Run it again any time — the moves and calendar are rewritten against your latest posts.'}</p></div><a class="btn green" href="#/" data-scroll="evalForm">Run a fresh evaluation</a></div>`)
-          : raw(h`<div class="upsell"><h3>Unlock your full Growth Plan</h3><p>${report.upsell?.unlock_count || 12} locked items: the remaining moves and your week-by-week calendar, written from your own posts — and around four quick answers about your next 90 days, so it's a plan you can actually do.</p>
+          : paid ? raw(h`<div class="refresh"><div class="t"><h2>This plan refreshes weekly</h2><p>${Object.keys(done).length ? `You did ${Object.keys(done).length} move${Object.keys(done).length === 1 ? '' : 's'} — we'll re-score you and tell you what changed.` : 'Run it again any time — the moves and calendar are rewritten against your latest posts.'}</p></div><a class="btn green" href="#/" data-scroll="evalForm">Run a fresh evaluation</a></div>`)
+          : raw(h`<div class="upsell"><h2>Unlock your full Growth Plan</h2><p>${report.upsell?.unlock_count || 12} locked items: the remaining moves and your week-by-week calendar, written from your own posts — and around four quick answers about your next 90 days, so it's a plan you can actually do.</p>
               <div class="paths">
                 <div class="path main"><div class="pn">Growth · <b>$${price}/mo</b>${founders ? raw(h` <span class="fine">founders price · ${fmtN(founders.left)} spots left</span>`) : ''}</div><div class="pd">Your full plan, posts written for you every week, and a score that moves — rescored weekly with check-ins at day 30 and 60.</div><button class="btn" data-action="unlock">Start the plan →</button></div>
                 ${oneTime ? raw(h`<div class="path"><div class="pn">60-day plan · <b>$${oneTime} once</b></div><div class="pd">Phases 1 and 2 — moves 01–09 and 8 weeks of calendar, written once. No subscription.</div><button class="btn light" data-action="unlock-once">Get the 60-day plan</button></div>`) : ''}
@@ -918,7 +940,7 @@
       if (now) done[k] = Date.now(); else delete done[k];
       if (!isSample) lset(doneKey, done);
       const row = b.closest('.mvrow, .done') || b; row.classList.toggle('on', now); (b.classList.contains('box') ? b : b.querySelector('.box')).textContent = now ? '✓' : '';
-      $view.querySelectorAll(`[data-move="${k}"]`).forEach(o => { if (o === b) return; const r = o.closest('.mvrow, .done') || o; r.classList.toggle('on', now); (o.classList.contains('box') ? o : o.querySelector('.box')).textContent = now ? '✓' : ''; });
+      $view.querySelectorAll(`[data-move="${k}"]`).forEach(o => { o.setAttribute('aria-pressed', now ? 'true' : 'false'); if (o === b) return; const r = o.closest('.mvrow, .done') || o; r.classList.toggle('on', now); (o.classList.contains('box') ? o : o.querySelector('.box')).textContent = now ? '✓' : ''; });
       if (token() && paid && !isSample) { try { await api('/reports/' + encodeURIComponent(report.report_id) + '/moves', { method: 'POST', body: JSON.stringify({ key: k, done: now }) }); } catch { } }
       if (!isSample) { report.moves_done = done; sset('sc_report_' + report.report_id, report); }
       $view.querySelectorAll('.phase').forEach((ph, i) => { const p = phases[i]; if (!p || !paid) return; const total = 1 + p.moves.length; const dn = (isDone(p.key + 'm1') ? 1 : 0) + p.moves.filter(m => isDone(p.key + 'm' + m.n)).length; const el = ph.querySelector('.prog'); if (el) el.textContent = `${dn} of ${total} done`; });
@@ -940,6 +962,7 @@
       ao.querySelector('[data-action=take-annual]').addEventListener('click', async e => { e.currentTarget.disabled = true; try { await api('/billing/subscribe', { method: 'POST', body: JSON.stringify({ tier: 'growth_plan', billingCycle: 'annual' }) }); track('annual_offer_taken', {}, report.report_id); sset('sc_annual_dismissed', true); ao.remove(); toast('Annual plan on. Thank you — same plan, one payment a year.'); } catch (e2) { toast(e2.message); e.currentTarget.disabled = false; } });
       if (qs.get('annual') === '1') ao.scrollIntoView({ behavior: 'smooth', block: 'center' });
     } }
+    $view.querySelectorAll('details > summary').forEach(sm => { if (sm.querySelector('[role=heading]')) return; const w = document.createElement('span'); w.setAttribute('role', 'heading'); w.setAttribute('aria-level', '2'); while (sm.firstChild) w.appendChild(sm.firstChild); sm.appendChild(w); });
     const goalAsk = $view.querySelector('#goalAsk');
     if (goalAsk) bindGoalPicker(goalAsk, async (goal, target) => {
       try {
@@ -955,18 +978,18 @@
       const HEATS = [['mild', 'Mild', 'A friend with a dig'], ['medium', 'Medium', 'A tight five on your feed'], ['extra_crispy', 'Extra Crispy', 'No survivors (content only)']];
       const reroastOpen = r => !r || !r.reroast_after || Date.now() >= r.reroast_after;
       const show = html => { timers.forEach(clearTimeout); timers = []; roastWrap.hidden = false; roastWrap.innerHTML = html; roastWrap.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
-      const pick = () => show(h`<div class="roast pick"><div class="eb">ROAST MODE · OPT-IN</div><h3>How hot?</h3><p>Same facts as the report, told with no mercy. It roasts what you post — never who you are.</p>
+      const pick = () => show(h`<div class="roast pick"><div class="eb">ROAST MODE · OPT-IN</div><h2>How hot?</h2><p>Same facts as the report, told with no mercy. It roasts what you post — never who you are.</p>
         <div class="heats">${raw(HEATS.map(([k, l, d]) => h`<button type="button" class="heat ${k === heat ? 'on' : ''}" data-heat="${k}"><b>${l}</b><span>${d}</span></button>`).join(''))}</div>
         <div class="acts"><button class="btn dark" data-roast="go">Roast me</button><button class="btn ghost" data-roast="close">Never mind</button></div><p class="fine">Tip: screen-record the reveal.</p></div>`);
       const reveal = (r, instant = false) => {
         const lines = r.lines || [];
         show(h`<div class="roast reveal"><div class="eb">ROASTED · ${r.heat_label || ''}${r.previous ? raw(h` · THEN ${r.previous.overall} → NOW ${r.overall}`) : ''}</div><ol class="lines">${raw(lines.map((l, i) => h`<li style="animation-delay:${instant ? 0 : i * 1.1}s">${l.text}</li>`).join(''))}</ol>
-          <div class="fix" style="animation-delay:${instant ? 0 : lines.length * 1.1 + 0.4}s"><h3>${r.closer || "Okay, here's how we fix it"}</h3>${r.first_move ? raw(h`<p class="a">${r.first_move.action}</p><p class="w">${r.first_move.why}</p>`) : ''}
+          <div class="fix" style="animation-delay:${instant ? 0 : lines.length * 1.1 + 0.4}s"><h2>${r.closer || "Okay, here's how we fix it"}</h2>${r.first_move ? raw(h`<p class="a">${r.first_move.action}</p><p class="w">${r.first_move.why}</p>`) : ''}
           <div class="acts"><button class="btn dark" data-roast="share">Share the roast</button><button class="btn ghost" data-roast="close">Back to the report</button>${reroastOpen(r) ? raw(h`<button class="btn ghost" data-roast="again">Roast me again</button>`) : raw(h`<span class="fine">Roast me again opens ${fmtDate(r.reroast_after)}</span>`)}</div></div></div>`);
       };
-      const unavailable = why => show(h`<div class="roast off"><div class="eb">ROAST MODE</div><h3>${why === 'minor' ? 'No roast for this account.' : why === 'safety' ? "The roast didn't pass our check." : 'The roast is unavailable right now.'}</h3><p>${why === 'minor' ? "The bio reads as under 18, so it's the normal report only." : why === 'safety' ? 'Every roast is screened for jokes about the person instead of the content. This one failed twice, so you get the normal report.' : 'Try again in a few minutes — the report is still all yours.'}</p><div class="acts"><button class="btn ghost" data-roast="close">Back to the report</button></div></div>`);
+      const unavailable = why => show(h`<div class="roast off"><div class="eb">ROAST MODE</div><h2>${why === 'minor' ? 'No roast for this account.' : why === 'safety' ? "The roast didn't pass our check." : 'The roast is unavailable right now.'}</h2><p>${why === 'minor' ? "The bio reads as under 18, so it's the normal report only." : why === 'safety' ? 'Every roast is screened for jokes about the person instead of the content. This one failed twice, so you get the normal report.' : 'Try again in a few minutes — the report is still all yours.'}</p><div class="acts"><button class="btn ghost" data-roast="close">Back to the report</button></div></div>`);
       const run = async (reroast = false) => {
-        show(h`<div class="roast loading"><div class="eb">ROAST MODE · ${(HEATS.find(x => x[0] === heat) || [])[1] || ''}</div><h3>Reading your posts…</h3><p>Every line has to lean on something you actually posted.</p></div>`);
+        show(h`<div class="roast loading"><div class="eb">ROAST MODE · ${(HEATS.find(x => x[0] === heat) || [])[1] || ''}</div><h2>Reading your posts…</h2><p>Every line has to lean on something you actually posted.</p></div>`);
         try {
           const res = await api('/reports/' + encodeURIComponent(report.report_id) + '/roast', { method: 'POST', body: JSON.stringify({ heat, reroast }) }, { allow401: true });
           if (res.unavailable) return unavailable(res.unavailable);
@@ -1109,7 +1132,7 @@
         <h1>Pay when the plan is worth doing.</h1>
         <p class="lede">Score first, free. Unlock the rest when you've read it and decided it's right.</p>
         ${fd ? raw(h`<div class="founders-bar"><b>Founders pricing:</b> ${fmtN(fd.left)} of ${fmtN(fd.cap)} spots left — Growth at $${fd.monthlyPrice}/mo or $${fd.annualPrice}/yr, locked in for as long as you stay subscribed.</div>`) : ''}
-        <div class="toggle" role="tablist"><button type="button" class="${annual ? '' : 'on'}" data-billing="monthly">Monthly</button><button type="button" class="${annual ? 'on' : ''}" data-billing="annual">Annual · ${pricing.discount?.annual || '2 months free'}</button></div>
+        <div class="toggle" role="tablist" aria-label="Billing period"><button type="button" role="tab" aria-selected="${annual ? 'false' : 'true'}" class="${annual ? '' : 'on'}" data-billing="monthly">Monthly</button><button type="button" role="tab" aria-selected="${annual ? 'true' : 'false'}" class="${annual ? 'on' : ''}" data-billing="annual">Annual · ${pricing.discount?.annual || '2 months free'}</button></div>
         <div class="tiers three">
           <div class="card tier">
             <div class="n">${free.name || 'Free'}</div>
@@ -1209,7 +1232,7 @@
     const next = sget('sc_next', '#/');
     $view.innerHTML = h`<div class="wrap"><div class="authwrap"><div class="brandname">Scalecraft</div>
       ${sget('sc_limit_msg', null) ? raw(h`<div class="notice" style="margin-top:16px">${sget('sc_limit_msg', '')}</div>`) : ''}
-      <form class="card lightform" id="signinForm" novalidate><h2>Sign in</h2>
+      <form class="card lightform" id="signinForm" novalidate><h1>Sign in</h1>
         <div class="field"><label for="siEmail">Email</label><input id="siEmail" type="email" name="email" autocomplete="email" placeholder="you@email.com" value="${sget('sc_form', {}).email || ''}"></div>
         <div class="field"><div class="lblrow"><label for="siPass">Password</label><a href="#" data-action="forgot">Forgot?</a></div><input id="siPass" type="password" name="password" autocomplete="current-password" placeholder="••••••••••"></div>
         <div class="form-error" id="signinError" hidden></div>
@@ -1234,7 +1257,7 @@
     renderHeader('signup');
     const next = sget('sc_next', '#/');
     $view.innerHTML = h`<div class="wrap"><div class="authwrap"><div class="brandname">Scalecraft</div>
-      <form class="card lightform" id="signupForm" novalidate><h2>Create account</h2>
+      <form class="card lightform" id="signupForm" novalidate><h1>Create account</h1>
         <div class="field"><label for="suName">Name or handle</label><input id="suName" type="text" name="company_name" placeholder="@yourhandle" autocapitalize="none"></div>
         <div class="field"><label for="suEmail">Email</label><input id="suEmail" type="email" name="email" autocomplete="email" placeholder="you@email.com" value="${sget('sc_form', {}).email || ''}"></div>
         <div class="field"><label for="suPass">Password</label><input id="suPass" type="password" name="password" autocomplete="new-password" placeholder="At least 8 characters"></div>
@@ -1357,39 +1380,36 @@
     const el = document.createElement('div'); el.className = 'sheet center';
     const losses = [lose.runs > 1 ? `${lose.runs} scores of history since ${fmtShort(lose.first_run)}` : null, lose.streak_weeks ? `a ${lose.streak_weeks}-week streak` : null, lose.next_posts ? `${lose.next_posts} written posts` : null, lose.competitors ? `your competitor set` : null, lose.moves_done ? `${lose.moves_done} moves marked done` : null].filter(Boolean);
     const stepOffers = () => h`<div class="panel dialog cancelflow" role="dialog" aria-label="Before you cancel">
-      <div class="eb">BEFORE YOU GO</div><h3>Keep what you've built?</h3>
+      <div class="eb">BEFORE YOU GO</div><h2>Keep what you've built?</h2>
       ${losses.length ? raw(h`<p>Cancelling stops the weekly rescore. The plan keeps ${raw(losses.map(l => h`<b>${l}</b>`).join(', '))} — on the free tier those stop updating.</p>`) : raw(h`<p>Cancelling stops the weekly rescore. Your reports stay yours.</p>`)}
       ${pv && pv.pause && subn.current_tier !== 'maintenance' ? raw(h`<div class="offer"><div class="t"><b>Pause instead</b><span>Nothing charged, nothing lost. Your streak is frozen, not reset.</span></div><div class="months">${raw(pv.pause.months.map(m => h`<button type="button" class="btn ghost sm" data-pause="${m}">${m} month${m === 1 ? '' : 's'}</button>`).join(''))}</div></div>`) : ''}
       ${pv && pv.maintenance && subn.current_tier !== 'maintenance' ? raw(h`<div class="offer"><div class="t"><b>${pv.maintenance.name} · $${pv.maintenance.monthlyPrice}/mo</b><span>${pv.maintenance.description}</span></div><button type="button" class="btn ghost sm" data-switch="maintenance">Switch to ${pv.maintenance.name}</button></div>`) : ''}
       <div class="row2"><button type="button" class="btn ghost" data-close>Keep my plan</button><button type="button" class="btn danger" data-next>Cancel anyway</button></div></div>`;
     const stepWhy = () => h`<div class="panel dialog cancelflow" role="dialog" aria-label="Cancel plan">
-      <h3>One question before you go.</h3><p>Optional. It goes to the two of us building this, nowhere else.</p>
+      <h2>One question before you go.</h2><p>Optional. It goes to the two of us building this, nowhere else.</p>
       <div class="reasons">${raw(((pv && pv.reasons) || [['other', 'Other']]).map(([k, l]) => h`<label class="reason"><input type="radio" name="why" value="${k}"><span>${l}</span></label>`).join(''))}</div>
       <input type="text" id="cancelWhy" placeholder="Anything else? (one line)" autocomplete="off" maxlength="300">
       <div class="row2"><button type="button" class="btn ghost" data-close>Keep my plan</button><button type="button" class="btn danger" data-cancel>Cancel the plan</button></div>
       <div class="fine center">You keep everything until ${untilTxt}, and you can resume until then.</div></div>`;
     el.innerHTML = stepOffers();
-    document.body.appendChild(el);
-    const close = () => el.remove();
+    const close = mountSheet(el, { label: 'Cancel plan' });
     el.addEventListener('click', async e => {
-      if (e.target === el || e.target.closest('[data-close]')) return close();
+      if (e.target.closest('[data-close]')) return close();
       const p = e.target.closest('[data-pause]'); if (p) { p.disabled = true; try { const r = await api('/billing/pause', { method: 'POST', body: JSON.stringify({ months: Number(p.dataset.pause) }) }); track('pause', { months: r.months }); close(); toast(`Paused until ${fmtDate(r.pausedUntil)}. Resume any time from this page.`); viewReports(); } catch (e2) { toast(e2.message); p.disabled = false; } return; }
       const sw = e.target.closest('[data-switch]'); if (sw) { sw.disabled = true; try { await api('/billing/switch', { method: 'POST', body: JSON.stringify({ tier: sw.dataset.switch }) }); close(); toast('Switched. The weekly rescore keeps going; the plan is on hold.'); viewReports(); } catch (e2) { toast(e2.message); sw.disabled = false; } return; }
-      if (e.target.closest('[data-next]')) { el.innerHTML = stepWhy(); return; }
+      if (e.target.closest('[data-next]')) { el.innerHTML = stepWhy(); el.querySelector('input[name=why]')?.focus(); return; }
       const c = e.target.closest('[data-cancel]'); if (c) { c.disabled = true; const code = el.querySelector('input[name=why]:checked')?.value || null; try { const r = await api('/billing/cancel', { method: 'POST', body: JSON.stringify({ reason_code: code, reason: el.querySelector('#cancelWhy').value }) }); close(); toast(r.endsAt ? `Cancelled. Yours until ${fmtDate(r.endsAt)}.` : 'Cancelled.'); viewReports(); } catch (e2) { if (e2.status === 401) return; toast(e2.message); c.disabled = false; } }
     });
   }
   function openDeleteDialog(n) {
     const el = document.createElement('div'); el.className = 'sheet center';
     el.innerHTML = h`<div class="panel dialog" role="dialog" aria-label="Delete account">
-      <h3>Delete your account and all ${n} report${n === 1 ? '' : 's'}?</h3>
+      <h2>Delete your account and all ${n} report${n === 1 ? '' : 's'}?</h2>
       <p>This can't be undone. Your scores, plans and calendars go with it. If you only want to stop paying, cancel the plan instead and keep the reports.</p>
       <input type="text" id="delConfirm" placeholder="Type DELETE to confirm" autocomplete="off">
       <div class="row2"><button type="button" class="btn ghost" data-close>Keep my account</button><button type="button" class="btn danger" data-del disabled>Delete everything</button></div>
       <div class="fine center">Or <a href="#/pricing">cancel the plan</a> and keep your reports.</div></div>`;
-    document.body.appendChild(el);
-    const close = () => el.remove();
-    el.addEventListener('click', e => { if (e.target === el) close(); });
+    const close = mountSheet(el, { label: 'Delete account' });
     el.querySelector('[data-close]').addEventListener('click', close);
     el.querySelector('#delConfirm').addEventListener('input', e => { el.querySelector('[data-del]').disabled = e.target.value.trim() !== 'DELETE'; });
     el.querySelector('[data-del]').addEventListener('click', async () => {
@@ -1403,7 +1423,7 @@
     renderHeader('signin');
     const last = sget('sc_forgot_email', '');
     $view.innerHTML = h`<div class="wrap"><div class="authwrap"><div class="brandname">Scalecraft</div><form class="card lightform" id="forgotForm" novalidate>
-        <h2>Reset your password</h2>
+        <h1>Reset your password</h1>
         <p class="sub">Type the email you signed up with. If it has an account, we'll send a link that works once, for an hour.</p>
         <div class="field"><label for="fgEmail">Email</label><input id="fgEmail" type="email" name="email" autocomplete="email" value="${last}" placeholder="you@example.com"></div>
         <button class="btn block" type="submit">Send the link</button>
@@ -1715,6 +1735,6 @@
   });
   loadLevels();
   window.addEventListener('hashchange', route);
-  if (CFG.useMock) { const b = document.createElement('div'); b.className = 'mockbadge'; b.textContent = 'Sample data'; document.body.appendChild(b); }
+  if (CFG.useMock) { const b = document.createElement('div'); b.className = 'mockbadge'; b.textContent = 'Sample data'; b.setAttribute('aria-hidden', 'true'); document.body.appendChild(b); }
   route();
 })();
