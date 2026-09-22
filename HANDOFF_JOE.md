@@ -7,6 +7,8 @@
 - **PR #6 `feat/next-build`** — the whole build spec, Waves 1–5, stacked on #5 (77 commits, 82 files). Merge #5 first (or just merge #6 — it contains #5). Every feature was built and verified locally against the real backend plus the mock; the pg-mem test covers both DB modules; `scripts/smoke.js` and `scripts/shape_diff.js` are the regression checks.
 - PR #3 (`redesign/field-guide`) is long since hand-merged — close it.
 
+Feature-by-feature explanations: `docs/WHAT_WE_BUILT.md`.
+
 Demo (mock data, no backend): `scalecraft-demo.vercel.app`, deployed with `scripts/deploy_demo.sh` — same `public/` as prod, mock switched on by hostname.
 
 ## What's on PR #6 (spec numbering)
