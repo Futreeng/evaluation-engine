@@ -364,7 +364,7 @@
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast('Add an email first.'); return; }
       try { await api('/waitlist', { method: 'POST', body: JSON.stringify({ email, platform: 'launch' }) }); } catch { }
       const f2 = sget('sc_pricing', null)?.founders;
-      f.innerHTML = h`<div class="waitdone" style="flex:1">Noted — the launch note goes to ${email}. ${f2 ? `Founders pricing is live now: <a href="#/pricing">$${f2.monthlyPrice}/mo, ${fmtN(f2.left)} spots left</a>.` : ''}</div>`;
+      f.innerHTML = h`<div class="waitdone" style="flex:1">Noted — the launch note goes to ${email}. ${f2 ? raw(h`Founders pricing is live now: <a href="#/pricing">$${f2.monthlyPrice}/mo, ${fmtN(f2.left)} spots left</a>.`) : ''}</div>`;
     });
     const scrollTo = sget('sc_scroll', null);
     if (scrollTo) { sessionStorage.removeItem('sc_scroll'); document.getElementById(scrollTo)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
