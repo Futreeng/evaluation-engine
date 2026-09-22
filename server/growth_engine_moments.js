@@ -26,6 +26,30 @@ const STREAK = {
   start_freezes: Number(process.env.STREAK_START_FREEZES || 1),
 };
 
+// 4.6 badges — behind ENABLE_BADGES (off by default). Real milestones only;
+// the list is config (BADGES_JSON overrides), cumulative on the report.
+const BADGES_ENABLED = process.env.ENABLE_BADGES === "true";
+const BADGES = (() => {
+  const d = [
+    { key: "first_1k", title: "First 1k followers", test: (b) => Number(b.business?.followers) >= 1000 },
+    { key: "first_3x", title: "A post at 3× your average", test: (b) => { const ps = (b.posts || []).filter((p) => !p.is_pinned); const e = ps.map(metricOf); const m = median(e); return m > 0 && e.some((x) => x >= 3 * m); } },
+    { key: "streak_12", title: "12-week streak", test: (b) => Number(b.streak?.weeks) >= 12 },
+    { key: "dim_90", title: "A dimension scored 90+", test: (b) => (b.scores?.dimensions || []).some((dm) => Number(dm.score) >= 90) },
+  ];
+  try { if (process.env.BADGES_JSON) { const keep = new Set(JSON.parse(process.env.BADGES_JSON).map((x) => x.key)); return d.filter((x) => keep.has(x.key)); } } catch { /* default list */ }
+  return d;
+})();
+function median(a) { if (!a.length) return 0; const s = [...a].sort((x, y) => x - y); const m = Math.floor(s.length / 2); return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; }
+// Cumulative badge list on the report; newly earned ones come back as moments.
+function detectBadges(reportBody, prevBody) {
+  if (!BADGES_ENABLED) return [];
+  const have = new Map((prevBody?.badges || []).map((b) => [b.key, b]));
+  const fresh = [];
+  for (const b of BADGES) { if (have.has(b.key)) continue; let ok = false; try { ok = !!b.test(reportBody); } catch { ok = false; } if (ok) { const row = { key: b.key, title: b.title, earned_at: Date.now() }; have.set(b.key, row); fresh.push(row); } }
+  reportBody.badges = [...have.values()];
+  return fresh.map((b) => ({ kind: "badge", key: `badge_${b.key}`, title: b.title, line: `Badge earned · @${reportBody.business?.handle}`, score: reportBody.scores?.overall, at: b.earned_at }));
+}
+
 const MILESTONES = {
   followers: Number(process.env.MILESTONE_FOLLOWERS || 1000),
   score: Number(process.env.MILESTONE_SCORE || 70),
@@ -110,4 +134,4 @@ function computeStreak(reportBody, prevBody, { pause = null } = {}) {
 
 function fmtK(n) { return n >= 1000 ? `${Math.round(n / 100) / 10}k`.replace(".0k", "k") : String(n); }
 
-module.exports = { LEVELS, MILESTONES, STREAK, RECORD_METRIC, levelFor, detectMoments, computeStreak };
+module.exports = { LEVELS, MILESTONES, STREAK, RECORD_METRIC, BADGES, BADGES_ENABLED, levelFor, detectMoments, computeStreak, detectBadges };

@@ -93,7 +93,7 @@ function scoreChanged({ to, userId, handle, reportId, oldScore, newScore, dimens
 // Monday move (spec 2.6): one action under 15 minutes with a one-tap done link.
 const moveDoneUrl = (reportId, key, s) => `${APP}/api/growth-engine/v1/email/move-done?r=${encodeURIComponent(reportId)}&k=${encodeURIComponent(key)}&s=${s}`;
 const optOutUrl = (reportId, s) => `${APP}/api/growth-engine/v1/email/optout?r=${encodeURIComponent(reportId)}&s=${s}`;
-function mondayMove({ to, userId, handle, reportId, paid, kind, move, doneUrl, optOutUrl: oo }) {
+function mondayMove({ to, userId, handle, reportId, paid, kind, move, doneUrl, optOutUrl: oo, quest = null }) {
   const url = reportUrl(reportId);
   let inner, subject;
   if (kind === "upgrade") {
@@ -105,6 +105,7 @@ function mondayMove({ to, userId, handle, reportId, paid, kind, move, doneUrl, o
     inner = h2("This week's move.") + p(`${move.time ? `About ${esc(move.time)}. ` : "Under 15 minutes. "}${paid ? "One of the moves from your plan — tick it off and it counts toward your rescore." : "The first move from your free report."}`)
       + moveCard(`PHASE ${move.phase} · MOVE ${String(move.n).padStart(2, "0")}`, move.action, move.why)
       + (steps ? `<ol style="margin:14px 0 0;padding-left:20px;font-size:14px;line-height:1.55;color:#5B4C3B">${steps}</ol>` : "")
+      + (quest ? `<div style="margin-top:16px;padding:12px 16px;background:#FFF6E9;border-radius:12px;font-size:14px;line-height:1.5;color:#2A2118"><b>This week's quest:</b> ${esc(quest.title)}. <span style="color:#7A6A57">Checked at your next rescore.</span></div>` : "")
       + button(doneUrl, "Mark done", "#2E7D5B") + ghost(url, "Open the plan");
   }
   return send({ to, userId, subject, html: layout("Monday move", inner, { userId }), tag: "monday_move", optOutUrl: oo });

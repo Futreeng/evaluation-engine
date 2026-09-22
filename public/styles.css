@@ -833,3 +833,11 @@ p { margin: 0; }
 .cancelflow .reason { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1.5px solid var(--line); border-radius: 10px; font-size: 14px; cursor: pointer; }
 .cancelflow .reason:has(input:checked) { border-color: var(--act); background: var(--ground); }
 .offercard { margin: 0 0 14px; } .offercard .eb { font-size: 11px; font-weight: 700; letter-spacing: .1em; color: var(--act); margin-bottom: 6px; } .offercard h3 { margin: 0 0 6px; font-size: 22px; } .offercard p { margin: 0 0 12px; font-size: 14px; color: var(--body); max-width: 60ch; } .offercard .acts { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* ---- badges (4.6) + quests (4.7), flagged ---- */
+.scorebox .badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.scorebox .badge { font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; background: #FBEED2; color: #6B5310; }
+.questcard { margin: 0 0 14px; } .questcard .eb { font-size: 11px; font-weight: 700; letter-spacing: .1em; color: var(--act); margin-bottom: 6px; } .questcard h3 { margin: 0 0 10px; font-size: 20px; }
+.questcard .bar { height: 10px; border-radius: 999px; background: var(--ground); overflow: hidden; } .questcard .bar .fill { height: 100%; background: var(--act); border-radius: 999px; }
+.questcard .fine { margin-top: 6px; font-size: 12px; color: var(--muted); }
+.questcard .qh { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; font-size: 12px; color: var(--muted); } .questcard .qh .ok { color: #2E7D5B; }

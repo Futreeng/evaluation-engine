@@ -199,12 +199,14 @@ class JobQueue {
               }
               // Weekly streak (spec 2.3) — paid plans only; carried and evaluated at each rescore.
               if (hasPlan) { let pause = null; try { const ent = await geDb.getEffectiveEntitlement(accountId); pause = ent?.pauseEndedAt ? { ended_at: ent.pauseEndedAt } : null; } catch { /* fine */ } reportBody.streak = moments.computeStreak(reportBody, prevReport?.reportBody || null, { pause }); }
+              // Quests (spec 4.7, flagged): close last week's, open this week's.
+              if (hasPlan) { try { require("./growth_engine_quests").rollQuests(reportBody, prevReport?.reportBody || null); } catch { /* flagged off or no calendar */ } }
               // Rank-ups, milestones, records (spec 2.2, 2.4, 2.5): only when a rescore shows the change.
-              const found = moments.detectMoments(reportBody, prevReport?.reportBody || null);
+              const found = [...moments.detectMoments(reportBody, prevReport?.reportBody || null), ...moments.detectBadges(reportBody, prevReport?.reportBody || null)];
               if (found.length) {
                 reportBody.moments = found;
                 reportBody.moments_seen = [...(reportBody.moments_seen || []), ...found.map((m) => ({ key: m.key, at: m.at }))];
-                for (const m of found) events.track(m.kind === "rank_up" ? "rank_up" : m.kind === "record" ? "record" : "milestone", { accountId, reportId: null, props: { key: m.key, handle: inputParams.handle } });
+                for (const m of found) events.track(m.kind === "rank_up" ? "rank_up" : m.kind === "record" ? "record" : m.kind === "badge" ? "badge" : "milestone", { accountId, reportId: null, props: { key: m.key, handle: inputParams.handle } });
               }
               const nudge = detectNudge(reportBody, prevReport, inputParams);
               if (nudge) { reportBody.nudge = nudge; reportBody.nudges_sent = [...(reportBody.nudges_sent || []), { key: nudge.key, phase: nudge.phase, at: Date.now() }]; }
@@ -261,6 +263,8 @@ class JobQueue {
       // Level is just a name for the score band — always attached (spec 2.2).
       if (reportBody.scores && Number.isFinite(reportBody.scores.overall)) reportBody.scores.level = moments.levelFor(reportBody.scores.overall);
       if (hasPlan && !reportBody.streak) reportBody.streak = moments.computeStreak(reportBody, null);
+      if (hasPlan && !reportBody.quest) { try { const q = require("./growth_engine_quests"); if (q.ENABLED) reportBody.quest = q.nextQuest(reportBody); } catch { /* flagged off */ } }
+      if (moments.BADGES_ENABLED && !reportBody.badges) moments.detectBadges(reportBody, null);
       // Win-back rescore (spec 4.4): marked so the milestone can't fire twice.
       if (inputParams.winback) reportBody.winback = inputParams.winback;
       // Annual offer (spec 4.5): once, after the first score increase on a monthly plan.

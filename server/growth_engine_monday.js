@@ -95,6 +95,7 @@ async function sendMondayMoves({ now = Date.now(), force = false } = {}) {
     else continue;
     const r2 = await mailer.mondayMove({
       to, userId: r.accountId || null, handle: r.business?.handle, reportId: r.reportId, paid, kind, move,
+      quest: paid && process.env.ENABLE_QUESTS === "true" && body.quest && body.quest.ends_at > now ? body.quest : null,
       doneUrl: move ? mailer.moveDoneUrl(r.reportId, move.key, doneSig(r.reportId, move.key)) : null,
       optOutUrl: r.accountId ? null : mailer.optOutUrl(r.reportId, sig(`optout:${r.reportId}`)),
     });
