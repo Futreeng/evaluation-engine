@@ -883,3 +883,6 @@ p { margin: 0; }
 .briefcard .body { padding-top: 4px; }
 .reviews .rlist { margin-top: 4px; }
 @media (max-width: 720px) { .statusrow { grid-template-columns: 1fr; } }
+
+/* PASS2-C: the card is the point of the share sheet — give it the room on phones */
+@media (max-width: 560px) { .sheet .row { flex-direction: column; align-items: stretch; } .sheet .preview { width: auto; max-width: 260px; margin: 0 auto; } .sheet .preview canvas { max-height: 46vh; width: auto; margin: 0 auto; } .sheet .opts .btn { width: 100%; } }
