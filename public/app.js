@@ -134,6 +134,14 @@
     n.scrollIntoView({ behavior: 'smooth', block: 'center' });
     return true;
   }
+  // The score arrives: count up over ~900ms. Off when the user prefers reduced motion.
+  const reduceMotion = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; } };
+  function countUp(el, to, ms = 900) {
+    if (!el || !Number.isFinite(to) || reduceMotion()) return;
+    const start = performance.now(); const from = Math.max(0, to - Math.min(to, 40));
+    const tick = now => { const t = Math.min(1, (now - start) / ms); const e = 1 - Math.pow(1 - t, 3); el.textContent = Math.round(from + (to - from) * e); if (t < 1) requestAnimationFrame(tick); else el.textContent = to; };
+    el.textContent = from; requestAnimationFrame(tick);
+  }
   function rememberPricing(p) { try { const g = (p.tiers || []).find(t => t.tier === 'growth_plan'); sset('sc_pricing', { variant: p.variant || 'control', growth_plan: g?.monthlyPrice, plan_unlock: p.one_time?.[0]?.price, one_time_sold: !!(p.one_time || []).length, founders: p.founders && p.founders.left > 0 ? p.founders : null, pro: (p.tiers || []).find(t => t.tier === 'growth_plan_pro')?.monthlyPrice }); } catch { } }
   // Admin link in the nav: ask /auth/me once per token and remember the answer.
   async function refreshAdminFlag() {
@@ -948,6 +956,7 @@
     $view.querySelector('[data-action=share]').addEventListener('click', () => { if (!isSample) track('share_clicked', { overall }, report.report_id); openShareSheet(report); });
     $view.querySelectorAll('[data-moment-share]').forEach(b => b.addEventListener('click', () => { const m = (report.moments || []).find(x => x.key === b.dataset.momentShare); if (m) openShareSheet(report, m); }));
     $view.querySelectorAll('[data-moment-dismiss]').forEach(b => b.addEventListener('click', () => { try { localStorage.setItem('sc_moment_' + report.report_id + '_' + b.dataset.momentDismiss, '1'); } catch { } b.closest('.moment')?.remove(); }));
+    countUp($view.querySelector('.scorebox .bignum'), overall);
     // Weekly trend brief (spec 3.4): loads after the report; hidden until the niche is ready.
     { const bw = $view.querySelector('#briefWrap'); if (bw && biz.category && !isSample) api('/briefs/' + encodeURIComponent(biz.category) + '?platform=' + encodeURIComponent(biz.platform || 'instagram'), {}, { allow401: true }).then(b => {
       if (!b || !b.ready) { if (b && b.n != null && paid) { bw.hidden = false; bw.innerHTML = h`<details class="card acc briefcard soon"><summary>What's working in ${niche}</summary><div class="body"><p class="fine">Published once ${b.min_n} ${niche} accounts are scored — ${b.n} so far. It's built from our own data, aggregated and anonymised.</p></div></details>`; } return; }

@@ -915,3 +915,60 @@ button, [role="button"], .pill, .chip, .btn.sm, [data-copy], .done .box, .mvrow 
 .mvdetail.dark .ex .exl { color: var(--on-dark); }
 .sheet h2, .dialog h2, .opts h2 { font-size: 20px; margin: 0 0 8px; }
 .notin h2 { font-size: 18px; margin: 0; }
+
+/* ================= Motion =================
+   Three kinds only: things arriving (score, bars, sections), state changing
+   (done, selected, sheet), and hover/press. transform + opacity, ≤700ms,
+   ease-out in / ease-in out. All of it is switched off by the
+   prefers-reduced-motion rule near the top of this file. */
+@keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes fillIn { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes popIn { 0% { transform: scale(.94); opacity: 0; } 60% { transform: scale(1.02); opacity: 1; } 100% { transform: none; } }
+@keyframes sheetUp { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes dialogIn { from { transform: scale(.96); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes toastUp { from { transform: translate(-50%, 12px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+@keyframes checkPop { 0% { transform: scale(.6); } 70% { transform: scale(1.18); } 100% { transform: none; } }
+@keyframes shine { from { transform: translateX(-120%); } to { transform: translateX(220%); } }
+
+/* Arriving: staggered rise for the first things on a page */
+.hero .l > *, .hero .r, .stance .it, .tiers > *, .toprow > *, .moment, .statusrow > *, .report > .card.acc, .history > *, .pricing > * { animation: rise .42s cubic-bezier(.2,.7,.2,1) both; }
+.hero .l > :nth-child(1) { animation-delay: 0ms; } .hero .l > :nth-child(2) { animation-delay: 60ms; } .hero .l > :nth-child(3) { animation-delay: 120ms; } .hero .r { animation-delay: 160ms; }
+.stance .it:nth-child(1) { animation-delay: 120ms; } .stance .it:nth-child(2) { animation-delay: 180ms; } .stance .it:nth-child(3) { animation-delay: 240ms; }
+.tiers > :nth-child(1) { animation-delay: 0ms; } .tiers > :nth-child(2) { animation-delay: 70ms; } .tiers > :nth-child(3) { animation-delay: 140ms; }
+.toprow > :nth-child(1) { animation-delay: 0ms; } .toprow > :nth-child(2) { animation-delay: 90ms; }
+.report > .card.acc:nth-of-type(1) { animation-delay: 160ms; } .report > .card.acc:nth-of-type(2) { animation-delay: 220ms; } .report > .card.acc:nth-of-type(3) { animation-delay: 280ms; } .report > .card.acc:nth-of-type(n+4) { animation-delay: 320ms; }
+.moment { animation: popIn .5s cubic-bezier(.2,.7,.2,1) both; }
+
+/* Bars fill from the left; the marker stays put */
+.bar .fill, .goalbar .bar .fill, .questcard .bar .fill, .briefcard .fm .bar > div { transform-origin: left center; animation: fillIn .7s cubic-bezier(.2,.7,.2,1) both; }
+.dimcard:nth-child(1) .fill, .dims > :nth-child(1) .fill { animation-delay: 120ms; } .dimcard:nth-child(2) .fill, .dims > :nth-child(2) .fill { animation-delay: 200ms; } .dimcard:nth-child(3) .fill, .dims > :nth-child(3) .fill { animation-delay: 280ms; } .dimcard:nth-child(4) .fill, .dims > :nth-child(4) .fill { animation-delay: 360ms; }
+
+/* Score history: the line draws itself */
+.histchart .line { stroke-dasharray: 1000; stroke-dashoffset: 1000; animation: drawLine 1s cubic-bezier(.4,0,.2,1) .25s forwards; }
+@keyframes drawLine { to { stroke-dashoffset: 0; } }
+.histchart .dot { opacity: 0; animation: rise .3s ease .9s forwards; }
+
+/* State changes */
+.chip, .goalpick .opt, .roast .heat, [data-heat], .pill, .reason { transition: transform .12s ease, background .15s ease, border-color .15s ease, color .15s ease; }
+.chip.on, .goalpick .opt.on, .roast .heat.on, .pill.dark { animation: popIn .22s ease-out; }
+.done .box, .mvrow .box { transition: background .15s ease, border-color .15s ease; }
+.done.on .box, .mvrow.on .box { animation: checkPop .32s cubic-bezier(.2,.7,.2,1); }
+.mvrow { transition: background .2s ease, opacity .2s ease; }
+.sheet { animation: rise .18s ease-out both; }
+.sheet .panel { animation: sheetUp .28s cubic-bezier(.2,.7,.2,1) both; }
+.sheet.center .panel { animation: dialogIn .22s cubic-bezier(.2,.7,.2,1) both; }
+.toast { animation: toastUp .26s cubic-bezier(.2,.7,.2,1) both; }
+.limitnote, .notice { animation: rise .3s ease-out both; }
+.lvl, .streak, .badge { transition: transform .12s ease; }
+.founders-bar { position: relative; overflow: hidden; }
+.founders-bar::after { content: ""; position: absolute; inset: 0; width: 40%; background: linear-gradient(90deg, transparent, rgba(255,255,255,.35), transparent); animation: shine 2.4s ease-in-out .8s 1; pointer-events: none; }
+
+/* Hover / press — the smallest motions on the page */
+.btn { transition: transform .12s ease, background .15s ease, box-shadow .15s ease, color .15s ease; }
+.btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(42,33,24,.12); }
+.btn:active:not(:disabled) { transform: translateY(0) scale(.98); box-shadow: none; }
+.card.tier, .procard, .npost, .rv { transition: transform .18s ease, box-shadow .18s ease; }
+.card.tier:hover, .procard:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(42,33,24,.08); }
+summary { transition: color .15s ease; }
+details[open] > .body, details[open] > .rlist { animation: rise .26s ease-out both; }
+.share-preview-img { transition: opacity .3s ease; }
