@@ -185,7 +185,7 @@ p { margin: 0; }
 .scorecard .foot { display: flex; justify-content: space-between; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); gap: 10px; flex-wrap: wrap; }
 .scorecard .foot a { font-weight: 600; }
 .howstrip { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; padding: 0 0 36px; }
-.howstrip .it { padding: 16px 18px; background: var(--card); border: 1px solid var(--line); border-radius: var(--r-in); border-left-width: 5px; }
+.howstrip .it { padding: 16px 18px; background: var(--card); border: 1px solid var(--line); border-radius: var(--r-in); }
 .howstrip .it b { display: block; font-size: 15px; margin-bottom: 4px; }
 .howstrip .it p { font-size: 14px; color: var(--body); }
 .founders { padding: 26px; background: var(--dark); color: var(--on-dark); border-radius: var(--r-card); display: flex; flex-wrap: wrap; gap: 18px; align-items: center; margin-bottom: 36px; }
@@ -342,7 +342,6 @@ p { margin: 0; }
 .week .sl { font-size: 13px; color: var(--body); }
 .week .slots { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
 .week .slot { padding: 12px 14px; background: var(--card); border-radius: 12px; }
-.week .slot.bd1 { border-left-color: var(--c1); } .week .slot.bd2 { border-left-color: var(--c2); } .week .slot.bd3 { border-left-color: var(--c3); } .week .slot.bd4 { border-left-color: var(--c4); }
 .week .slot .d { font-size: 12px; letter-spacing: .08em; color: var(--muted); }
 .week .slot .a { font-size: 14px; line-height: 1.45; margin-top: 4px; }
 .week .slot .p { font-size: 13px; color: var(--muted); margin-top: 4px; }
