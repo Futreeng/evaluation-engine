@@ -48,7 +48,7 @@ const scoreRow = (oldS, newS) => `<div style="margin-top:20px;font-family:'Brico
 
 // All sending goes through the email service (preferences, footer, log).
 // `tag` is the template name; `type` the preference bucket.
-const TYPE_OF = { report_ready: "transactional", password_reset: "transactional", checkin: "monday_move", monday_move: "monday_move", score_changed: "weekly_score", plan_ended: "weekly_score", moment: "milestones", post_review: "post_reviews" };
+const TYPE_OF = { report_ready: "transactional", password_reset: "transactional", checkin: "monday_move", monday_move: "monday_move", score_changed: "weekly_score", plan_ended: "weekly_score", moment: "milestones", post_review: "post_reviews", winback: "product_news", annual_offer: "product_news" };
 async function send({ to, userId = null, subject, html, tag, devLink, optOutUrl = null }) {
   let uid = userId;
   if (!uid && to) { try { uid = (await geDb.getUserByEmail(String(to).toLowerCase()))?.userId || null; } catch { /* anonymous recipient */ } }
@@ -123,6 +123,24 @@ function postReview({ to, userId, handle, reportId, review: r }) {
   return send({ to, userId, subject: `@${handle}: your ${r.type || "post"} at 48 hours — ${m.vs_avg != null ? `${m.vs_avg}× your average` : "reviewed"}`, html: layout("Post review", inner, { userId }), tag: "post_review" });
 }
 
+// Win-back (spec 4.4): a one-off rescore 30/60 days after leaving. Pref: product_news.
+function winback({ to, userId, handle, reportId, oldScore, newScore, since, milestone }) {
+  const url = reportUrl(reportId);
+  const up = Number.isFinite(oldScore) && newScore > oldScore;
+  const inner = (up ? h2(`Your score went up since you left.`) + scoreRow(oldScore, newScore) + p(`@${esc(handle)} is doing better on its own — genuinely, well done. We rescored it once so you'd know. If you ever want the weekly rescore and the plan back, it's one tap; if not, this is the last of these.`)
+    : h2(`Your score went from ${esc(oldScore)} to ${esc(newScore)} since you left.`) + scoreRow(oldScore, newScore) + p(`We rescored @${esc(handle)} once${since ? ` against ${esc(new Date(since).toLocaleDateString("en-GB", { day: "numeric", month: "short" }))}` : ""} so you can see what changed. The report shows which dimension moved and the first move to turn it around.`))
+    + button(`${url}?resubscribe=1`, up ? "See the report" : "See what changed") + ghost(`${APP}/#/pricing`, "Start the plan again");
+  return send({ to, userId, subject: up ? `@${handle}: ${oldScore} → ${newScore} since you left — nice` : `@${handle}: ${oldScore} → ${newScore} since you left`, html: layout("Since you left", inner, { userId }), tag: "winback" });
+}
+
+// Annual offer (spec 4.5): once, after the first score increase on a monthly plan. Pref: product_news.
+function annualOffer({ to, userId, handle, reportId, offer, oldScore, newScore }) {
+  const url = reportUrl(reportId);
+  const inner = h2(`First rise: ${esc(oldScore)} → ${esc(newScore)}.`) + p(`That's the plan working for @${esc(handle)}. If you're staying, a year is $${esc(offer.annual)} instead of $${esc(offer.monthly * 12)} — ${esc(offer.saves)} off, same plan, no change to what runs weekly.`)
+    + button(`${url}?annual=1`, `Lock in a year — $${offer.annual}`) + ghost(url, "Not now");
+  return send({ to, userId, subject: `@${handle}: ${oldScore} → ${newScore}. A year for $${offer.annual}?`, html: layout("Annual plan", inner, { userId }), tag: "annual_offer" });
+}
+
 // Rank-up or milestone after a rescore (spec 2.2, 2.5). Pref: milestones.
 function moment({ to, userId, handle, reportId, moment: m }) {
   const url = reportUrl(reportId);
@@ -149,4 +167,4 @@ function passwordReset({ to, resetUrl }) {
   return send({ to, subject: "Reset your Scalecraft password", html: layout("Reset your password", inner), tag: "password_reset", devLink: resetUrl });
 }
 
-module.exports = { send, reportReady, checkin, scoreChanged, planEnded, passwordReset, moment, mondayMove, postReview, moveDoneUrl, optOutUrl, reportUrl, pauseSig, layout, configured: () => email.configured() };
+module.exports = { send, reportReady, checkin, scoreChanged, planEnded, passwordReset, moment, mondayMove, postReview, winback, annualOffer, moveDoneUrl, optOutUrl, reportUrl, pauseSig, layout, configured: () => email.configured() };

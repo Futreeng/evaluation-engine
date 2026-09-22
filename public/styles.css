@@ -832,3 +832,4 @@ p { margin: 0; }
 .cancelflow .reasons { display: grid; gap: 6px; margin: 10px 0; }
 .cancelflow .reason { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1.5px solid var(--line); border-radius: 10px; font-size: 14px; cursor: pointer; }
 .cancelflow .reason:has(input:checked) { border-color: var(--act); background: var(--ground); }
+.offercard { margin: 0 0 14px; } .offercard .eb { font-size: 11px; font-weight: 700; letter-spacing: .1em; color: var(--act); margin-bottom: 6px; } .offercard h3 { margin: 0 0 6px; font-size: 22px; } .offercard p { margin: 0 0 12px; font-size: 14px; color: var(--body); max-width: 60ch; } .offercard .acts { display: flex; gap: 8px; flex-wrap: wrap; }

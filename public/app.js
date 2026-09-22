@@ -754,6 +754,7 @@
         ${goalNow && !showGoalAsk && !isSample ? raw((() => { const gp = goalProgress(goalNow, report.goal_target || sget('sc_goal', null)?.goal_target || null, report); return gp ? h`<div class="goalbar"><div class="t"><span class="l">${goalLabel(goalNow)}</span><span class="v">${gp.label}</span></div><div class="bar"><div class="fill" style="width:${gp.pct}%"></div></div><div class="fine">${gp.sub}</div></div>` : ''; })()) : ''}
         <div class="roastwrap" id="roastWrap" hidden></div>
         <div class="brief" id="briefWrap" hidden></div>
+        ${paid && !isSample && report.offers && report.offers.annual && !sget('sc_annual_dismissed', false) ? raw(h`<div class="card offercard" id="annualOffer"><div class="eb">YOUR FIRST RISE · ANNUAL PLAN</div><h3>Lock in a year for $${report.offers.annual.annual}.</h3><p>Instead of $${report.offers.annual.monthly * 12} month by month — $${report.offers.annual.saves} off, the same plan, nothing changes in what runs weekly.</p><div class="acts"><button type="button" class="btn dark" data-action="take-annual">Switch to annual</button><button type="button" class="btn ghost" data-action="dismiss-annual">Not now</button></div></div>`) : ''}
         ${paid && !isSample && (report.post_reviews || []).length ? raw(h`<details class="card reviews" open><summary>Your posts, 48 hours in <span class="fine">${report.post_reviews.length} reviewed</span></summary>
           <div class="rlist">${raw(report.post_reviews.map(r => h`<div class="rv" id="rv-${r.post_id}"><div class="h"><span class="when">${fmtDate(r.posted_at)} · ${String(r.type || '').toUpperCase()}</span><span class="vs ${r.metrics?.vs_avg >= 1.05 ? 'up' : r.metrics?.vs_avg < 0.8 ? 'down' : ''}">${r.metrics?.vs_avg != null ? `${r.metrics.vs_avg}× your average` : ''}</span></div>
             ${r.caption ? raw(h`<div class="cap">“${r.caption.slice(0, 120)}${r.caption.length > 120 ? '…' : ''}”</div>`) : ''}
@@ -904,6 +905,11 @@
         ${fm.length ? raw(h`<div class="fmts">${raw(fm.map(f => h`<div class="fm"><div class="t"><span>${f.key}</span><span>${f.share_top}% of top posts · ${f.share_all}% of all</span></div><div class="bar"><div class="all" style="width:${f.share_all}%"></div><div class="top" style="width:${f.share_top}%"></div></div></div>`).join(''))}</div>`) : ''}
         <div class="fine">From ${fmtN(b.n)} ${niche} accounts and ${fmtN(b.posts)} posts in the last ${b.window_days} days, aggregated and anonymised — no one's account is shown. "Top" = beat its own account's average by 1.5×.</div></div>`;
     }).catch(() => { }); }
+    { const ao = $view.querySelector('#annualOffer'); if (ao) {
+      ao.querySelector('[data-action=dismiss-annual]').addEventListener('click', () => { sset('sc_annual_dismissed', true); ao.remove(); });
+      ao.querySelector('[data-action=take-annual]').addEventListener('click', async e => { e.currentTarget.disabled = true; try { await api('/billing/subscribe', { method: 'POST', body: JSON.stringify({ tier: 'growth_plan', billingCycle: 'annual' }) }); track('annual_offer_taken', {}, report.report_id); sset('sc_annual_dismissed', true); ao.remove(); toast('Annual plan on. Thank you — same plan, one payment a year.'); } catch (e2) { toast(e2.message); e.currentTarget.disabled = false; } });
+      if (qs.get('annual') === '1') ao.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } }
     const goalAsk = $view.querySelector('#goalAsk');
     if (goalAsk) bindGoalPicker(goalAsk, async (goal, target) => {
       try {
