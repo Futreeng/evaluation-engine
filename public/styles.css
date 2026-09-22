@@ -873,3 +873,7 @@ p { margin: 0; }
   .ctxrow .edit { flex: 0 0 auto; }
 }
 .soonlist { display: contents; }
+
+/* FINDING-005: header nav on phones — 44px hit areas, no orphan wrap */
+.nav a { padding: 11px 0; display: inline-block; }
+@media (max-width: 480px) { .nav { gap: 14px; font-size: 13px; } .nav a[href="#/business"] { display: none; } }
