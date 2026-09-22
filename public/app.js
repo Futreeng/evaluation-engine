@@ -142,7 +142,7 @@
     const tick = now => { const t = Math.min(1, (now - start) / ms); const e = 1 - Math.pow(1 - t, 3); el.textContent = Math.round(from + (to - from) * e); if (t < 1) requestAnimationFrame(tick); else el.textContent = to; };
     el.textContent = from; requestAnimationFrame(tick);
   }
-  function rememberPricing(p) { try { const g = (p.tiers || []).find(t => t.tier === 'growth_plan'); sset('sc_pricing', { variant: p.variant || 'control', growth_plan: g?.monthlyPrice, plan_unlock: p.one_time?.[0]?.price, one_time_sold: !!(p.one_time || []).length, founders: p.founders && p.founders.left > 0 ? p.founders : null, pro: (p.tiers || []).find(t => t.tier === 'growth_plan_pro')?.monthlyPrice, rescore: Object.fromEntries(Object.entries(p.limits || {}).map(([k, v]) => [k, v && v.rescore_days])) }); } catch { } }
+  function rememberPricing(p) { try { const g = (p.tiers || []).find(t => t.tier === 'growth_plan'); sset('sc_pricing', { at: Date.now(), variant: p.variant || 'control', growth_plan: g?.monthlyPrice, plan_unlock: p.one_time?.[0]?.price, one_time_sold: !!(p.one_time || []).length, founders: p.founders && p.founders.left > 0 ? p.founders : null, pro: (p.tiers || []).find(t => t.tier === 'growth_plan_pro')?.monthlyPrice, rescore: Object.fromEntries(Object.entries(p.limits || {}).map(([k, v]) => [k, v && v.rescore_days])) }); } catch { } }
   // Admin link in the nav: ask /auth/me once per token and remember the answer.
   async function refreshAdminFlag() {
     if (!token()) { try { localStorage.removeItem('sc_admin'); } catch { } return; }
@@ -739,7 +739,8 @@
 
   async function viewReport(reportId) {
     // Live prices for the upsell and plan copy — never the numbers frozen into an old report body.
-    if (!sget('sc_pricing', null)) { try { rememberPricing(await api('/billing/pricing', {}, { allow401: true })); } catch { } }
+    // Founders spots and prices can change under an open tab: refetch after 10 minutes so the page and checkout agree.
+    { const pc = sget('sc_pricing', null); if (!pc || !pc.at || Date.now() - pc.at > 10 * 60 * 1000) { try { rememberPricing(await api('/billing/pricing', {}, { allow401: true })); } catch { } } }
     const isSample = reportId === 'sample';
     if (isSample && !SHIPPED) { renderHeader('report'); $view.innerHTML = h`<div class="center-msg"><h2>Score your own account to see a real one.</h2><a href="#/">Score my account</a></div>`; return; }
     let report = isSample ? SHIPPED : sget('sc_report_' + reportId, null);
