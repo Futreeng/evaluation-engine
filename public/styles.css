@@ -435,8 +435,7 @@ p { margin: 0; }
 .bizpage { padding: 36px 0 48px; max-width: 880px; margin: 0 auto; }
 .bizpage h1 { margin-top: 10px; font-size: 42px; line-height: 1.03; letter-spacing: -.035em; text-wrap: pretty; }
 .three { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 28px; }
-.three .it { flex: 1 1 240px; padding: 20px 22px; background: var(--card); border: 1px solid var(--line); border-left-width: 5px; border-radius: 20px; }
-.three .it.bd1, .dimx.bd1 { border-left-color: var(--c1); } .three .it.bd2, .dimx.bd2 { border-left-color: var(--c2); } .three .it.bd4, .dimx.bd4 { border-left-color: var(--c4); } .dimx.bd3 { border-left-color: var(--c3); }
+.three .it { flex: 1 1 240px; padding: 20px 22px; background: var(--card); border: 1px solid var(--line); border-radius: 20px; }
 .three .it b { font-size: 16px; }
 .three .it p { margin-top: 8px; font-size: 15px; line-height: 1.5; color: var(--body); }
 
@@ -501,7 +500,7 @@ p { margin: 0; }
 .howpage { padding: 36px 0 52px; max-width: 720px; margin: 0 auto; }
 .howpage h1 { font-size: 40px; line-height: 1.05; letter-spacing: -.035em; }
 .dimlist { display: flex; flex-direction: column; gap: 14px; margin-top: 28px; }
-.dimx { padding: 22px; border-left-width: 5px; border-radius: 20px; }
+.dimx { padding: 22px; border-radius: 20px; }
 .dimx .n { font-size: 19px; font-weight: 700; }
 .dimx p { margin-top: 8px; font-size: 15px; line-height: 1.6; color: var(--body); }
 .dimx .chips2 { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
@@ -680,8 +679,7 @@ p { margin: 0; }
 
 /* ---- best times to post ---- */
 .windows { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
-.window { padding: 14px 16px; background: var(--ground); border-radius: var(--r-in); border-left: 4px solid var(--c1); }
-.window.bd2 { border-left-color: var(--c2); } .window.bd3 { border-left-color: var(--c3); } .window.bd4 { border-left-color: var(--c4); }
+.window { padding: 14px 16px; background: var(--ground); border-radius: var(--r-in); }
 .window .d { font-family: var(--display); font-size: 18px; font-weight: 700; }
 .window .x { font-size: 13px; font-weight: 600; color: var(--c2); margin-top: 2px; } .window .x.muted { color: var(--muted); font-weight: 500; }
 .window p { margin-top: 6px; font-size: 13px; line-height: 1.5; color: var(--body); }
@@ -698,8 +696,7 @@ p { margin: 0; }
 
 /* ---- your next posts ---- */
 #nextPosts { gap: 10px; }
-.npost { padding: 16px 18px; background: var(--ground); border-radius: var(--r-in); border-left: 4px solid var(--c1); }
-.npost.bd2 { border-left-color: var(--c2); } .npost.bd3 { border-left-color: var(--c3); } .npost.bd4 { border-left-color: var(--c4); }
+.npost { padding: 16px 18px; background: var(--ground); border-radius: var(--r-in); }
 .npost .nh { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .npost .when { font-family: var(--display); font-size: 17px; font-weight: 700; }
 .npost .fmt { font-size: 11px; letter-spacing: .08em; font-weight: 700; color: var(--muted2); }
