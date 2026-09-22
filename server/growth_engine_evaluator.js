@@ -799,8 +799,9 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
       cta_label: "Unlock your full Growth Plan",
       target_tier: "growth_plan",
       unlock_count: phases.reduce((n, p) => n + (Number(p?.locked?.count) || 4), 0) || 12,
-      monthly_price: TIER_PRICING.growth_plan / 100,
-      one_time_price: ONE_TIME_PRICING.plan_unlock / 100,
+      monthly_price: require("./growth_engine_plans").priceFor("growth_plan", "monthly") / 100,
+      // The one-time plan is only offered while it's on sale (P.8 earmarks it); the app reads live pricing anyway.
+      ...(require("./growth_engine_plans").ONE_TIME_UNLOCK_ENABLED ? { one_time_price: ONE_TIME_PRICING.plan_unlock / 100 } : {}),
     };
   }
 

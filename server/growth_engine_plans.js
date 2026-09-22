@@ -56,18 +56,18 @@ const TIERS = {
     cta: "Switch to Maintenance",
   },
   growth_plan: {
-    tier: "growth_plan", name: "Growth", rank: 2, has: GROWTH_HAS, popular: true,
+    tier: "growth_plan", name: "Growth Plan", rank: 2, has: GROWTH_HAS, popular: true,
     description: "Your full plan, posts written for you every week, and a score that moves.",
     features: ["Your full plan: every move, plus the 12-week posting calendar", "Posts written for you every week — 6, with hooks, captions and scripts", "See your score move every week — history and change emails", "48-hour reviews of every new post", "The Monday move", "Levels, streaks with freezes, personal records and milestone cards", "What's working in your niche, weekly", "Competitor comparison, up to 5 handles", "One platform"],
-    cta: "Start Growth",
+    cta: "Start Growth Plan",
   },
   growth_plan_pro: {
     tier: "growth_plan_pro", name: "Pro", rank: 3, has: PRO_HAS,
     description: "Every platform you're on, rescored every 3 days, with double the writing.",
-    features: ["Everything in Growth", "All supported platforms scored under one plan", "Rescores every 3 days instead of weekly", "12 written posts per week", "Competitor comparison, up to 10 handles", "Higher fair-use limits"],
+    features: ["Everything in Growth Plan", "All supported platforms scored under one plan", "Rescores every 3 days instead of weekly", "12 written posts per week", "Competitor comparison, up to 10 handles", "Higher fair-use limits"],
     cta: "Start Pro",
   },
-  business_growth: { tier: "business_growth", name: "Business Growth Plan", rank: 2, has: GROWTH_HAS, business: true, description: "Scored against your category; the plan is written for bookings.", features: ["Everything in Growth", "Category benchmarks for businesses", "Moves written for bookings, not followers"], cta: "Start Business Growth Plan" },
+  business_growth: { tier: "business_growth", name: "Business Growth Plan", rank: 2, has: GROWTH_HAS, business: true, description: "Scored against your category; the plan is written for bookings.", features: ["Everything in Growth Plan", "Category benchmarks for businesses", "Moves written for bookings, not followers"], cta: "Start Business Growth Plan" },
   business_evaluator: { tier: "business_evaluator", name: "Business Evaluator", rank: 3, has: PRO_HAS, business: true, description: "The plan answers to the P&L, not just the feed.", features: ["Everything in Business Growth Plan", "Margin-aware recommendations", "Action plan checklist with owners and dates", "Rescores every 3 days"], cta: "Start Business Evaluator" },
   agency: { tier: "agency", name: "Agency", rank: 4, has: PRO_HAS, business: true, hidden: true, description: "Many accounts, one dashboard.", features: [], cta: "Talk to us" },
 };
