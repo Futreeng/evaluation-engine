@@ -896,7 +896,10 @@ async function evaluateTier1(accountId, inputParams, onStage = () => {}, { tier:
     let result = null;
     for (let attempt = 0; attempt < 2 && !result; attempt++) {
       const prompt = interpolateTemplate(PLAN_PHASE_PROMPT, vars) + (attempt && result === null && vars.PROBLEMS ? `\n\nYour previous answer was rejected:\n${vars.PROBLEMS}\nWrite ${MOVES_PER_PHASE} different moves that serve "${vars.PHASE_LABEL}" and repeat nothing.` : "");
-      const r = await askJson(prompt, `Plan Writer: phase ${i + 1}${attempt ? " (rewrite)" : ""}`, 6144).then((x) => (x && Array.isArray(x.moves) && x.moves.length ? x : null));
+      // One flaky phase must not throw the paid report away: a phase that fails on every model ships as missing and the plan is marked for an early refresh.
+      let r = null;
+      try { r = await askJson(prompt, `Plan Writer: phase ${i + 1}${attempt ? " (rewrite)" : ""}`, 6144).then((x) => (x && Array.isArray(x.moves) && x.moves.length ? x : null)); }
+      catch (err) { console.warn(`[Growth Engine] Plan Writer: phase ${i + 1} failed on every model: ${String(err.message).slice(0, 160)}`); }
       if (!r) break;
       const check = planQuality.validatePhases([...phaseResults.map((pr, k) => ({ label: labels[k], visible_action: snapPhases[k].visible_action, opener: pr?.first_move || null, moves: pr?.moves || [] })), { label: labels[i], visible_action: p.visible_action, opener: r.first_move || null, moves: r.moves }], { labels });
       const mine = check.problems.filter((x) => x.phase === i || x.kind === "overcite");
