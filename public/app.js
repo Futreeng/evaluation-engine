@@ -151,6 +151,8 @@
     if (lget('sc_admin', false) !== before) { const cur = $header.querySelector('.nav a.strong'); renderHeader(cur ? (cur.getAttribute('href') || '').replace('#/', '') : ''); }
   }
   const grade = s => s < 50 ? ['Weak', 'weak'] : s < 70 ? ['Fair', 'fair'] : ['Strong', 'strong'];
+  // The summary names the dimensions holding the score back; those never read "Strong" beside it.
+  const gradeIn = (d, summary) => { const g = grade(d.score); return g[0] === 'Strong' && d.label && new RegExp(d.label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(summary || '') ? ['Biggest gap', 'fair'] : g; };
 
   let toastTimer;
   function toast(msg) {
@@ -193,7 +195,7 @@
           <a href="#/pricing" class="${kind === 'pricing' ? 'strong' : ''}">Pricing</a>
           <a href="#/business">For businesses</a>
           ${token()
-            ? raw(h`<a href="#/reports" class="${kind === 'reports' ? 'strong' : ''}">Reports</a>${lget('sc_admin', false) ? raw(h`<a href="#/admin" class="${kind === 'admin' ? 'strong' : ''}">Admin</a>`) : ''}<a href="#" data-action="signout">Sign out</a>`)
+            ? raw(h`${lget('sc_path_home', null) ? raw(h`<a href="#/path/${lget('sc_path_home', '')}" class="${kind === 'path' ? 'strong' : ''}">Your path</a>`) : ''}<a href="#/reports" class="${kind === 'reports' ? 'strong' : ''}">Reports</a>${lget('sc_admin', false) ? raw(h`<a href="#/admin" class="${kind === 'admin' ? 'strong' : ''}">Admin</a>`) : ''}<a href="#" data-action="signout">Sign out</a>`)
             : raw(h`<a href="#/signin" class="strong">Sign in</a>`)}
         </nav>
       </div></div>`;
@@ -240,6 +242,8 @@
 
   // ------------------------------------------------------------ landing
   function viewLanding() {
+    // Anyone with a plan opens the app to their next step; the report is one tap away.
+    if (token() && lget('sc_path_home', null) && !sget('sc_stay_home', false)) { sset('sc_stay_home', true); go('#/path/' + lget('sc_path_home', '')); return; }
     renderHeader('landing');
     if (!sget('sc_support', null)) api('/billing/pricing', {}, { allow401: true }).then(p => { if (p.support_email) { sset('sc_support', p.support_email); const f = $view.querySelector('.footer'); if (f && !f.querySelector('a[href^=mailto]')) (f.querySelector('span') || f).insertAdjacentHTML(f.querySelector('span') ? 'beforebegin' : 'beforeend', h`<a href="mailto:${p.support_email}">Contact</a>`); } }).catch(() => { });
     const last = sget('sc_form', {});
@@ -791,6 +795,7 @@
     // Phase check-in window: day 25–45 for phase 2, 55–75 for phase 3
     const duePhase = subscriber ? ([[2, 25, 45], [3, 55, 75]].find(([ph, a, b]) => ageDays >= a && ageDays < b && !checkins['p' + ph]) || [])[0] : 0;
     const nudge = subscriber && report.nudge ? report.nudge : null;
+    if (paid && !isSample) lset('sc_path_home', report.report_id);
     if (subscriber && qs.get('checkin') && qs.get('changed') === '1') { go(`#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=checkin&phase=${qs.get('checkin')}`); return; }
     if (isSample) sset('sc_once_price', oneTime);
 
@@ -827,7 +832,9 @@
               <p class="a">${thisWeek.action}</p>
               ${thisWeek.detail ? raw(h`<p class="w">${thisWeek.detail}</p>`) : ''}
               ${paid && thisWeek.opener ? raw(moveDetailHTML(thisWeek.opener, true)) : ''}
-              <button class="done ${isDone('p1m1') ? 'on' : ''}" data-move="p1m1" aria-pressed="${isDone('p1m1') ? 'true' : 'false'}"><span class="box" aria-hidden="true">${isDone('p1m1') ? '✓' : ''}</span>Mark this move done</button>
+              ${paid || isSample ? raw(h`<a class="btn light block starthere" href="#/path/${report.report_id}">${Object.keys(done).length ? 'Continue your path →' : 'Start here →'}</a><div class="next">${Object.keys(done).length ? `${Object.keys(done).length} step${Object.keys(done).length === 1 ? '' : 's'} done. ` : ''}One step at a time — moves, post days and written posts in order.</div>`)
+              : raw(h`<button class="done ${isDone('p1m1') ? 'on' : ''}" data-move="p1m1" aria-pressed="${isDone('p1m1') ? 'true' : 'false'}"><span class="box" aria-hidden="true">${isDone('p1m1') ? '✓' : ''}</span>Mark this move done</button>
+              <a class="btn light block starthere" href="#/path/${report.report_id}">See your path →</a>`)}
               ${nextPhase ? raw(h`<div class="next">Next: Day 31 — ${nextPhase.label}</div>`) : ''}
             </div>`) : ''}
           </div>
@@ -850,7 +857,7 @@
           <details class="card acc" open>
             <summary>The four dimensions</summary>
             <div class="body">
-              ${raw((s.dimensions || []).map(d => { const sc = clamp(d.score, 0, 100); const [g, gcc] = grade(sc); const hue = hueOf(d.label); const dd = hist?.delta_dimensions?.find(x => x.label === d.label);
+              ${raw((s.dimensions || []).map(d => { const sc = clamp(d.score, 0, 100); const [g, gcc] = gradeIn({ score: sc, label: d.label }, s.summary); const hue = hueOf(d.label); const dd = hist?.delta_dimensions?.find(x => x.label === d.label);
                 return h`<div class="dimcard bd${hue}"><div class="top"><span class="n">${d.label}</span><span class="s hue${hue}">${sc} · ${g}${dd && dd.delta ? raw(h`<span class="dd g-${dd.delta > 0 ? 'strong' : 'weak'}">${dd.delta > 0 ? '+' : ''}${dd.delta}</span>`) : ''}</span></div>
                   <div class="bar in"><div class="fill bg${hue}" style="width:${sc}%"></div>${d.category_avg != null ? raw(h`<div class="mark" style="left:${clamp(d.category_avg, 0, 100)}%"></div>`) : ''}</div>
                   <p>${d.explanation || ''}</p>${raw(evidenceHTML(d.evidence_posts))}</div>`; }).join(''))}
@@ -927,7 +934,7 @@
           <div class="datawindow">${report.data_window || `Based on your last ${pi?.sample || 12} posts. We can't see saves, reach or story views.`}</div>
 
           ${!paid && sget('sc_limit_msg', null) ? raw(h`<div class="notice">${sget('sc_limit_msg', '')} <a href="#/pricing">See the plan →</a></div>`) : ''}
-          ${isSample ? raw(h`<div class="refresh"><div class="t"><h2>This is what $${price} a month gets you${founders ? " (founders price)" : ""}</h2><p>Every move with the reason behind it, a 12-week calendar written from the account's own posts, competitors scored the same way, and a fresh score every week. Yours starts with a free Snapshot.</p></div><a class="btn green" href="#/" data-scroll="evalForm">Score my account free</a></div>`)
+          ${isSample ? raw(h`<div class="refresh"><div class="t"><h2>This is what $${price} a month gets you${founders ? " (founders price)" : ""}</h2><p>Every move with the reason behind it, a week-by-week posting calendar and posts written from the account's own material, competitors scored the same way, and a fresh score every week. Yours starts with a free Snapshot.</p></div><a class="btn green" href="#/" data-scroll="evalForm">Score my account free</a></div>`)
           : paid && once ? raw(h`<div class="notin"><div class="hd"><h2>Not in your 60-day plan</h2><p>Yours to keep, as bought. This is what the Growth Plan adds, for $${price} a month — less than the $${oneTime} you paid once.</p></div>
               <div class="rows">${raw(['Days 61–90 — phase 3, moves 10 through 13', 'Re-scored every week, with what each move changed', 'Day-30 and day-60 check-ins that reshape the plan', 'Up to 5 competitors, scored the same way', 'Score and follower history', 'A fresh plan every 90 days'].map(t => h`<div><i>🔒</i>${t}</div>`).join(''))}</div>
               <button class="btn green" data-action="unlock">Start the plan · $${price}/mo</button></div>`)
@@ -1637,6 +1644,128 @@
   }
 
   // ------------------------------------------------------------ how the score works (batch 3)
+  // ------------------------------------------------------------ the Path
+  // One step at a time (docs/PATH_SPEC.md). The step list comes from the
+  // shared engine (public/path-engine.js) — on the server for real reports,
+  // in the browser for the sample.
+  const PATH_SKIP_REASONS = [['did_it', 'Already did it'], ['cant', "Can't right now"], ['not_me', 'Not for me']];
+  const dueLabel = (t) => { if (!t) return ''; const d0 = new Date(); d0.setHours(0, 0, 0, 0); const diff = Math.round((new Date(t).setHours(0, 0, 0, 0) - d0) / 86400000); return diff === 0 ? 'Today' : diff === 1 ? 'Tomorrow' : diff === -1 ? 'Yesterday' : diff < 0 ? `${-diff} days ago` : new Date(t).toLocaleDateString('en-GB', { weekday: 'long' }) + (diff > 6 ? ` ${fmtShort(t)}` : ''); };
+  function pathStepCard(s, path, { isSample, report }) {
+    const post = s.post || null;
+    const late = s.kind === 'slot' && s.due && new Date(s.due).setHours(0, 0, 0, 0) < new Date().setHours(0, 0, 0, 0);
+    return h`<article class="card pstep ${s.kind}" data-step="${s.key}">
+      <div class="eb"><span>${s.kind === 'slot' ? `${s.day} · ${String(s.format).toUpperCase()}${s.source ? ` · ${s.source === 'new' ? 'NEW SHOOT' : s.source === 'archive' ? 'FROM ARCHIVE' : 'NO CAMERA'}` : ''}` : `MOVE ${String(s.n).padStart(2, '0')}`}</span><span>${s.kind === 'slot' ? raw(h`<b class="${late ? 'late' : ''}">${late ? 'Was due ' + dueLabel(s.due).toLowerCase() : dueLabel(s.due)}</b>`) : `Days ${String(s.phase_range).replace('-', '–')} · ${s.phase_label}`}</span></div>
+      <h2>${s.kind === 'slot' && post ? post.hook : s.action || s.title}</h2>
+      ${s.kind === 'slot' ? raw(h`<p class="a">${s.title}${s.action && s.action !== s.title ? raw(h` — ${s.action}`) : ''}</p>`) : s.title && s.title !== s.action && !s.opener ? raw(h`<p class="a">${s.title}</p>`) : ''}
+      ${s.why ? raw(h`<details class="why"><summary>Why this</summary><p>${s.why}</p></details>`) : ''}
+      ${s.verified && s.status !== 'done' && s.verified.ok ? raw(h`<div class="vnote ok">✓ ${s.verified.note} Looks done already — mark it and move on.</div>`) : s.verified && s.status === 'done' && !s.verified.ok ? raw(h`<div class="vnote">${s.verified.note}</div>`) : ''}
+      ${post ? raw(h`<div class="ppost">
+        <div class="fld"><div class="fl">Caption <button class="copy" data-copy="caption">Copy</button></div><p class="txt">${post.caption}</p></div>
+        ${post.script ? raw(h`<div class="fld"><div class="fl">${/reel|video/.test(post.format) ? 'Script' : /carousel/.test(post.format) ? 'Slides' : 'Shot idea'} <button class="copy" data-copy="script">Copy</button></div><p class="txt script">${post.script}</p></div>`) : ''}
+        ${post.why ? raw(h`<p class="w">Why this post: ${post.why}</p>`) : ''}</div>`)
+      : raw(moveDetailHTML({ how: s.how, example: s.example, done_when: s.done_when, time: s.time }))}
+      ${s.kind === 'slot' && !post ? raw(h`<div class="dw"><span><b>Done when:</b> ${s.done_when}</span><span class="tm">${s.time}</span></div>`) : ''}
+      <div class="pacts">
+        <button class="btn green" data-path="done" data-key="${s.key}">Done</button>
+        <button class="btn ghost" data-path="skip" data-key="${s.key}">Skip</button>
+        <button class="btn ghost" data-path="later" data-key="${s.key}">Not today</button>
+      </div>
+      <div class="skipwhy" hidden><span>Why skip it?</span>${raw(PATH_SKIP_REASONS.map(([k, l]) => h`<button class="pill" data-skip-reason="${k}" data-key="${s.key}">${l}</button>`).join(''))}<button class="pill" data-skip-cancel>Never mind</button></div>
+    </article>`;
+  }
+  async function viewPath(reportId) {
+    const isSample = reportId === 'sample';
+    if (!isSample && !token()) { sset('sc_next', '#/path/' + reportId); go('#/signin'); return; }
+    renderHeader('path');
+    let report = isSample ? SHIPPED : sget('sc_report_' + reportId, null);
+    if (isSample && !report) { $view.innerHTML = h`<div class="center-msg"><h2>Score your own account to see a real one.</h2><a href="#/">Score my account</a></div>`; return; }
+    if (!report) {
+      $view.innerHTML = h`<div class="center-msg">Loading your path…</div>`;
+      try { report = normalizeReport(await api('/reports/' + encodeURIComponent(reportId)), reportId); sset('sc_report_' + reportId, report); }
+      catch (e) { if (e.status === 401) return; $view.innerHTML = h`<div class="center-msg"><h2>We couldn't find that report.</h2><a href="#/reports">Your reports</a></div>`; return; }
+    }
+    const paid = !!report.tier && report.tier !== 'social_snapshot';
+    if (paid && !isSample) lset('sc_path_home', report.report_id);
+    // Sample state lives in this browser only.
+    const sampleState = () => ({ ...report, ...lget('sc_path_sample', {}) });
+    const compute = async () => isSample ? window.ScalecraftPath.build(sampleState(), { paid: true }) : await api('/reports/' + encodeURIComponent(report.report_id) + '/path');
+    let path;
+    try { path = await compute(); } catch (e) { if (e.status === 401) return; $view.innerHTML = h`<div class="center-msg"><h2>${e.message || "Couldn't load your path."}</h2><a href="#/report/${report.report_id}">Open the report</a></div>`; return; }
+    const qs = new URLSearchParams(location.hash.split('?')[1] || '');
+    const setStatus = async (key, status, reason) => {
+      if (isSample) { const st = window.ScalecraftPath.apply(sampleState(), key, status, { reason }); lset('sc_path_sample', st); return window.ScalecraftPath.build(sampleState(), { paid: true }); }
+      return api('/reports/' + encodeURIComponent(report.report_id) + '/path/' + encodeURIComponent(key), { method: 'POST', body: JSON.stringify({ status, reason: reason || undefined }) });
+    };
+    if (qs.get('done') && qs.get('done') !== 'invalid') { try { path = await setStatus(qs.get('done'), 'done'); toast('Marked done from your email.'); } catch { } }
+    if (qs.get('done') === 'invalid') toast("That link didn't work — mark the move done here instead.");
+
+    const render = (moment) => {
+      const biz = report.business || {};
+      const steps = path.steps;
+      const nowSteps = path.now.map(k => steps.find(s => s.key === k)).filter(Boolean);
+      const first = nowSteps[0] || null;
+      const upcoming = steps.filter(s => s.live && s.status === 'open' && !path.now.includes(s.key)).slice(0, 4);
+      const doneSteps = steps.filter(s => s.status === 'done' || s.status === 'skipped');
+      const locked = steps.filter(s => s.status === 'locked');
+      const pv = sget('sc_pricing', null); const founders = pv?.founders || null; const price = founders ? founders.monthlyPrice : (pv?.growth_plan ?? report.upsell?.monthly_price ?? 19);
+      const streak = report.streak && report.streak.visible ? report.streak : null;
+      $view.innerHTML = h`<div class="wrap"><div class="pathwrap">
+        ${isSample ? raw(h`<div class="samplebar"><b>Sample path.</b> The same plan as the <a href="#/report/sample">sample report</a>, one step at a time. Ticks you make here stay in this browser. <a href="#/" data-scroll="evalForm">Score my account →</a></div>`) : ''}
+        <header class="phead">
+          <div class="l"><div class="eb">YOUR PATH · @${biz.handle}${path.plan_day ? raw(h` · DAY ${path.plan_day}`) : ''}</div>
+            <h1>${path.free ? 'Start here.' : path.caught_up ? "You're caught up." : nowSteps.length > 1 ? `${nowSteps.length} things today.` : first && first.kind === 'slot' ? 'Post today.' : 'One thing today.'}</h1></div>
+          <div class="r"><a class="btn ghost sm" href="#/report/${report.report_id}">Your report</a></div>
+        </header>
+        <div class="pprog" role="progressbar" aria-valuemin="0" aria-valuemax="${path.progress.total}" aria-valuenow="${path.progress.done}" aria-label="Path progress">
+          <div class="t"><span>${path.progress.done} of ${path.progress.total} done${path.progress.skipped ? raw(h` <em>· ${path.progress.skipped} skipped</em>`) : ''}</span><span>${path.phase ? `Days ${String(path.phase.range).replace('-', '–')} · ${path.phase.label} · ${path.phase.done}/${path.phase.total}` : ''}</span></div>
+          <div class="bar"><div class="fill" style="width:${path.progress.pct}%"></div></div>
+          ${streak ? raw(h`<div class="fine">${streak.weeks ? `🔥 ${streak.weeks}-week streak` : 'Your streak starts this week'}${streak.freezes ? ` · ${streak.freezes} freeze${streak.freezes === 1 ? '' : 's'}` : ''} · an on-plan week means you posted on your ${streak.planned_days} days.</div>`) : ''}
+        </div>
+        ${moment ? raw(h`<div class="pmoment" role="status"><span class="tick" aria-hidden="true">✓</span><div><b>${moment.title}</b><div class="fine">${moment.line}</div></div></div>`) : ''}
+        ${first ? raw(pathStepCard(first, path, { isSample, report })) : path.free ? '' : raw(h`<div class="card pstep caught">
+            <div class="eb"><span>NOTHING DUE</span><span>${path.next ? dueLabel(path.next.at) : ''}</span></div>
+            <h2>${path.next ? `Next: ${path.next.title}` : 'That was the last step. Your rescore writes the next plan.'}</h2>
+            ${path.next ? raw(h`<p class="a">${path.next.kind === 'slot' ? `Post day is ${dueLabel(path.next.at).toLowerCase()}. Nothing to do until then — unless you want to work ahead.` : `Days ${String(steps.find(s => s.key === path.next.key)?.phase_range || '').replace('-', '–')} open ${dueLabel(path.next.at).toLowerCase()}. Nothing to do until then — unless you want to work ahead.`}</p><div class="pacts"><button class="btn dark" data-ahead="${path.next.key}">Work ahead</button></div>`) : ''}
+            ${path.later ? raw(h`<p class="fine">You put one step off until tomorrow: it comes back ${dueLabel(path.later.at).toLowerCase()}.</p>`) : ''}
+          </div>`)}
+        ${nowSteps.length > 1 ? raw(h`<div class="ptoday"><div class="eb">ALSO TODAY</div>${raw(nowSteps.slice(1).map(s => h`<button class="prow" data-open="${s.key}"><span class="k">${s.kind === 'slot' ? `${s.day} · ${String(s.format).toUpperCase()}` : `MOVE ${String(s.n).padStart(2, '0')}`}</span><span class="t">${s.kind === 'slot' && s.post ? s.post.hook : s.action || s.title}</span></button>`).join(''))}</div>`) : ''}
+        ${path.free ? raw(h`<div class="pfree">
+            ${raw(steps.filter(s => s.live).map((s, i) => h`<div class="prow ${i === 0 ? 'now' : ''}"><span class="k">${String(i + 1).padStart(2, '0')}</span><span class="t"><b>${s.action}</b>${s.why ? raw(h`<span class="fine">${s.why}</span>`) : ''}</span><span class="d">Days ${String(s.phase_range).replace('-', '–')}</span></div>`).join(''))}
+            <div class="plocked"><div class="eb">${locked.length} MORE STEPS IN YOUR GROWTH PLAN</div>${raw(locked.slice(0, 6).map((s, i) => h`<div class="prow ghost"><span class="k">${String(i + 4).padStart(2, '0')}</span><span class="t">${s.title}</span></div>`).join(''))}${locked.length > 6 ? raw(h`<div class="fine">…and ${locked.length - 6} more, plus your posting calendar and written posts.</div>`) : ''}
+              <button class="btn" data-action="unlock-path">Start the plan · $${price}/mo${founders ? raw(h` <span class="fine">founders price</span>`) : ''}</button></div>
+          </div>`) : ''}
+        ${!path.free && upcoming.length ? raw(h`<div class="pnext"><div class="eb">UP NEXT</div>${raw(upcoming.map(s => h`<button class="prow ${s.phase_open ? '' : 'ghost'}" data-open="${s.key}" ${s.phase_open ? '' : 'title="Opens with the next phase"'}><span class="k">${s.kind === 'slot' ? dueLabel(s.due) : `MOVE ${String(s.n).padStart(2, '0')}`}</span><span class="t">${s.kind === 'slot' && s.post ? s.post.hook : s.action || s.title}</span><span class="d">${s.kind === 'slot' ? `${s.day} · ${s.format}` : s.time || ''}</span></button>`).join(''))}</div>`) : ''}
+        ${doneSteps.length ? raw(h`<details class="pdone"><summary>Done and skipped <span class="fine">${doneSteps.length}</span></summary>${raw(doneSteps.map(s => h`<div class="prow done ${s.status}"><span class="k" aria-hidden="true">${s.status === 'done' ? '✓' : '→'}</span><span class="t">${s.action || s.title}${s.verified ? raw(h`<span class="fine ${s.verified.ok ? 'ok' : ''}">${s.verified.ok ? '✓✓ ' : ''}${s.verified.note}</span>`) : s.status === 'skipped' ? raw(h`<span class="fine">Skipped${s.skipped?.reason ? ' · ' + (PATH_SKIP_REASONS.find(r => r[0] === s.skipped.reason) || [])[1]?.toLowerCase() : ''}</span>`) : ''}</span><button class="undo" data-path="open" data-key="${s.key}">Undo</button></div>`).join(''))}</details>`) : ''}
+      </div></div>${raw(footer())}`;
+
+      const update = async (key, status, reason, momentFor) => {
+        const btns = $view.querySelectorAll(`[data-key="${key}"]`); btns.forEach(b => { b.disabled = true; });
+        try {
+          const before = path; path = await setStatus(key, status, reason);
+          if (!isSample) { const cached = sget('sc_report_' + report.report_id, null); if (cached) { cached.moves_done = Object.fromEntries(path.steps.filter(s => s.status === 'done').map(s => [s.key, s.done_at || Date.now()])); sset('sc_report_' + report.report_id, cached); } track(status === 'done' ? 'path_done' : status === 'skip' ? 'path_skipped' : 'path_later', { key, reason }, report.report_id); }
+          const step = before.steps.find(s => s.key === key);
+          const phaseDone = path.phase && before.phase && path.phase.index > before.phase.index;
+          const mom = status === 'done' ? { title: phaseDone ? `Days ${String(before.phase.range).replace('-', '–')} done.` : step?.kind === 'slot' ? 'Posted. That counts toward your streak.' : `Done${step?.time ? ` · ${step.time}` : ''}.`, line: phaseDone ? `${path.phase.label} opens now.` : path.progress.done === path.progress.total ? 'That was the last step.' : `${path.progress.total - path.progress.done - path.progress.skipped} to go. ${path.caught_up ? "Nothing else due today." : 'Next one is up.'}` } : status === 'later' ? { title: 'Back tomorrow.', line: 'It comes around again in the morning. No streak lost.' } : null;
+          render(mom); window.scrollTo({ top: 0, behavior: 'smooth' });
+        } catch (e) { btns.forEach(b => { b.disabled = false; }); toast(e.message || 'Could not save that.'); }
+      };
+      $view.querySelectorAll('[data-path]').forEach(b => b.addEventListener('click', () => {
+        const key = b.dataset.key, st = b.dataset.path;
+        if (st === 'skip') { const box = b.closest('.pstep').querySelector('.skipwhy'); box.hidden = !box.hidden; if (!box.hidden) box.querySelector('button').focus(); return; }
+        update(key, st);
+      }));
+      $view.querySelectorAll('[data-skip-reason]').forEach(b => b.addEventListener('click', () => update(b.dataset.key, 'skip', b.dataset.skipReason)));
+      $view.querySelectorAll('[data-skip-cancel]').forEach(b => b.addEventListener('click', () => { b.closest('.skipwhy').hidden = true; }));
+      const showStep = (key) => { const s = steps.find(x => x.key === key); if (!s) return; const card = $view.querySelector('.pstep'); const el = document.createElement('div'); el.innerHTML = pathStepCard(s, path, { isSample, report }); const nc = el.firstElementChild; if (card) card.replaceWith(nc); else $view.querySelector('.pprog').insertAdjacentElement('afterend', nc); bind(nc); nc.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+      const bind = (root) => { root.querySelectorAll('[data-path]').forEach(b => b.addEventListener('click', () => { const key = b.dataset.key, st = b.dataset.path; if (st === 'skip') { const box = b.closest('.pstep').querySelector('.skipwhy'); box.hidden = !box.hidden; return; } update(key, st); })); root.querySelectorAll('[data-skip-reason]').forEach(b => b.addEventListener('click', () => update(b.dataset.key, 'skip', b.dataset.skipReason))); root.querySelectorAll('[data-skip-cancel]').forEach(b => b.addEventListener('click', () => { b.closest('.skipwhy').hidden = true; })); root.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', () => { const t = b.closest('.fld').querySelector('.txt, .hook')?.textContent || ''; navigator.clipboard?.writeText(t).then(() => toast('Copied.')).catch(() => toast('Select the text and copy it.')); })); };
+      $view.querySelectorAll('[data-open], [data-ahead]').forEach(b => b.addEventListener('click', () => showStep(b.dataset.open || b.dataset.ahead)));
+      $view.querySelectorAll('.pstep [data-copy]').forEach(b => b.addEventListener('click', () => { const t = b.closest('.fld').querySelector('.txt, .hook')?.textContent || ''; navigator.clipboard?.writeText(t).then(() => toast('Copied.')).catch(() => toast('Select the text and copy it.')); }));
+      $view.querySelector('[data-action=unlock-path]')?.addEventListener('click', () => { sset('sc_intent_tier', 'growth_plan'); sset('sc_unlock_report', report.report_id); go('#/pricing'); });
+    };
+    render(null);
+    if (!isSample && !sget('sc_path_viewed_' + report.report_id, false)) { sset('sc_path_viewed_' + report.report_id, true); track('path_viewed', { paid }, report.report_id); }
+  }
+
   function viewHow() {
     renderHeader('how');
     const minN = (LEVELS && LEVELS.min_n) || 10;
@@ -1724,6 +1853,7 @@
     if (parts.length === 0) return viewLanding();
     if (parts[0] === 'evaluating' && parts[1]) return viewEvaluating(decodeURIComponent(parts[1]));
     if (parts[0] === 'report' && parts[1]) return viewReport(decodeURIComponent(parts[1]));
+    if (parts[0] === 'path' && parts[1]) return viewPath(decodeURIComponent(parts[1]));
     if (parts[0] === 'pricing') return viewPricing();
     if (parts[0] === 'plan-setup') return viewPlanSetup();
     if (parts[0] === 'business') return viewBusiness();
