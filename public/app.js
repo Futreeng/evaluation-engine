@@ -89,6 +89,37 @@
   let LEVELS = sget('sc_levels', null);
   const loadLevels = async () => { if (LEVELS) return LEVELS; try { LEVELS = await api('/levels'); sset('sc_levels', LEVELS); } catch { } return LEVELS; };
   const levelOf = (score, given) => { if (given && given.name) return given; if (!LEVELS || !Number.isFinite(score)) return null; const ls = LEVELS.levels; const l = ls.filter(x => score >= x.min).pop() || ls[0]; const n = ls.find(x => x.min > l.min) || null; return { name: l.name, rank: l.rank, of: ls.length, next: n ? { name: n.name, min: n.min, points_away: n.min - score } : null }; };
+  // Goal onboarding (spec 3.3): asked right after the first report, kept on the
+  // account (signed in) and the report; the plan, Monday moves and post writing
+  // read it through plan_context.
+  const GOALS = [['followers', 'Grow to a follower target', 'a number you want to hit'], ['deals', 'Land brand deals'], ['sell', 'Sell a product or service', 'a guide, coaching, bookings'], ['bookings', 'Bookings or clients'], ['consistency', 'Just grow consistently']];
+  const goalLabel = g => (GOALS.find(x => x[0] === g) || [])[1] || '';
+  const niceTarget = f => { const n = Math.max(100, (Number(f) || 0) * 1.5); const p = Math.pow(10, Math.floor(Math.log10(n))); return Math.ceil(n / p) * p; };
+  const knownGoal = report => (report && report.goal) || sget('sc_goal', null)?.goal || null;
+  // Progress toward the goal, from what the report already knows. null = nothing measurable yet.
+  function goalProgress(goal, target, report) {
+    if (!goal || !report) return null;
+    const followers = report.business?.followers || 0;
+    if (goal === 'followers') { const t = target || niceTarget(followers); return { pct: clamp(Math.round(followers / t * 100), 0, 100), label: `${fmtN(followers)} of ${fmtN(t)} followers`, sub: report.history?.delta_followers != null ? `${report.history.delta_followers >= 0 ? '+' : ''}${fmtN(report.history.delta_followers)} since ${fmtShort(report.history.previous.generated_at)}` : 'Updated at every rescore' }; }
+    if (goal === 'consistency') { const w = report.streak?.visible ? report.streak.weeks : 0; return { pct: clamp(Math.round(w / 4 * 100), 0, 100), label: `${w} on-plan week${w === 1 ? '' : 's'} toward a 4-week streak`, sub: report.streak?.visible ? `Posted on ${report.streak.posted_days ?? '—'} of ${report.streak.planned_days} planned days last week` : 'Counted from your first rescore on the plan' }; }
+    const phases = report.growth_path?.phases || []; const total = phases.reduce((n, p) => n + (p.not_included ? 0 : 1 + (p.moves || []).length), 0); const done = Object.keys(report.moves_done || {}).length;
+    const paid = report.tier && report.tier !== 'social_snapshot';
+    return { pct: clamp(Math.round(done / Math.max(1, total) * 100), 0, 100), label: `${done} of ${total} plan moves done`, sub: paid ? `Every move in the plan is written toward ${goalLabel(goal).toLowerCase()}` : 'The Growth Plan writes all 13 moves toward this goal' };
+  }
+  function goalPickerHTML(cur, target, followers, { first = false } = {}) {
+    return h`<div class="goalpick"><div class="opts">${raw(GOALS.map(([k, l, d]) => h`<button type="button" class="opt ${k === cur ? 'on' : ''}" data-goal="${k}"><b>${l}</b>${d ? raw(h`<small>${d}</small>`) : ''}</button>`).join(''))}</div>
+      <div class="target" ${cur === 'followers' ? '' : 'hidden'}><label>Follower target <input type="number" name="goal_target" min="1" step="1" value="${target || niceTarget(followers)}" inputmode="numeric"></label></div>
+      <div class="acts"><button type="button" class="btn dark" data-goal-save="1" ${cur ? '' : 'disabled'}>${first ? 'Set my goal' : 'Save'}</button>${first ? raw(h`<button type="button" class="btn ghost" data-goal-skip="1">Not now</button>`) : ''}</div></div>`;
+  }
+  // Wires a picker; onSave(goal, target) does the API call.
+  function bindGoalPicker(root, onSave, onSkip) {
+    let cur = root.querySelector('.opt.on')?.dataset.goal || null;
+    root.addEventListener('click', e => {
+      const o = e.target.closest('[data-goal]'); if (o) { cur = o.dataset.goal; root.querySelectorAll('[data-goal]').forEach(x => x.classList.toggle('on', x === o)); root.querySelector('.target').hidden = cur !== 'followers'; root.querySelector('[data-goal-save]').disabled = false; return; }
+      if (e.target.closest('[data-goal-save]')) { const t = Number(root.querySelector('[name=goal_target]')?.value) || null; onSave(cur, cur === 'followers' ? t : null); }
+      if (e.target.closest('[data-goal-skip]') && onSkip) onSkip();
+    });
+  }
   function rememberPricing(p) { try { const g = (p.tiers || []).find(t => t.tier === 'growth_plan'); sset('sc_pricing', { variant: p.variant || 'control', growth_plan: g?.monthlyPrice, plan_unlock: p.one_time?.[0]?.price }); } catch { } }
   // Admin link in the nav: ask /auth/me once per token and remember the answer.
   async function refreshAdminFlag() {
@@ -321,7 +352,8 @@
       const body = { handle: payload.handle, platform: payload.platform, category: payload.category, email: payload.email };
       try { body.tz = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { }
       if (payload.competitors && payload.competitors.length) body.competitors = payload.competitors;
-      const ctx = payload.plan_context || sget('sc_plan_context', null);
+      let ctx = payload.plan_context || sget('sc_plan_context', null);
+      const g = sget('sc_goal', null); if (g && g.goal && !(ctx && ctx.goal)) ctx = { ...(ctx || {}), goal: g.goal, goal_target: g.goal_target || undefined };
       if (ctx) body.plan_context = ctx;
       if (payload.rerun_of) body.rerun_of = payload.rerun_of;
       if (payload.is_business) body.is_business = true;
@@ -671,6 +703,8 @@
     const paid = !!report.tier && report.tier !== 'social_snapshot';
     const overall = clamp(s.overall, 0, 100); const [gl, gc] = grade(overall);
     const lvl = levelOf(overall, s.level);
+    const goalNow = knownGoal(report);
+    const showGoalAsk = !isSample && !goalNow && !(report.history && report.history.runs > 1) && !sget('sc_goal_skipped_' + report.report_id, false);
     const momentsToShow = isSample ? [] : (report.moments || []).filter(m => { try { return !localStorage.getItem('sc_moment_' + report.report_id + '_' + m.key); } catch { return true; } });
     const niche = nicheName(biz.category);
     const nicheKnown = s.niche_known !== false;
@@ -716,14 +750,16 @@
         ${duePhase ? raw(h`<div class="checkin"><div class="t"><div class="eb">DAY ${Math.round(ageDays)} · CHECK-IN</div><h3>Phase ${duePhase} starts. Anything change?</h3><p>The next 30 days were written when you started. If your time, goal or next few weeks changed, the plan is rewritten tonight.</p></div><div class="acts"><button class="btn green" data-checkin="${duePhase}" data-changed="0">Nothing changed</button><a class="btn ghost" href="#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=checkin&phase=${duePhase}">Something changed</a></div></div>`) : ''}
         ${nudge ? raw(h`<div class="checkin nudge" id="nudge"><div class="t"><div class="eb">FROM THIS WEEK'S RE-SCORE</div><h3>${nudge.title}</h3><p>${nudge.text}</p></div><div class="acts"><button class="btn" data-nudge="${nudge.key}" data-changed="1">${nudge.cta}</button><button class="btn ghost" data-nudge="${nudge.key}" data-changed="0">Keep the plan as is</button></div></div>`) : ''}
         ${raw(momentsToShow.map(m => h`<div class="moment ${m.kind}" data-moment="${m.key}"><div class="t"><div class="eb">${m.kind === 'rank_up' ? 'RANK UP' : m.kind === 'record' ? 'PERSONAL RECORD' : 'MILESTONE'} · FROM THIS RE-SCORE</div><h3>${m.title}</h3><p>${m.line}</p></div><div class="acts"><button class="btn dark" data-moment-share="${m.key}">Share the card</button><button class="btn ghost" data-moment-dismiss="${m.key}">Later</button></div></div>`).join(''))}
+        ${showGoalAsk ? raw(h`<div class="card goalcard ask" id="goalAsk"><div class="eb">ONE QUESTION</div><h3>What do you want from this?</h3><p>The plan, your Monday move and the posts we write all lean toward it. Change it any time on your reports page.</p>${raw(goalPickerHTML(null, null, followers, { first: true }))}</div>`) : ''}
+        ${goalNow && !showGoalAsk && !isSample ? raw((() => { const gp = goalProgress(goalNow, report.goal_target || sget('sc_goal', null)?.goal_target || null, report); return gp ? h`<div class="goalbar"><div class="t"><span class="l">${goalLabel(goalNow)}</span><span class="v">${gp.label}</span></div><div class="bar"><div class="fill" style="width:${gp.pct}%"></div></div><div class="fine">${gp.sub}</div></div>` : ''; })()) : ''}
         <div class="roastwrap" id="roastWrap" hidden></div>
         <div class="report">
           <div class="toprow">
             <div class="card scorebox">
+              ${hist && hist.delta_overall != null ? raw(h`<div class="trend ${hist.delta_overall > 0 ? 'up' : hist.delta_overall < 0 ? 'down' : 'flat'}"><b>${hist.delta_overall > 0 ? `Up ${hist.delta_overall} point${hist.delta_overall === 1 ? '' : 's'}` : hist.delta_overall < 0 ? `Down ${-hist.delta_overall} point${hist.delta_overall === -1 ? '' : 's'}` : 'Unchanged'}</b> since ${fmtShort(hist.previous.generated_at)}${hist.runs ? raw(h` · run ${hist.runs}`) : ''}${hist.delta_followers != null && hist.delta_followers !== 0 ? raw(h` · ${hist.delta_followers > 0 ? '+' : ''}${fmtN(hist.delta_followers)} followers`) : ''}</div>`) : paid && !isSample ? raw(h`<div class="trend first">Your first score — the plan rescores you weekly, so this line becomes your own trend.</div>`) : ''}
               <div class="bigrow"><span class="bignum">${overall}</span>
                 <div class="meta"><span class="tag ${gc}">${gl.toUpperCase()}</span>${lvl ? raw(h`<span class="lvl" title="Rank ${lvl.rank} of ${lvl.of}">${lvl.name.toUpperCase()}${lvl.next ? raw(h`<em>· ${lvl.next.points_away} to ${lvl.next.name}</em>`) : raw('<em>· top band</em>')}</span>`) : ''}${report.streak && report.streak.visible ? raw(h`<span class="streak ${report.streak.weeks ? 'on' : ''}" title="An on-plan week means you posted on at least ${report.streak.planned_days} days. A freeze covers a missed week.">${report.streak.weeks ? `🔥 ${report.streak.weeks}-week streak` : 'New streak starts this week'}${report.streak.freezes ? raw(h`<em>· ${report.streak.freezes} freeze${report.streak.freezes === 1 ? '' : 's'}</em>`) : ''}</span>`) : ''}
                   ${followers ? raw(h`<span class="f">${fmtN(followers)} followers</span>`) : ''}
-                  ${hist && hist.delta_overall != null ? raw(h`<span class="delta ${hist.delta_overall > 0 ? 'up' : hist.delta_overall < 0 ? 'down' : 'flat'}">${hist.delta_overall === 0 ? `${overall} → ${overall} · unchanged since ${fmtShort(hist.previous.generated_at)}` : `${hist.delta_overall > 0 ? '+' : ''}${hist.delta_overall} since ${fmtShort(hist.previous.generated_at)}`}</span>`) : ''}
                 </div></div>
               <p class="why">${s.summary || ''}</p>
               ${s.category_percentile ? raw(h`<div class="pct">Scores higher than <b>${s.category_percentile.beats_pct}%</b> of ${niche} accounts we've scored (${fmtN(s.category_percentile.n)}).</div>`) : ''}
@@ -852,6 +888,14 @@
     $view.querySelector('[data-action=share]').addEventListener('click', () => { if (!isSample) track('share_clicked', { overall }, report.report_id); openShareSheet(report); });
     $view.querySelectorAll('[data-moment-share]').forEach(b => b.addEventListener('click', () => { const m = (report.moments || []).find(x => x.key === b.dataset.momentShare); if (m) openShareSheet(report, m); }));
     $view.querySelectorAll('[data-moment-dismiss]').forEach(b => b.addEventListener('click', () => { try { localStorage.setItem('sc_moment_' + report.report_id + '_' + b.dataset.momentDismiss, '1'); } catch { } b.closest('.moment')?.remove(); }));
+    const goalAsk = $view.querySelector('#goalAsk');
+    if (goalAsk) bindGoalPicker(goalAsk, async (goal, target) => {
+      try {
+        const res = await api('/reports/' + encodeURIComponent(report.report_id) + '/goal', { method: 'POST', body: JSON.stringify({ goal, goal_target: target }) }, { allow401: true });
+        report.goal = res.goal; report.goal_target = res.goal_target; sset('sc_report_' + report.report_id, report); sset('sc_goal', { goal: res.goal, goal_target: res.goal_target });
+        track('goal_set', { goal, first: true }, report.report_id); toast('Goal set. The next rescore and your Monday moves lean toward it.'); viewReport(report.report_id);
+      } catch (e) { toast('Could not save the goal: ' + e.message); }
+    }, () => { sset('sc_goal_skipped_' + report.report_id, true); goalAsk.remove(); });
     // Roast mode (spec 2.1): opt-in, heat first, then a line-by-line reveal.
     const roastWrap = $view.querySelector('#roastWrap');
     if (roastWrap) {
@@ -1174,8 +1218,8 @@
     renderHeader('reports');
     if (!token()) { sset('sc_next', '#/reports'); go('#/signin'); return; }
     $view.innerHTML = h`<div class="center-msg">Loading your reports…</div>`;
-    let list, subn = null, refs = null;
-    try { [list, subn, refs] = await Promise.all([api('/account/reports'), api('/account/subscription-status').catch(() => null), api('/account/referrals').catch(() => null)]); } catch (e) { if (e.status === 401) return; $view.innerHTML = h`<div class="center-msg"><h2>Couldn’t load reports.</h2>${e.message}</div>`; return; }
+    let list, subn = null, refs = null, me;
+    try { [list, subn, refs, me] = await Promise.all([api('/account/reports'), api('/account/subscription-status').catch(() => null), api('/account/referrals').catch(() => null), api('/auth/me').catch(() => null)]); } catch (e) { if (e.status === 401) return; $view.innerHTML = h`<div class="center-msg"><h2>Couldn’t load reports.</h2>${e.message}</div>`; return; }
     // Email preferences (spec 1.6): four toggles + pause all. Receipts, report-ready and password emails always send.
     const PREF_LABELS = [['weekly_score', 'Weekly score', 'Your re-score and what changed'], ['monday_move', 'Plan check-ins and Monday move', 'Day-30/60 check-ins, the week\'s move'], ['milestones', 'Milestones', 'Rank-ups and personal records'], ['product_news', 'Product news', 'What\'s new, occasionally']];
     const emailPrefsHTML = prefs => {
@@ -1195,10 +1239,18 @@
     };
     const reports = (list.reports || []).map(r => ({ id: r.reportId || r.report_id, tier: r.tier, at: r.generatedAt || r.generated_at, handle: r.business?.handle, platform: r.business?.platform, category: r.business?.category, overall: r.reportBody?.scores?.overall ?? null, known: r.reportBody?.scores?.niche_known !== false })).sort((a, b) => b.at - a.at);
     const byHandle = {}; for (const r of reports) (byHandle[`${r.platform}:${r.handle}`] ||= []).push(r);
+    // Goal progress reads the latest report; use the session copy when the report page cached it, else fetch it once.
+    let latestRep = reports[0] ? sget('sc_report_' + reports[0].id, null) : null;
+    if (reports[0] && !latestRep) { try { latestRep = normalizeReport(await api('/reports/' + encodeURIComponent(reports[0].id)), reports[0].id); } catch { latestRep = null; } }
     const unknownNiches = [...new Set(reports.filter(r => !r.known).map(r => nicheName(r.category)))];
     $view.innerHTML = h`<div class="wrap"><div class="history">
       <div class="ph"><h1>Your reports</h1><a class="btn pillbtn" href="#/" data-scroll="evalForm">Run a new evaluation</a></div>
       ${raw(planCard())}
+      ${raw((() => { const g = me && me.goal ? me.goal : sget('sc_goal', null)?.goal; const t = me && me.goal_target != null ? me.goal_target : sget('sc_goal', null)?.goal_target; const gp = g && latestRep ? goalProgress(g, t, latestRep) : null;
+        return h`<div class="card goalcard" id="goalCard"><div class="t"><div class="n">Your goal</div><h2>${g ? goalLabel(g) : 'Not set yet'}</h2></div>
+          ${gp ? raw(h`<div class="goalbar"><div class="t"><span class="v">${gp.label}</span></div><div class="bar"><div class="fill" style="width:${gp.pct}%"></div></div><div class="fine">${gp.sub}</div></div>`) : g ? raw('<p class="fine">Progress shows once a report is open in this session.</p>') : raw('<p class="fine">Pick one and the plan, Monday moves and post writing lean toward it.</p>')}
+          <div class="goaledit" ${g ? 'hidden' : ''}>${raw(goalPickerHTML(g || null, t || null, latestRep?.business?.followers || 0))}</div>
+          ${g ? raw('<div class="acts"><button type="button" class="btn ghost sm" data-action="edit-goal">Change goal</button></div>') : ''}</div>`; })())}
       ${reports.length ? raw(Object.values(byHandle).map((rs, gi) => { const asc = [...rs].reverse(); const series = asc.map(r => r.overall).filter(v => v != null); const latest = rs[0], first = asc[0]; const delta = series.length > 1 ? latest.overall - first.overall : null;
         return h`<details class="card hgroup" ${gi === 0 ? 'open' : ''}><summary>
             <div class="who"><div class="handle">@${latest.handle}</div><div class="ctx">${platName(latest.platform)} · ${nicheName(latest.category)} · ${rs.length} run${rs.length === 1 ? '' : 's'}</div></div>
@@ -1218,6 +1270,7 @@
     </div></div>${raw(footer())}`;
     $view.querySelector('[data-action=delete-account]').addEventListener('click', () => openDeleteDialog(reports.length));
     $view.querySelector('[data-action=copy-ref]')?.addEventListener('click', async () => { try { await navigator.clipboard.writeText(refs.link); toast('Link copied.'); } catch { toast(refs.link); } });
+    { const gc = $view.querySelector('#goalCard'); if (gc) { const ed = gc.querySelector('.goaledit'); gc.querySelector('[data-action=edit-goal]')?.addEventListener('click', () => { ed.hidden = false; }); bindGoalPicker(ed, async (goal, target) => { try { const res = await api('/account/goal', { method: 'PUT', body: JSON.stringify({ goal, goal_target: target }) }); sset('sc_goal', { goal: res.goal, goal_target: res.goal_target }); track('goal_set', { goal }); toast('Goal saved.'); viewReports(); } catch (e) { toast('Could not save the goal: ' + e.message); } }); } }
     $view.querySelector('[data-action=cancel-plan]')?.addEventListener('click', () => openCancelDialog(subn));
     $view.querySelectorAll('[data-pref]').forEach(cb => cb.addEventListener('change', async e => {
       const k = e.currentTarget.dataset.pref, on = e.currentTarget.checked;

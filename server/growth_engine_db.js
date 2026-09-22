@@ -170,6 +170,9 @@ function initSchema() {
   // Phase-2 signals (spec 1.9): business flag + confirmed niche on the account
   try { db.run(`ALTER TABLE users ADD COLUMN is_business INTEGER DEFAULT 0`); } catch { /* exists */ }
   try { db.run(`ALTER TABLE users ADD COLUMN niche TEXT`); } catch { /* exists */ }
+  // Goal onboarding (spec 3.3): what they want, and a follower target when that's the goal.
+  try { db.run(`ALTER TABLE users ADD COLUMN goal TEXT`); } catch { /* exists */ }
+  try { db.run(`ALTER TABLE users ADD COLUMN goal_target INTEGER`); } catch { /* exists */ }
   try { db.run(`ALTER TABLE users ADD COLUMN price_variant TEXT`); } catch { /* exists */ }
   try { db.run(`ALTER TABLE users ADD COLUMN email_prefs TEXT`); } catch { /* exists */ }
   db.run(`
@@ -1349,6 +1352,8 @@ async function getUserByEmail(email) {
     refCode: columns.includes("ref_code") ? row[columns.indexOf("ref_code")] || null : null,
     emailPrefs: columns.includes("email_prefs") ? (() => { try { return JSON.parse(row[columns.indexOf("email_prefs")] || "null") || null; } catch { return null; } })() : null,
     niche: columns.includes("niche") ? row[columns.indexOf("niche")] || null : null,
+    goal: columns.includes("goal") ? row[columns.indexOf("goal")] || null : null,
+    goalTarget: columns.includes("goal_target") ? (row[columns.indexOf("goal_target")] != null ? Number(row[columns.indexOf("goal_target")]) : null) : null,
   };
 }
 
@@ -1380,6 +1385,8 @@ async function getUserById(userId) {
     refCode: columns.includes("ref_code") ? row[columns.indexOf("ref_code")] || null : null,
     emailPrefs: columns.includes("email_prefs") ? (() => { try { return JSON.parse(row[columns.indexOf("email_prefs")] || "null") || null; } catch { return null; } })() : null,
     niche: columns.includes("niche") ? row[columns.indexOf("niche")] || null : null,
+    goal: columns.includes("goal") ? row[columns.indexOf("goal")] || null : null,
+    goalTarget: columns.includes("goal_target") ? (row[columns.indexOf("goal_target")] != null ? Number(row[columns.indexOf("goal_target")]) : null) : null,
   };
 }
 
@@ -1388,6 +1395,12 @@ async function setUserProfile(userId, { isBusiness, niche, priceVariant } = {}) 
   if (priceVariant !== undefined) db.run(`UPDATE users SET price_variant = ?, updated_at = ? WHERE user_id = ?`, [priceVariant || null, Date.now(), userId]);
   if (isBusiness !== undefined) db.run(`UPDATE users SET is_business = ?, updated_at = ? WHERE user_id = ?`, [isBusiness ? 1 : 0, Date.now(), userId]);
   if (niche !== undefined) db.run(`UPDATE users SET niche = ?, updated_at = ? WHERE user_id = ?`, [niche || null, Date.now(), userId]);
+  saveDb();
+  return getUserById(userId);
+}
+async function setGoal(userId, goal, target) {
+  if (!db) throw new Error("Database not initialized");
+  db.run(`UPDATE users SET goal = ?, goal_target = ?, updated_at = ? WHERE user_id = ?`, [goal || null, Number.isFinite(target) ? Math.round(target) : null, Date.now(), userId]);
   saveDb();
   return getUserById(userId);
 }
@@ -1516,6 +1529,7 @@ module.exports = {
   listEmailLog,
   insertRoastRejection,
   listRoastRejections,
+  setGoal,
   listReportsWithEmailSince,
   setUserProfile,
   listBusinessAccounts,

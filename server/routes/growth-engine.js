@@ -187,6 +187,8 @@ router.get("/auth/me", authMiddleware, async (req, res) => {
       is_business: !!user.isBusiness,
       niche: user.niche || null,
       ref_code: user.refCode || null,
+      goal: user.goal || null,
+      goal_target: user.goalTarget ?? null,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -391,17 +393,52 @@ function cleanPlanContext(raw) {
   for (const [k, vals] of Object.entries(CTX_ENUM)) if (vals.includes(raw[k])) out[k] = raw[k];
   if (typeof raw.link === "string" && raw.link.trim()) { const l = raw.link.trim().slice(0, 200); out.link = /^https?:\/\//i.test(l) ? l : `https://${l}`; }
   if (typeof raw.notes === "string" && raw.notes.trim()) out.notes = raw.notes.trim().slice(0, 140);
+  if (out.goal === "followers" && Number.isFinite(Number(raw.goal_target)) && Number(raw.goal_target) > 0) out.goal_target = Math.round(Number(raw.goal_target));
   if (typeof raw.contact === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw.contact.trim())) out.contact = raw.contact.trim().slice(0, 120);
   return Object.keys(out).length ? out : null;
 }
 // Saved context for this account + handle, or the one sent with the request.
 async function resolvePlanContext(req, accountId, handle, platform) {
   const sent = cleanPlanContext(req.body.plan_context);
-  if (sent && accountId && accountId !== "demo-account") { try { await geDb.setPlanContext(accountId, handle, platform, sent); } catch { /* best-effort */ } return sent; }
-  if (sent) return sent;
-  if (accountId && accountId !== "demo-account") { try { return await geDb.getPlanContext(accountId, handle, platform); } catch { return null; } }
-  return null;
+  let ctx = null;
+  if (sent && accountId && accountId !== "demo-account") { try { await geDb.setPlanContext(accountId, handle, platform, sent); } catch { /* best-effort */ } ctx = sent; }
+  else if (sent) ctx = sent;
+  else if (accountId && accountId !== "demo-account") { try { ctx = await geDb.getPlanContext(accountId, handle, platform); } catch { ctx = null; } }
+  // Goal onboarding (spec 3.3): the account's goal tunes the plan even when the
+  // intake wasn't answered (free runs, or a paid run before the questions).
+  if (accountId && accountId !== "demo-account" && !(ctx && ctx.goal)) {
+    try { const u = await geDb.getUserById(accountId); if (u?.goal) ctx = { ...(ctx || {}), goal: u.goal, goal_target: u.goalTarget ?? null }; } catch { /* fine */ }
+  }
+  return ctx;
 }
+const GOALS = new Set(["followers", "deals", "sell", "bookings", "consistency"]);
+const cleanGoal = (b) => { const goal = GOALS.has(String(b?.goal)) ? String(b.goal) : null; const t = Number(b?.goal_target); return { goal, target: goal === "followers" && Number.isFinite(t) && t > 0 ? Math.round(t) : null }; };
+// Signed-in: the goal lives on the account and can be changed any time.
+router.put("/account/goal", authMiddleware, async (req, res) => {
+  try {
+    const { goal, target } = cleanGoal(req.body);
+    if (!goal) return sendError(res, 400, "INVALID_GOAL", "goal must be one of followers, deals, sell, bookings, consistency");
+    const u = await geDb.setGoal(req.user.id, goal, target);
+    events.track("goal_set", { ...events.attribution(req), props: { goal, target } });
+    res.json({ goal: u.goal, goal_target: u.goalTarget ?? null });
+  } catch (err) { sendError(res, 500, "GOAL_ERROR", err.message); }
+});
+// Right after the first report (spec 3.3): stored on the report so anonymous
+// free reports keep it too; copied to the account when there is one.
+router.post("/reports/:reportId/goal", optionalAuth, async (req, res) => {
+  try {
+    const report = await geDb.getReport(req.params.reportId);
+    if (!report) return sendError(res, 404, "REPORT_NOT_FOUND", "Report not found");
+    const anon = !report.accountId || report.accountId === "demo-account";
+    if (!anon && report.accountId !== req.user?.id) return sendError(res, req.user ? 403 : 401, "NOT_YOUR_REPORT", "This report belongs to another account");
+    const { goal, target } = cleanGoal(req.body);
+    if (!goal) return sendError(res, 400, "INVALID_GOAL", "goal must be one of followers, deals, sell, bookings, consistency");
+    await geDb.patchReportBody(report.reportId, { goal, goal_target: target, goal_set_at: Date.now() });
+    if (!anon) { try { await geDb.setGoal(report.accountId, goal, target); } catch { /* fine */ } }
+    events.track("goal_set", { ...events.attribution(req), reportId: report.reportId, props: { goal, target, first: !report.reportBody?.goal } });
+    res.json({ goal, goal_target: target });
+  } catch (err) { sendError(res, 500, "GOAL_ERROR", err.message); }
+});
 
 router.get("/account/plan-context", authMiddleware, async (req, res) => {
   try {

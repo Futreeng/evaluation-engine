@@ -138,6 +138,8 @@ async function initSchema() {
     await client.query(`ALTER TABLE entitlements ADD COLUMN IF NOT EXISTS cancel_at BIGINT`);
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_paused BOOLEAN DEFAULT FALSE`);
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_business BOOLEAN DEFAULT FALSE`);
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS goal TEXT`);
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS goal_target INTEGER`);
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS niche TEXT`);
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS price_variant TEXT`);
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_prefs TEXT`);
@@ -287,7 +289,7 @@ async function createUser(email, passwordHash, companyName = null) {
 
 function userRow(row) {
   return row
-    ? { userId: row.user_id, email: row.email, passwordHash: row.password_hash, companyName: row.company_name, createdAt: Number(row.created_at), updatedAt: Number(row.updated_at), emailPaused: !!row.email_paused, isBusiness: !!row.is_business, niche: row.niche || null, priceVariant: row.price_variant || null, refCode: row.ref_code || null, emailPrefs: (() => { try { return row.email_prefs ? (typeof row.email_prefs === "string" ? JSON.parse(row.email_prefs) : row.email_prefs) : null; } catch { return null; } })() }
+    ? { userId: row.user_id, email: row.email, passwordHash: row.password_hash, companyName: row.company_name, goal: row.goal || null, goalTarget: row.goal_target != null ? Number(row.goal_target) : null, createdAt: Number(row.created_at), updatedAt: Number(row.updated_at), emailPaused: !!row.email_paused, isBusiness: !!row.is_business, niche: row.niche || null, priceVariant: row.price_variant || null, refCode: row.ref_code || null, emailPrefs: (() => { try { return row.email_prefs ? (typeof row.email_prefs === "string" ? JSON.parse(row.email_prefs) : row.email_prefs) : null; } catch { return null; } })() }
     : null;
 }
 async function getUserByEmail(email) {
@@ -300,6 +302,10 @@ async function setUserProfile(userId, { isBusiness, niche, priceVariant } = {}) 
   if (priceVariant !== undefined) await q(`UPDATE users SET price_variant = $1, updated_at = $2 WHERE user_id = $3`, [priceVariant || null, Date.now(), userId]);
   if (isBusiness !== undefined) await q(`UPDATE users SET is_business = $1, updated_at = $2 WHERE user_id = $3`, [!!isBusiness, Date.now(), userId]);
   if (niche !== undefined) await q(`UPDATE users SET niche = $1, updated_at = $2 WHERE user_id = $3`, [niche || null, Date.now(), userId]);
+  return getUserById(userId);
+}
+async function setGoal(userId, goal, target) {
+  await q(`UPDATE users SET goal = $1, goal_target = $2, updated_at = $3 WHERE user_id = $4`, [goal || null, Number.isFinite(target) ? Math.round(target) : null, Date.now(), userId]);
   return getUserById(userId);
 }
 async function listBusinessAccounts() {
@@ -881,6 +887,7 @@ module.exports = {
   listEmailLog,
   insertRoastRejection,
   listRoastRejections,
+  setGoal,
   listReportsWithEmailSince,
   setUserProfile,
   listBusinessAccounts,

@@ -264,6 +264,8 @@ class JobQueue {
       geDb.attachReportToCosts(jobId, reportId).catch((e) => console.warn("[Costs] attach failed:", e.message));
       events.track("evaluate_completed", { accountId: accountId !== "demo-account" ? accountId : null, anon: inputParams.attribution?.anon || null, ref: inputParams.attribution?.ref || null, reportId, props: { tier, platform: inputParams.platform, category: inputParams.category, overall: reportBody.scores?.overall ?? null, scheduled: !!inputParams.scheduled, ms: Date.now() - (this._started?.get?.(jobId) || Date.now()) } });
 
+      // Goal (spec 3.3) rides on the report for the progress bar; carried from the plan context or the account.
+      if (!reportBody.goal && reportBody.plan_context?.goal) { reportBody.goal = reportBody.plan_context.goal; reportBody.goal_target = reportBody.plan_context.goal_target ?? null; }
       // Level is just a name for the score band — always attached (spec 2.2).
       if (reportBody.scores && Number.isFinite(reportBody.scores.overall)) reportBody.scores.level = moments.levelFor(reportBody.scores.overall);
       if (tier !== "social_snapshot" && !reportBody.streak) reportBody.streak = moments.computeStreak(reportBody, null);

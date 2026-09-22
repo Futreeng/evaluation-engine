@@ -151,6 +151,7 @@ const assert = require("assert");
   assert.equal(pc.n, 21); assert.ok(pc.beats_pct >= 40 && pc.beats_pct <= 50, "pct " + pc.beats_pct);
 
   assert.ok(Array.isArray(await db.listReportsWithEmailSince(0)));
+  { const g = await db.setGoal(u.userId, "followers", 5000); assert.equal(g.goal, "followers"); assert.equal(g.goalTarget, 5000); }
   await db.insertRoastRejection({ reportId: "r1", accountId: "a1", heat: "medium", reason: "blocklist", flagged: "[2]", text: "[]" });
   assert.equal((await db.listRoastRejections(5))[0].reason, "blocklist");
 

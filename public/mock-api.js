@@ -152,6 +152,7 @@
   const jobs = new Map();
   const reports = new Map();
   let savedContext = null;
+  let mockGoal = { goal: null, goal_target: null };
   const mockPrefs = { weekly_score: true, monday_move: true, milestones: true, product_news: false, paused: false };
   let entitlement = { account_id: 'acct_mock', current_tier: 'social_snapshot' };
   let queueDepth = 2;
@@ -249,6 +250,7 @@
       r.competitor_handles = handles; r.competitors = { generated_at: Date.now(), you, competitors: comps, rank };
       return json(200, r.competitors);
     }
+    if (method === 'POST' && (m = path.match(/^\/reports\/([^/]+)\/goal$/))) { const r = reports.get(m[1]); if (!r) return json(404, { error: 'Report not found' }); r.goal = body.goal; r.goal_target = body.goal === 'followers' ? Number(body.goal_target) || null : null; mockGoal = { goal: r.goal, goal_target: r.goal_target }; return json(200, mockGoal); }
     if (method === 'POST' && (m = path.match(/^\/reports\/([^/]+)\/roast$/))) {
       const r = reports.get(m[1]); if (!r) return json(404, { error: 'Report not found' });
       const heat = ['mild', 'medium', 'extra_crispy'].includes(body.heat) ? body.heat : 'medium';
@@ -297,7 +299,8 @@
       if (path === '/auth/login' && body.password === 'wrong') return json(401, { error: 'Invalid email or password', code: 'AUTH_FAILED' });
       return json(200, { token: 'mock.' + btoa(body.email) + '.' + Date.now(), user: { user_id: 'usr_mock', email: body.email, company_name: body.company_name || null } });
     }
-    if (method === 'GET' && path === '/auth/me') return json(200, { user_id: 'usr_mock', email: 'maya@sunrisefitness.co', company_name: 'Sunrise Fitness BK', is_admin: false, is_business: false, niche: 'fitness_creator', ref_code: 'mockref1' });
+    if (method === 'GET' && path === '/auth/me') return json(200, { user_id: 'usr_mock', email: 'maya@sunrisefitness.co', company_name: 'Sunrise Fitness BK', is_admin: false, is_business: false, niche: 'fitness_creator', ref_code: 'mockref1', goal: mockGoal.goal, goal_target: mockGoal.goal_target });
+    if (method === 'PUT' && path === '/account/goal') { mockGoal = { goal: body.goal, goal_target: body.goal === 'followers' ? Number(body.goal_target) || null : null }; return json(200, mockGoal); }
     return json(404, { error: 'No mock route for ' + method + ' ' + path });
   };
 })();
