@@ -65,7 +65,32 @@ function drawScore(ctx, W, H, d, size) {
   ctx.fillText(`${fmtDate(d.date)}  ·  Score yours at ${SITE}`, P, M.footY); ctx.globalAlpha = 1;
 }
 
-const KINDS = { score: drawScore };
+// Moment card (spec 2.2, 2.5): one big line — the rank or milestone — the
+// score underneath, handle and the site. Kept sparse so it reads at story size.
+function drawMoment(ctx, W, H, d, size) {
+  const P = 84, sq = size === "square";
+  ctx.fillStyle = COLORS.ink; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = COLORS.bg; ctx.textBaseline = "top";
+  const dsp = (px) => `700 ${px}px ${DISPLAY}`; const sans = (px, wt = 500) => `${wt} ${px}px ${SANS}`;
+  ctx.font = sans(sq ? 34 : 40, 600); ctx.globalAlpha = 0.85;
+  ctx.fillText(`@${d.handle}  ·  ${d.kind === "rank_up" ? "RANK UP" : "MILESTONE"}`.toUpperCase(), P, P); ctx.globalAlpha = 1;
+  let y = sq ? 250 : 560;
+  // Title wraps by words to the card width.
+  const tpx = sq ? 132 : 168; ctx.font = dsp(tpx);
+  const words = String(d.title || "").split(" "); let line = "";
+  for (const w of words) { const t = line ? `${line} ${w}` : w; if (ctx.measureText(t).width > W - P * 2 && line) { ctx.fillText(line, P - 6, y); y += tpx * 1.02; line = w; } else line = t; }
+  if (line) { ctx.fillText(line, P - 6, y); y += tpx * 1.02; }
+  y += sq ? 20 : 40;
+  ctx.font = sans(sq ? 40 : 52, 600); ctx.globalAlpha = 0.9; ctx.fillText(d.line || "", P, y); ctx.globalAlpha = 1; y += (sq ? 40 : 52) * 1.7;
+  if (Number.isFinite(d.overall)) {
+    ctx.font = dsp(sq ? 150 : 240); ctx.fillText(String(d.overall), P - 8, y);
+    ctx.font = sans(sq ? 32 : 40, 600); ctx.globalAlpha = 0.85; ctx.fillText("MY SCALECRAFT SCORE", P + ctx.measureText("").width + (sq ? 220 : 340), y + (sq ? 100 : 160)); ctx.globalAlpha = 1;
+  }
+  ctx.font = sans(sq ? 28 : 34, 500); ctx.globalAlpha = 0.85;
+  ctx.fillText(`${fmtDate(d.date)}  ·  Score yours at ${SITE}`, P, sq ? H - 62 : H - P - 30); ctx.globalAlpha = 1;
+}
+
+const KINDS = { score: drawScore, moment: drawMoment };
 const cache = new Map(); const CACHE_MAX = 200;
 function render(kind, data, size = "story", cacheKey = null) {
   fonts();
@@ -89,4 +114,8 @@ function scoreDataFrom(reportBody, { thenNow = false } = {}) {
     span: thenNow && reportBody.history?.previous?.generated_at ? `since ${fmtDate(reportBody.history.previous.generated_at)}` : null,
   };
 }
-module.exports = { render, scoreDataFrom, KINDS: Object.keys(KINDS) };
+// Snapshot for a moment card: the moment itself plus the score it happened at.
+function momentDataFrom(reportBody, m) {
+  return { handle: reportBody.business?.handle, platform: reportBody.business?.platform, niche: reportBody.business?.category, date: m.at || reportBody.generated_at || Date.now(), kind: m.kind, key: m.key, title: m.title, line: m.line, overall: Number.isFinite(m.score) ? m.score : reportBody.scores?.overall };
+}
+module.exports = { render, scoreDataFrom, momentDataFrom, KINDS: Object.keys(KINDS) };

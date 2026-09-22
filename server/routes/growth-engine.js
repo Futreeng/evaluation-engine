@@ -640,7 +640,14 @@ router.post("/reports/:reportId/share", optionalAuth, async (req, res) => {
     if (!anon && report.accountId !== req.user?.id) return sendError(res, 403, "NOT_YOUR_REPORT", "This report belongs to another account");
     const cards = require("../growth_engine_cards");
     const kind = cards.KINDS.includes(req.body?.kind) ? req.body.kind : "score";
-    const data = cards.scoreDataFrom(report.reportBody || {}, { thenNow: !!req.body?.then_now });
+    let data;
+    if (kind === "moment") {
+      // Only a moment this report actually earned can be carded.
+      const m = (report.reportBody?.moments || []).find((x) => x.key === String(req.body?.moment_key || ""));
+      if (!m) return sendError(res, 404, "NO_MOMENT", "That moment isn't on this report");
+      data = cards.momentDataFrom(report.reportBody || {}, m);
+      events.track("moment_shared", { ...events.attribution(req), reportId: report.reportId, props: { key: m.key } });
+    } else data = cards.scoreDataFrom(report.reportBody || {}, { thenNow: !!req.body?.then_now });
     if (!Number.isFinite(data.overall)) return sendError(res, 400, "NO_SCORE", "This report has no score to share");
     const ref = req.user?.id ? await geDb.ensureRefCode(req.user.id).catch(() => null) : null;
     const share = await geDb.createShare({ accountId: anon ? null : report.accountId, reportId: report.reportId, kind, data, ref });
@@ -784,6 +791,13 @@ router.get("/baselines/:category", async (req, res) => {
 });
 
 // Get pricing
+// Score bands + milestone thresholds (spec 2.2, 2.5) — config, so the app
+// never hardcodes them. Public: the pricing and sample pages show ranks too.
+router.get("/levels", (_req, res) => {
+  const m = require("../growth_engine_moments");
+  res.json({ levels: m.LEVELS, milestones: m.MILESTONES });
+});
+
 router.get("/billing/pricing", optionalAuth, async (req, res) => {
   try {
     res.json(billingManager.getPricing(pricingAB.prices(await variantFor(req))));

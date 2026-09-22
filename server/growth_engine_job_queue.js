@@ -14,6 +14,7 @@ const geDb = require("./growth_engine_db_select");
 const { compareCompetitors } = require("./growth_engine_competitors");
 const { saveReportAsMarkdown } = require("./report_saver");
 const mailer = require("./mailer");
+const moments = require("./growth_engine_moments");
 const events = require("./growth_engine_events");
 const costs = require("./growth_engine_costs");
 const thumbs = require("./growth_engine_thumbs");
@@ -191,6 +192,14 @@ class JobQueue {
                 if (prevReport?.reportBody?.nudges_sent) reportBody.nudges_sent = prevReport.reportBody.nudges_sent;
                 if (prevReport?.reportBody?.emails_sent) reportBody.emails_sent = prevReport.reportBody.emails_sent;
                 if (prevReport?.reportBody?.moves_done && !reportBody.moves_done) reportBody.moves_done = prevReport.reportBody.moves_done;
+                if (prevReport?.reportBody?.moments_seen) reportBody.moments_seen = prevReport.reportBody.moments_seen;
+              }
+              // Rank-ups and milestones (spec 2.2, 2.5): only when a rescore shows the change.
+              const found = moments.detectMoments(reportBody, prevReport?.reportBody || null);
+              if (found.length) {
+                reportBody.moments = found;
+                reportBody.moments_seen = [...(reportBody.moments_seen || []), ...found.map((m) => ({ key: m.key, at: m.at }))];
+                for (const m of found) events.track(m.kind === "rank_up" ? "rank_up" : "milestone", { accountId, reportId: null, props: { key: m.key, handle: inputParams.handle } });
               }
               const nudge = detectNudge(reportBody, prevReport, inputParams);
               if (nudge) { reportBody.nudge = nudge; reportBody.nudges_sent = [...(reportBody.nudges_sent || []), { key: nudge.key, phase: nudge.phase, at: Date.now() }]; }
@@ -253,6 +262,9 @@ class JobQueue {
       geDb.attachReportToCosts(jobId, reportId).catch((e) => console.warn("[Costs] attach failed:", e.message));
       events.track("evaluate_completed", { accountId: accountId !== "demo-account" ? accountId : null, anon: inputParams.attribution?.anon || null, ref: inputParams.attribution?.ref || null, reportId, props: { tier, platform: inputParams.platform, category: inputParams.category, overall: reportBody.scores?.overall ?? null, scheduled: !!inputParams.scheduled, ms: Date.now() - (this._started?.get?.(jobId) || Date.now()) } });
 
+      // Level is just a name for the score band — always attached (spec 2.2).
+      if (reportBody.scores && Number.isFinite(reportBody.scores.overall)) reportBody.scores.level = moments.levelFor(reportBody.scores.overall);
+
       // Emails: report ready on a fresh run; score changed on a weekly refresh.
       try {
         const to = inputParams.email || null;
@@ -262,6 +274,7 @@ class JobQueue {
         if (inputParams.scheduled && reportBody.history) {
           const h = reportBody.history;
           const biggest = (h.delta_dimensions || []).filter((d) => d.delta != null).sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))[0];
+          for (const m of reportBody.moments || []) await mailer.moment({ to, userId: accountId, handle: inputParams.handle, reportId, moment: m });
           if (h.delta_overall !== 0 || reportBody.nudge) {
             await mailer.scoreChanged({ to, userId: accountId, handle: inputParams.handle, reportId, oldScore: h.previous.overall, newScore: reportBody.scores.overall, dimension: biggest?.label || "Overall", delta: biggest?.delta ?? h.delta_overall, movesDone: (h.moves_done_since || []).length, nudge: reportBody.nudge || null });
           }

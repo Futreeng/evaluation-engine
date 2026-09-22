@@ -48,7 +48,7 @@ const scoreRow = (oldS, newS) => `<div style="margin-top:20px;font-family:'Brico
 
 // All sending goes through the email service (preferences, footer, log).
 // `tag` is the template name; `type` the preference bucket.
-const TYPE_OF = { report_ready: "transactional", password_reset: "transactional", checkin: "monday_move", score_changed: "weekly_score", plan_ended: "weekly_score" };
+const TYPE_OF = { report_ready: "transactional", password_reset: "transactional", checkin: "monday_move", score_changed: "weekly_score", plan_ended: "weekly_score", moment: "milestones" };
 async function send({ to, userId = null, subject, html, tag, devLink }) {
   let uid = userId;
   if (!uid && to) { try { uid = (await geDb.getUserByEmail(String(to).toLowerCase()))?.userId || null; } catch { /* anonymous recipient */ } }
@@ -89,6 +89,15 @@ function scoreChanged({ to, userId, handle, reportId, oldScore, newScore, dimens
   return send({ to, userId, subject: `${handle}: ${oldScore} → ${newScore}`, html: layout("Score changed", inner, { userId }), tag: "score_changed" });
 }
 
+// Rank-up or milestone after a rescore (spec 2.2, 2.5). Pref: milestones.
+function moment({ to, userId, handle, reportId, moment: m }) {
+  const url = reportUrl(reportId);
+  const inner = h2(esc(m.title)) + p(esc(m.line))
+    + p(m.kind === "rank_up" ? `That's the score band for @${esc(handle)} moving up. The card is ready if you want to post it.` : `Milestone logged for @${esc(handle)}. Your plan keeps going — the next move is on the report.`)
+    + button(`${url}?moment=${encodeURIComponent(m.key)}`, "See the card");
+  return send({ to, userId, subject: `@${handle}: ${m.title}`, html: layout(m.title, inner, { userId }), tag: "moment" });
+}
+
 // Day 60 for one-time buyers: the plan they bought is over.
 function planEnded({ to, userId, handle, reportId, overall, price }) {
   const url = reportUrl(reportId);
@@ -106,4 +115,4 @@ function passwordReset({ to, resetUrl }) {
   return send({ to, subject: "Reset your Scalecraft password", html: layout("Reset your password", inner), tag: "password_reset", devLink: resetUrl });
 }
 
-module.exports = { send, reportReady, checkin, scoreChanged, planEnded, passwordReset, reportUrl, pauseSig, layout, configured: () => email.configured() };
+module.exports = { send, reportReady, checkin, scoreChanged, planEnded, passwordReset, moment, reportUrl, pauseSig, layout, configured: () => email.configured() };

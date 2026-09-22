@@ -85,6 +85,10 @@
   }
   const clearPromo = () => { try { sessionStorage.removeItem('sc_promo'); } catch { } };
   // Prices this visitor sees (may be an A/B variant): used by the report upsell and events.
+  // Score bands (spec 2.2) — GET /levels is config, cached per tab.
+  let LEVELS = sget('sc_levels', null);
+  const loadLevels = async () => { if (LEVELS) return LEVELS; try { LEVELS = await api('/levels'); sset('sc_levels', LEVELS); } catch { } return LEVELS; };
+  const levelOf = (score, given) => { if (given && given.name) return given; if (!LEVELS || !Number.isFinite(score)) return null; const ls = LEVELS.levels; const l = ls.filter(x => score >= x.min).pop() || ls[0]; const n = ls.find(x => x.min > l.min) || null; return { name: l.name, rank: l.rank, of: ls.length, next: n ? { name: n.name, min: n.min, points_away: n.min - score } : null }; };
   function rememberPricing(p) { try { const g = (p.tiers || []).find(t => t.tier === 'growth_plan'); sset('sc_pricing', { variant: p.variant || 'control', growth_plan: g?.monthlyPrice, plan_unlock: p.one_time?.[0]?.price }); } catch { } }
   // Admin link in the nav: ask /auth/me once per token and remember the answer.
   async function refreshAdminFlag() {
@@ -497,16 +501,31 @@
   }
   function roundRect(ctx, x, y, w, hh, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + hh, r); ctx.arcTo(x + w, y + hh, x, y + hh, r); ctx.arcTo(x, y + hh, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
 
-  function openShareSheet(report) {
+  function drawMomentCard(canvas, s, size, m) {
+    const W = 1080, H = size === 'square' ? 1080 : 1920, P = 84; canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d'); const cs = getComputedStyle(document.documentElement);
+    ctx.fillStyle = cs.getPropertyValue('--ground').trim() || '#FBF4EA'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = cs.getPropertyValue('--act').trim() || '#D5673B'; ctx.textBaseline = 'top';
+    const sq = size === 'square';
+    ctx.font = `600 ${sq ? 34 : 40}px Inter, system-ui, sans-serif`; ctx.fillText(`@${s.handle} · ${m.kind === 'rank_up' ? 'RANK UP' : 'MILESTONE'}`.toUpperCase(), P, P);
+    let y = sq ? 250 : 560; const tpx = sq ? 132 : 168; ctx.font = `700 ${tpx}px Inter, system-ui, sans-serif`;
+    let line = ''; for (const w of String(m.title).split(' ')) { const t = line ? line + ' ' + w : w; if (ctx.measureText(t).width > W - P * 2 && line) { ctx.fillText(line, P - 6, y); y += tpx * 1.02; line = w; } else line = t; }
+    if (line) { ctx.fillText(line, P - 6, y); y += tpx * 1.02; }
+    y += sq ? 20 : 40; ctx.font = `600 ${sq ? 40 : 52}px Inter, system-ui, sans-serif`; ctx.fillText(m.line || '', P, y); y += (sq ? 40 : 52) * 1.7;
+    ctx.font = `700 ${sq ? 150 : 240}px Inter, system-ui, sans-serif`; ctx.fillText(String(m.score ?? s.overall), P - 8, y);
+    ctx.font = `600 ${sq ? 32 : 40}px Inter, system-ui, sans-serif`; ctx.fillText('MY SCALECRAFT SCORE', P + (sq ? 220 : 340), y + (sq ? 100 : 160));
+    ctx.font = `500 ${sq ? 28 : 34}px Inter, system-ui, sans-serif`; ctx.fillText(`${fmtDate(m.at || Date.now())} · Score yours at scalecraft.app`, P, sq ? H - 62 : H - P - 30);
+  }
+  function openShareSheet(report, moment = null) {
     const s = { handle: report.business?.handle, platform: report.business?.platform, niche: report.business?.category, date: report.created_at, overall: report.scores.overall, dims: report.scores.dimensions };
     const prev = report.history?.previous?.overall;
     const el = document.createElement('div'); el.className = 'sheet';
     el.innerHTML = h`<div class="panel" role="dialog" aria-label="Share your score"><div class="grab"></div>
       <div class="row">
         <div class="preview"><canvas id="shareCanvas"></canvas></div>
-        <div class="opts"><h3>Post your score</h3>
+        <div class="opts"><h3>${moment ? moment.title : 'Post your score'}</h3>
           <div class="sizes"><button type="button" class="pill dark" data-size="story">Story 1080×1920</button><button type="button" class="pill" data-size="square">Square</button></div>
-          ${prev != null && prev !== s.overall ? raw(h`<label class="check"><input type="checkbox" id="thenNow" checked> Show ${prev} → ${s.overall}</label>`) : ''}
+          ${!moment && prev != null && prev !== s.overall ? raw(h`<label class="check"><input type="checkbox" id="thenNow" checked> Show ${prev} → ${s.overall}</label>`) : ''}
           <button type="button" class="btn" data-share="post">Post your score</button>
           <button type="button" class="btn ghost" data-share="save">Save image</button>
           <button type="button" class="btn ghost" data-share="copy">Copy link</button>
@@ -521,10 +540,10 @@
     const thenNowOn = () => { const tn = el.querySelector('#thenNow'); return !!(tn && tn.checked); };
     const makeShare = async () => {
       if (CFG.useMock || isSample) return null;
-      try { return await api('/reports/' + encodeURIComponent(report.report_id) + '/share', { method: 'POST', body: JSON.stringify({ kind: 'score', then_now: thenNowOn() }) }, { allow401: true }); } catch (e) { console.warn('[share] card unavailable:', e && e.message); return null; }
+      try { return await api('/reports/' + encodeURIComponent(report.report_id) + '/share', { method: 'POST', body: JSON.stringify(moment ? { kind: 'moment', moment_key: moment.key } : { kind: 'score', then_now: thenNowOn() }) }, { allow401: true }); } catch (e) { console.warn('[share] card unavailable:', e && e.message); return null; }
     };
     const redraw = async () => {
-      drawShareCard(canvas, s, size, thenNowOn() ? { prev, span: report.history?.previous?.generated_at ? 'since ' + fmtShort(report.history.previous.generated_at) : 'in six weeks' } : {});
+      if (moment) drawMomentCard(canvas, s, size, moment); else drawShareCard(canvas, s, size, thenNowOn() ? { prev, span: report.history?.previous?.generated_at ? 'since ' + fmtShort(report.history.previous.generated_at) : 'in six weeks' } : {});
       if (!share) { share = await makeShare(); if (share) el.dataset.share = share.share_id; }
       if (share) { const img = new Image(); img.onload = () => { const ctx = canvas.getContext('2d'); canvas.width = img.width; canvas.height = img.height; ctx.drawImage(img, 0, 0); }; img.src = share.png[size] + '&t=' + Date.now(); }
     };
@@ -540,7 +559,7 @@
     });
     el.querySelector('[data-share=post]').addEventListener('click', async () => {
       const blob = await toBlob(); const file = new File([blob], `scalecraft-${s.handle}.png`, { type: 'image/png' });
-      if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file], text: `My account scored ${s.overall}/100 on Scalecraft`, url: share ? share.url : undefined }); return; } catch { } }
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file], text: moment ? `${moment.title} — ${moment.line} on Scalecraft` : `My account scored ${s.overall}/100 on Scalecraft`, url: share ? share.url : undefined }); return; } catch { } }
       el.querySelector('[data-share=save]').click(); toast('Saved — post it from your camera roll.');
     });
     el.querySelector('[data-share=copy]').addEventListener('click', async () => {
@@ -651,6 +670,8 @@
     const biz = report.business || {};
     const paid = !!report.tier && report.tier !== 'social_snapshot';
     const overall = clamp(s.overall, 0, 100); const [gl, gc] = grade(overall);
+    const lvl = levelOf(overall, s.level);
+    const momentsToShow = isSample ? [] : (report.moments || []).filter(m => { try { return !localStorage.getItem('sc_moment_' + report.report_id + '_' + m.key); } catch { return true; } });
     const niche = nicheName(biz.category);
     const nicheKnown = s.niche_known !== false;
     const phases = (report.growth_path?.phases || []).map(normalizePhase);
@@ -694,11 +715,12 @@
         : raw(h`<div class="ctxrow free">${ctx && ctx.horizon ? raw(h`<span class="chip">${ctxLabel('horizon', ctx.horizon)}</span><span class="ex">Your three first moves were written around this. The Growth Plan asks four more — time, goal, how you make content — so every move and calendar slot fits.</span>`) : raw(h`<span class="chip empty">Written as business as usual</span><span class="ex">The Growth Plan asks four short questions — your next 90 days, time, goal, how you make content — so every move and calendar slot fits your life.</span>`)}</div>`)}
         ${duePhase ? raw(h`<div class="checkin"><div class="t"><div class="eb">DAY ${Math.round(ageDays)} · CHECK-IN</div><h3>Phase ${duePhase} starts. Anything change?</h3><p>The next 30 days were written when you started. If your time, goal or next few weeks changed, the plan is rewritten tonight.</p></div><div class="acts"><button class="btn green" data-checkin="${duePhase}" data-changed="0">Nothing changed</button><a class="btn ghost" href="#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=checkin&phase=${duePhase}">Something changed</a></div></div>`) : ''}
         ${nudge ? raw(h`<div class="checkin nudge" id="nudge"><div class="t"><div class="eb">FROM THIS WEEK'S RE-SCORE</div><h3>${nudge.title}</h3><p>${nudge.text}</p></div><div class="acts"><button class="btn" data-nudge="${nudge.key}" data-changed="1">${nudge.cta}</button><button class="btn ghost" data-nudge="${nudge.key}" data-changed="0">Keep the plan as is</button></div></div>`) : ''}
+        ${raw(momentsToShow.map(m => h`<div class="moment ${m.kind}" data-moment="${m.key}"><div class="t"><div class="eb">${m.kind === 'rank_up' ? 'RANK UP' : 'MILESTONE'} · FROM THIS RE-SCORE</div><h3>${m.title}</h3><p>${m.line}</p></div><div class="acts"><button class="btn dark" data-moment-share="${m.key}">Share the card</button><button class="btn ghost" data-moment-dismiss="${m.key}">Later</button></div></div>`).join(''))}
         <div class="report">
           <div class="toprow">
             <div class="card scorebox">
               <div class="bigrow"><span class="bignum">${overall}</span>
-                <div class="meta"><span class="tag ${gc}">${gl.toUpperCase()}</span>
+                <div class="meta"><span class="tag ${gc}">${gl.toUpperCase()}</span>${lvl ? raw(h`<span class="lvl" title="Rank ${lvl.rank} of ${lvl.of}">${lvl.name.toUpperCase()}${lvl.next ? raw(h`<em>· ${lvl.next.points_away} to ${lvl.next.name}</em>`) : raw('<em>· top band</em>')}</span>`) : ''}
                   ${followers ? raw(h`<span class="f">${fmtN(followers)} followers</span>`) : ''}
                   ${hist && hist.delta_overall != null ? raw(h`<span class="delta ${hist.delta_overall > 0 ? 'up' : hist.delta_overall < 0 ? 'down' : 'flat'}">${hist.delta_overall === 0 ? `${overall} → ${overall} · unchanged since ${fmtShort(hist.previous.generated_at)}` : `${hist.delta_overall > 0 ? '+' : ''}${hist.delta_overall} since ${fmtShort(hist.previous.generated_at)}`}</span>`) : ''}
                 </div></div>
@@ -827,6 +849,8 @@
       $view.querySelectorAll('.phase').forEach((ph, i) => { const p = phases[i]; if (!p || !paid) return; const total = 1 + p.moves.length; const dn = (isDone(p.key + 'm1') ? 1 : 0) + p.moves.filter(m => isDone(p.key + 'm' + m.n)).length; const el = ph.querySelector('.prog'); if (el) el.textContent = `${dn} of ${total} done`; });
     }));
     $view.querySelector('[data-action=share]').addEventListener('click', () => { if (!isSample) track('share_clicked', { overall }, report.report_id); openShareSheet(report); });
+    $view.querySelectorAll('[data-moment-share]').forEach(b => b.addEventListener('click', () => { const m = (report.moments || []).find(x => x.key === b.dataset.momentShare); if (m) openShareSheet(report, m); }));
+    $view.querySelectorAll('[data-moment-dismiss]').forEach(b => b.addEventListener('click', () => { try { localStorage.setItem('sc_moment_' + report.report_id + '_' + b.dataset.momentDismiss, '1'); } catch { } b.closest('.moment')?.remove(); }));
     // Both paid paths go through the 60-second intake first.
     $view.querySelector('[data-action=unlock]')?.addEventListener('click', () => { sset('sc_intent_tier', 'growth_plan'); sset('sc_form', { handle: biz.handle, platform: biz.platform, category: biz.category, email: sget('sc_form', {}).email || report.email || '' }); go(`#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=subscribe`); });
     $view.querySelector('[data-action=unlock-once]')?.addEventListener('click', () => { sset('sc_once_price', oneTime); go(`#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=once`); });
@@ -1508,6 +1532,7 @@
     if (act.dataset.action === 'signout') { e.preventDefault(); setToken(null); toast('Signed out.'); route(); }
     if (act.dataset.action === 'email-report') { e.preventDefault(); toast('This report is already on its way to your inbox.'); }
   });
+  loadLevels();
   window.addEventListener('hashchange', route);
   if (CFG.useMock) { const b = document.createElement('div'); b.className = 'mockbadge'; b.textContent = 'Sample data'; document.body.appendChild(b); }
   route();

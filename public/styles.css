@@ -744,3 +744,14 @@ p { margin: 0; }
 .histchart .line { fill: none; stroke: var(--act); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
 .histchart .dot { fill: var(--card); stroke: var(--act); stroke-width: 2; } .histchart .dot.last { fill: var(--act); }
 .histchart .hl { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--muted); margin-top: 4px; max-width: 320px; }
+
+/* ---- levels + moments (spec 2.2, 2.5) ---- */
+.scorebox .lvl { display: inline-flex; align-items: baseline; gap: 6px; font-size: 11px; font-weight: 700; letter-spacing: .08em; padding: 4px 9px; border-radius: 999px; border: 1.5px solid var(--act); color: var(--act); }
+.scorebox .lvl em { font-style: normal; font-weight: 500; letter-spacing: 0; color: var(--muted); text-transform: none; }
+.moment { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; margin: 0 0 14px; padding: 18px 20px; border-radius: 16px; background: var(--act); color: #fff; }
+.moment .eb { font-size: 11px; font-weight: 700; letter-spacing: .1em; opacity: .85; margin-bottom: 4px; }
+.moment h3 { margin: 0 0 4px; font-size: 22px; line-height: 1.15; }
+.moment p { margin: 0; font-size: 14px; opacity: .92; }
+.moment .acts { display: flex; gap: 8px; flex-wrap: wrap; }
+.moment .btn.dark { background: #fff; color: var(--act); border-color: #fff; }
+.moment .btn.ghost { color: #fff; border-color: rgba(255,255,255,.55); }
