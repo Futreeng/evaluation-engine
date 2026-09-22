@@ -982,7 +982,7 @@ router.get("/briefs/:category", async (req, res) => {
 // never hardcodes them. Public: the pricing and sample pages show ranks too.
 router.get("/levels", (_req, res) => {
   const m = require("../growth_engine_moments");
-  res.json({ levels: m.LEVELS, milestones: m.MILESTONES });
+  res.json({ levels: m.LEVELS, milestones: m.MILESTONES, min_n: Number(process.env.BASELINE_MIN_N || 10) });
 });
 
 router.get("/billing/pricing", optionalAuth, async (req, res) => {

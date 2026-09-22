@@ -145,7 +145,7 @@
   };
 
   // Score bands + milestone thresholds, same shape as GET /levels.
-  const LEVELS = { levels: [['Rookie', 0, 39], ['Rising', 40, 54], ['Consistent', 55, 69], ['Established', 70, 84], ['Elite', 85, 100]].map(([name, min, max], i) => ({ name, min, max, rank: i + 1 })), milestones: { followers: 1000, score: 70, streak_weeks: 4 } };
+  const LEVELS = { levels: [['Rookie', 0, 39], ['Rising', 40, 54], ['Consistent', 55, 69], ['Established', 70, 84], ['Elite', 85, 100]].map(([name, min, max], i) => ({ name, min, max, rank: i + 1 })), milestones: { followers: 1000, score: 70, streak_weeks: 4 }, min_n: 10 };
   const levelFor = sc => { const l = LEVELS.levels.filter(x => sc >= x.min).pop() || LEVELS.levels[0]; const n = LEVELS.levels.find(x => x.min > l.min) || null; return { name: l.name, rank: l.rank, of: LEVELS.levels.length, min: l.min, max: l.max, next: n ? { name: n.name, min: n.min, points_away: n.min - sc } : null }; };
 
   // ---- in-memory state ----

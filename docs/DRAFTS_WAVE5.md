@@ -1,4 +1,4 @@
-# Wave 5 drafts — for Haron's review before anything ships
+# Wave 5 drafts — approved and shipped 2026-09-22 (kept as the copy record)
 
 Spec 5.1 and 5.2 both say "show me the draft before it ships". Nothing below
 is live. The landing page, `index.html` meta and `#/how` are unchanged until

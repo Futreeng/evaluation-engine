@@ -233,9 +233,10 @@
         ${pr ? raw(h`<div class="promobar">Code <b>${pr.code}</b> ${pr.description ? '— ' + pr.description + '. ' : 'is ready. '}It's applied when you start the plan. <a href="#/pricing">See pricing →</a></div>`) : ''}
         <section class="hero">
           <div class="l">
-            <h1>Score your account. See exactly why. Get the plan.</h1>
-            <p class="sub">Type your handle. About a minute later you'll know where you stand in your niche, what's working, and the first three things to change.</p>
+            <h1>Stop posting into the void.</h1>
+            <p class="sub">Growth is a system, not luck. Scalecraft scores your account out of 100 from what you actually post, shows exactly where the points went, and writes the next 90 days — move by move, week by week.</p>
             <form class="darkform" id="evalForm" novalidate>
+              <div class="ql formlead">Score your account. See exactly why. Get the plan.</div>
               <div class="row">
                 <div class="field"><div class="handle"><span>@</span><input type="text" name="handle" placeholder="yourhandle" autocomplete="off" autocapitalize="none" spellcheck="false" value="${CFG.useMock && !last.handle ? 'humansofny' : (last.handle || '')}" aria-label="Your handle"></div></div>
                 <div class="field selwrap"><select name="category" aria-label="Niche">${raw(NICHES.map(([k, n]) => h`<option value="${k}" ${k === niche ? 'selected' : ''}>${n}</option>`).join(''))}</select></div>
@@ -256,11 +257,17 @@
               <div class="form-error" id="formError" hidden></div>
               <div class="cta">
                 <button class="btn" type="submit">Score my account — free</button>
-                <div class="reassure">No login to your account · Public data only<br>Score in about a minute</div>
+                <div class="reassure">About a minute · Public posts only · No card</div>
               </div>
             </form>
           </div>
           <div class="r">${raw(scoreCardHTML(hero))}</div>
+        </section>
+
+        <section class="stance">
+          <div class="it"><b>Four numbers, no mystery.</b><p>Posting Consistency, Content Mix, Engagement Quality, Profile Clarity — each one shows the posts that cost you the points.</p></div>
+          <div class="it"><b>A plan, not a pep talk.</b><p>Thirteen moves across 90 days, written from your own feed, with the how and a paste-ready example.</p></div>
+          <div class="it"><b>Re-scored every week.</b><p>Do the moves, watch the number move. Your trend first; the niche second.</p></div>
         </section>
 
         <section class="howstrip" id="how">
@@ -1575,18 +1582,22 @@
   // ------------------------------------------------------------ how the score works (batch 3)
   function viewHow() {
     renderHeader('how');
+    const minN = (LEVELS && LEVELS.min_n) || 10;
     const dims = [
-      ['Posting Consistency', 1, 'How often you post and how long you go quiet. We count your posts across the window, work out your weekly rate against a target of four to five, and look at your longest gap and how recently you last posted.', ['cadence 60', 'gaps 25', 'recency 15'], 'posting on fixed days, and never leaving a gap longer than a week.'],
-      ['Content Mix', 2, 'Whether you use enough video and enough different formats. We read the format of each post in the window, the share that is video against your niche target, and how much variety there is between reels, carousels and stills.', ['video share 50', 'format variety 25', 'caption depth 25'], 'adding a second format to a feed that only does one thing.'],
-      ['Engagement Quality', 3, 'Not just likes. We take likes and comments against your follower count for an engagement rate, measured against your niche goal, and then look at how much of that is comments rather than taps.', ['engagement rate 60', 'comment share 25', 'video reach 15'], 'captions that ask something answerable, and replying in the first hour.'],
-      ['Profile Clarity', 4, 'Whether a stranger knows what you do in five seconds. We read your bio for what you’re about, a working link and whether that link leads somewhere useful, a clear next step, and story highlights.', ['bio 25', 'link 20', 'link goes somewhere 25', 'next step 15', 'highlights 15'], 'one line saying who it’s for, and a link that goes straight to the thing.']
+      ['Posting Consistency', 1, 'Three parts. Cadence: your posts per week over the window against your niche’s target — full marks at the target, zero at none. Gaps: your longest silence — full marks at or under the niche’s gap limit (7 days for most creator niches), zero at four times it. Recency: days since your last post — full marks within a week, zero past 30 days.', ['cadence 60', 'gaps 25', 'recency 15'], 'posting on fixed days, and never leaving a gap longer than a week.'],
+      ['Content Mix', 2, 'On Instagram: Mix — how close your share of video is to the niche target (60% for travel, 90% for comedy and gaming, for example). Diversity — whether you use reels, carousels and stills, or only one. Substance — average caption length and how many captions are just a schedule or a promo. On TikTok: Variety of video kinds (short, standard, long, slideshow) 45, original sound 20, substance 35.', ['video share 50', 'format variety 25', 'caption depth 25'], 'adding a second format to a feed that only does one thing.'],
+      ['Engagement Quality', 3, 'On Instagram: Rate — likes plus comments per post against your follower count, against the niche target (roughly 2–4% depending on niche). Conversation — the share of interactions that are comments rather than likes. Reach — video views per post relative to your followers; neutral if you post no video. On TikTok: reach (plays per video vs followers) 40, keeping (shares and saves as a share of views) 35, conversation 25.', ['engagement rate 60', 'comment share 25', 'video reach 15'], 'captions that ask something answerable, and replying in the first hour.'],
+      ['Profile Clarity', 4, 'For creators, five checks with fixed points: a bio that says what you’re about, a link, a link that goes somewhere worth going (a channel, a shop, a newsletter, a booking page), a next step in the bio, and story highlights (not counted on TikTok). For businesses the checks are location, price or offer, a next step, a link, a booking link and highlights.', ['bio 25', 'link 20', 'link goes somewhere 25', 'next step 15', 'highlights 15'], 'one line saying who it’s for, and a link that goes straight to the thing.']
     ];
     $view.innerHTML = h`<div class="wrap"><div class="howpage">
       <h1>How the score works</h1>
-      <p class="lede">Your score out of 100 is the plain average of four dimensions. Nothing is weighted secretly at the top level — if one number is low, you can see exactly which one and why. Under 50 is Weak, 50 to 69 is Fair, 70 and up is Strong.</p>
+      <p class="lede">Your score is the plain average of four dimensions, each 0–100. Nothing is weighted secretly at the top: if the score is 61, you can see which of the four pulled it there. ${LEVELS ? raw(h`${LEVELS.levels.map(l => `${l.name} ${l.min}–${l.max}`).join(' · ')}.`) : 'Under 40 is Rookie, 40–54 Rising, 55–69 Consistent, 70–84 Established, 85+ Elite.'} The report also tags each number Weak, Fair or Strong.</p>
+      <p class="lede sm">The four numbers are computed by fixed rules from your public posts. The writing — the explanations, the moves, the calendar — is done by a language model that receives those numbers and your posts. It never sets or changes a number, and every fact it cites is checked against the data it was given.</p>
+      <div class="cannot"><div class="n">What we read</div><p>Your public profile and your most recent posts (30 on Instagram, fewer if the account has fewer; TikTok videos the same way). For each post: when it went up, its format, the caption, likes, comments and views where the platform shows them. From the profile: your bio, link, follower count and story highlights.</p></div>
       <div class="dimlist">${raw(dims.map(([l, hue, t, chips, moves]) => h`<div class="card dimx bd${hue}"><div class="n">${l}</div><p>${t}</p><div class="chips2">${raw(chips.map(c => h`<span class="pill tone">${c}</span>`).join(''))}</div><p class="mv">What moves it: ${moves}</p></div>`).join(''))}</div>
       <div class="cannot"><div class="n">What we cannot see</div><p>We read public data only. That means no saves, no reach, no story views, no audience demographics, and nothing from a private account. A report is based on your most recent public posts — usually 30, fewer on a newer account — within the window shown on it. If a number here disagrees with your own analytics, yours is the more complete one — ours is the one a stranger can see.</p></div>
-      <p class="lede sm">Your niche average appears once 20 accounts in that niche are scored. Until then the marker is the all-creator average and the report says so.</p>
+      <div class="cannot"><div class="n">Niche targets and the niche average</div><p>Each niche has a target set — posts per week, video share, engagement rate — that the dimensions score against. Those targets are working assumptions until enough accounts are scored to measure them. Separately, the niche average marker on your report is measured: it’s the average score of accounts we’ve scored in your niche, shown once the niche has at least ${minN} scored accounts. Below that the report says the average is pending and scores you against the general creator target. The same rule gates “what’s working in your niche” and the public benchmarks. “Scores higher than X% of accounts” uses the same gate; your history line compares you with you.</p></div>
+      <div class="cannot"><div class="n">What the score is not</div><p>It isn’t a prediction of reach, followers or income. It’s a measurement of habits the platforms reward, from what a stranger can see, plus the plan to change them. A high score with a bad product won’t sell; a low score with a good one leaves growth on the table.</p></div>
     </div></div>${raw(footer())}`;
   }
 

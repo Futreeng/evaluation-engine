@@ -149,7 +149,7 @@ app.get("/s/:id", async (req, res) => {
 <body><div class="wrap"><div class="brand">Scalecraft</div>
 <div class="card"><img src="${base}/cards/${share.shareId}.png?size=square" width="1080" height="1080" alt="${esc(title)}"></div>
 <h1>${esc(title)}</h1><p>Four dimensions, scored from public posts, with the first moves to change. Takes about a minute.</p>
-<a class="btn" href="${cta}">Score my account — free</a>
+<a class="btn" href="${cta}">Score my account — free</a><div class="fine" style="margin-top:8px">Growth is a system, not luck.</div>
 <div class="fine">Scores read public data only. <a href="${base}/#/how" style="color:#7A6A57">How the score works</a></div></div></body></html>`);
   } catch (err) { res.status(500).type("text").send("Card unavailable"); }
 });
