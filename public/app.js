@@ -1256,7 +1256,7 @@
       if (!form.consent.checked) { err.textContent = 'Please agree to the Terms and Privacy Policy.'; err.hidden = false; return; }
       err.hidden = true; const btn = form.querySelector('button[type=submit]'); btn.disabled = true; btn.textContent = 'Creating…';
       try {
-        const res = await api('/auth/signup', { method: 'POST', body: JSON.stringify({ email, password: pass, company_name: name || null, is_business: !!form.is_business?.checked, niche: form.niche?.value || undefined }) }, { allow401: true });
+        const res = await api('/auth/signup', { method: 'POST', body: JSON.stringify({ email, password: pass, ...(name ? { company_name: name } : {}), is_business: !!form.is_business?.checked, niche: form.niche?.value || undefined }) }, { allow401: true });
         const t = res.token || res.access_token; if (!t) throw new Error('No token in response');
         setToken(t); sessionStorage.removeItem('sc_next');
         const pendingUnlock = sget('sc_unlock_once', null);

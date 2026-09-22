@@ -44,7 +44,8 @@ function validateAuthRequest(req, res, next) {
   }
 
   // Company name validation (optional but sanitize if provided)
-  if (company_name !== undefined) {
+  // Optional: the signup form sends null when the name is left blank.
+  if (company_name !== undefined && company_name !== null) {
     if (typeof company_name !== "string") {
       return sendError(res, 400, "INVALID_COMPANY_NAME", "Company name must be a string");
     }
