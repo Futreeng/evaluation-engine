@@ -920,14 +920,16 @@ async function evaluateTier1(accountId, inputParams, onStage = () => {}, { tier:
     posting_days: schedule.days, posting_time: schedule.times[schedule.days[0]] || null, schedule,
     phases: snapPhases.slice(0, PHASES_BOUGHT).map((p, i) => ({ range: p.range, moves: phaseResults[i]?.moves || [], first_move: phaseResults[i]?.first_move || null })),
   };
-  const calendarRaw = await askJson(interpolateTemplate(PLAN_CALENDAR_PROMPT, {
+  let calendarRaw = null;
+  try { calendarRaw = await askJson(interpolateTemplate(PLAN_CALENDAR_PROMPT, {
     ...baseVars,
     POSTING_DAYS: schedule.label,
     POSTING_TIME: moves.posting_time || "morning",
     PHASES_JSON: JSON.stringify((reportBody.growth_path?.phases ?? []).slice(0, PHASES_BOUGHT).map((p, i) => ({ range: p.range, label: p.label, first_move: p.visible_action, moves: (moves.phases?.[i]?.moves || []).map((m) => m.title) }))),
     PHASE3_NOTE: PHASES_BOUGHT === 3 ? ", 9-12 phase 3" : "",
     WEEKS: WEEKS_BOUGHT,
-  }), "Plan Writer: calendar", 6144);
+  }), "Plan Writer: calendar", 6144); }
+  catch (err) { console.warn(`[Growth Engine] calendar failed on every model — shipping without one: ${String(err.message).slice(0, 120)}`); reportBody.plan_incomplete = true; }
   let calendarArr = Array.isArray(calendarRaw) ? calendarRaw : (calendarRaw && Array.isArray(calendarRaw.calendar) ? calendarRaw.calendar : []);
   // Models sometimes stop early and the loose parser keeps the weeks that
   // parsed. Ask once more for just the missing weeks rather than shipping
@@ -935,14 +937,16 @@ async function evaluateTier1(accountId, inputParams, onStage = () => {}, { tier:
   if (calendarArr.length && calendarArr.length < WEEKS_BOUGHT) {
     const have = calendarArr.length;
     console.warn(`[Growth Engine] calendar came back with ${have}/${WEEKS_BOUGHT} weeks — asking for the rest`);
-    const more = await askJson(interpolateTemplate(PLAN_CALENDAR_PROMPT, {
+    let more = null;
+    try { more = await askJson(interpolateTemplate(PLAN_CALENDAR_PROMPT, {
       ...baseVars,
       POSTING_DAYS: schedule.label,
       POSTING_TIME: moves.posting_time || "morning",
       PHASES_JSON: JSON.stringify((reportBody.growth_path?.phases ?? []).slice(0, PHASES_BOUGHT).map((p, i) => ({ range: p.range, label: p.label, first_move: p.visible_action, moves: (moves.phases?.[i]?.moves || []).map((m) => m.title) }))),
       PHASE3_NOTE: PHASES_BOUGHT === 3 ? ", 9-12 phase 3" : "",
       WEEKS: WEEKS_BOUGHT,
-    }).replace(`Produce ONLY a JSON array of ${WEEKS_BOUGHT} weeks`, `Weeks 1-${have} are already written. Produce ONLY a JSON array of the remaining weeks ${have + 1} through ${WEEKS_BOUGHT} (${WEEKS_BOUGHT - have} weeks, "week" numbered ${have + 1}..${WEEKS_BOUGHT})`), "Plan Writer: calendar (rest)", 6144);
+    }).replace(`Produce ONLY a JSON array of ${WEEKS_BOUGHT} weeks`, `Weeks 1-${have} are already written. Produce ONLY a JSON array of the remaining weeks ${have + 1} through ${WEEKS_BOUGHT} (${WEEKS_BOUGHT - have} weeks, "week" numbered ${have + 1}..${WEEKS_BOUGHT})`), "Plan Writer: calendar (rest)", 6144); }
+    catch (err) { console.warn(`[Growth Engine] calendar (rest) failed on every model — shipping ${have} weeks: ${String(err.message).slice(0, 120)}`); reportBody.plan_incomplete = true; }
     const rest = Array.isArray(more) ? more : (more && Array.isArray(more.calendar) ? more.calendar : []);
     const seen = new Set(calendarArr.map((w) => Number(w.week)));
     for (const w of rest) { const n = Number(w.week); if (n > have && n <= WEEKS_BOUGHT && !seen.has(n)) { calendarArr.push(w); seen.add(n); } }
