@@ -319,7 +319,7 @@ router.get("/email/move-done", async (req, res) => {
       events.track("move_done", { accountId: report.accountId || null, reportId: r, props: { key: k, via: "monday_email" } });
       events.track("monday_move_done", { accountId: report.accountId || null, reportId: r, props: { key: k } });
     }
-    res.redirect(`${app}/#/report/${encodeURIComponent(r)}?done=${encodeURIComponent(k)}`);
+    res.redirect(`${app}/#/path/${encodeURIComponent(r)}?done=${encodeURIComponent(k)}`);
   } catch (err) { sendError(res, 500, "MOVE_ERROR", err.message); }
 });
 // Report-scoped opt-out for free reports that have no account (CAN-SPAM link in the footer).
@@ -925,6 +925,37 @@ router.post("/reports/:reportId/moves", authMiddleware, async (req, res) => {
   } catch (err) {
     sendError(res, 500, "MOVE_ERROR", err.message);
   }
+});
+
+// The Path (docs/PATH_SPEC.md): the plan as ordered steps with a status each.
+const pathEngine = require("../../public/path-engine.js");
+router.get("/reports/:reportId/path", authMiddleware, async (req, res) => {
+  try {
+    const report = await geDb.getReport(req.params.reportId);
+    if (!report) return sendError(res, 404, "REPORT_NOT_FOUND", "Report not found");
+    if (report.accountId !== req.user.id) return sendError(res, 403, "NOT_YOUR_REPORT", "This report belongs to another account");
+    res.json(pathEngine.build(report.reportBody || {}, {}));
+  } catch (err) { sendError(res, 500, "PATH_ERROR", err.message); }
+});
+// done | skip (with a reason) | later (comes back tomorrow) | open (undo)
+router.post("/reports/:reportId/path/:key", authMiddleware, async (req, res) => {
+  try {
+    const report = await geDb.getReport(req.params.reportId);
+    if (!report) return sendError(res, 404, "REPORT_NOT_FOUND", "Report not found");
+    if (report.accountId !== req.user.id) return sendError(res, 403, "NOT_YOUR_REPORT", "This report belongs to another account");
+    const key = String(req.params.key || ""), status = String(req.body.status || "");
+    if (!/^[a-z0-9_-]{1,40}$/i.test(key)) return sendError(res, 400, "INVALID_MOVE", "key is required");
+    if (!["done", "skip", "later", "open"].includes(status)) return sendError(res, 400, "INVALID_STATUS", "status must be done, skip, later or open");
+    const reason = ["did_it", "cant", "not_me", "other"].includes(req.body.reason) ? req.body.reason : null;
+    const b = report.reportBody || {};
+    const patch = pathEngine.apply(b, key, status, { reason });
+    await geDb.patchReportBody(report.reportId, patch);
+    const dims = {}; for (const d of b.scores?.dimensions || []) dims[d.label] = d.score;
+    if (status === "done" || status === "skip") geDb.logMove({ accountId: req.user.id, reportId: report.reportId, handle: b.business?.handle, platform: b.business?.platform, category: b.business?.category, moveKey: key, done: status === "done", overall: b.scores?.overall ?? null, dims, planDay: b.plan_started_at ? Math.floor((Date.now() - b.plan_started_at) / 86400000) : null }).catch((e) => console.warn("[Outcomes] move log failed:", e.message));
+    if (status === "done") events.track("move_done", { ...events.attribution(req), reportId: report.reportId, props: { key, via: "path" } });
+    if (status === "skip") events.track("move_skipped", { ...events.attribution(req), reportId: report.reportId, props: { key, reason } });
+    res.json(pathEngine.build({ ...b, ...patch }, {}));
+  } catch (err) { sendError(res, 500, "PATH_ERROR", err.message); }
 });
 
 // Does doing the moves move the score? Aggregate only — no handles.

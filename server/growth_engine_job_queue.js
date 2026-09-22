@@ -18,6 +18,7 @@ const moments = require("./growth_engine_moments");
 const events = require("./growth_engine_events");
 const costs = require("./growth_engine_costs");
 const thumbs = require("./growth_engine_thumbs");
+const pathEngine = require("../public/path-engine.js");
 
 // Weekly refresh: does what the creator told us still match what they're
 // doing? At most one nudge per phase; the report and the score-changed
@@ -194,6 +195,10 @@ class JobQueue {
                 if (prevReport?.reportBody?.nudges_sent) reportBody.nudges_sent = prevReport.reportBody.nudges_sent;
                 if (prevReport?.reportBody?.emails_sent) reportBody.emails_sent = prevReport.reportBody.emails_sent;
                 if (prevReport?.reportBody?.moves_done && !reportBody.moves_done) reportBody.moves_done = prevReport.reportBody.moves_done;
+                // The Path (docs/PATH_SPEC.md): skips and deferrals ride along; moves are checked against the profile.
+                for (const k of ["moves_skipped", "moves_later", "moves_verified"]) if (prevReport?.reportBody?.[k] && !reportBody[k]) reportBody[k] = prevReport.reportBody[k];
+                reportBody.path_baseline = prevReport?.reportBody?.path_baseline || { bio: prevReport?.reportBody?.profile?.bio ?? prevReport?.reportBody?.bio ?? null, external_url: prevReport?.reportBody?.profile?.external_url || null, highlight_count: prevReport?.reportBody?.profile?.highlight_count || 0, pinned_posts: prevReport?.reportBody?.profile?.pinned_posts || 0 };
+                try { reportBody.moves_verified = pathEngine.verify(reportBody, reportBody.path_baseline); } catch (e) { console.warn("[Path] verify failed:", e.message); }
                 if (prevReport?.reportBody?.moments_seen) reportBody.moments_seen = prevReport.reportBody.moments_seen;
                 if (prevReport?.reportBody?.annual_offer_at) reportBody.annual_offer_at = prevReport.reportBody.annual_offer_at;
               }
