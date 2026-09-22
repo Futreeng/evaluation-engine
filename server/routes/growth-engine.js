@@ -899,13 +899,9 @@ router.post("/waitlist", async (req, res) => {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return sendError(res, 400, "INVALID_EMAIL", "Email is required");
     if (!/^[a-z]{1,30}$/.test(platform)) return sendError(res, 400, "INVALID_PLATFORM", "Platform is required");
     await geDb.addWaitlist(email, platform);
-    // Founders band: hand out the founders code while it lasts.
-    let code = null;
-    if (platform === "founders" && process.env.FOUNDERS_PROMO_CODE) {
-      const p = await geDb.getPromo(process.env.FOUNDERS_PROMO_CODE).catch(() => null);
-      if (p && promos.checkUsable(p, "growth_plan").ok) code = { code: p.code, description: promos.quote(p, "growth_plan", TIER_PRICING.growth_plan, "monthly")?.description || "" };
-    }
-    res.json({ ok: true, platform, promo: code });
+    // Founders pricing (P.2) applies itself at checkout while spots last — no code is handed out here.
+    // "launch" is the landing-page note list; platforms are the "soon" waitlists; "business" the phase-2 list.
+    res.json({ ok: true, platform, promo: null });
   } catch (err) {
     sendError(res, 500, "WAITLIST_ERROR", err.message);
   }

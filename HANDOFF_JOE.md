@@ -39,7 +39,7 @@ New tables (both backends create them on boot): `growth_engine_events`, `_costs`
 
 ### Render env (beyond what's already there)
 
-`SUPPORT_EMAIL=hello@futreeng.com` · `MAIL_FROM="Scalecraft <hello@futreeng.com>"` · `EMAIL_POSTAL_ADDRESS` · `APP_URL=https://scalecraft.onrender.com` (or the domain) · `ADMIN_EMAILS` (you + Haron) · `ADMIN_TOKEN` · `FOUNDERS_PROMO_CODE=FOUNDER50` (create it: `node scripts/promo.js create FOUNDER50 --kind free_months --value 1 --max 50`) · `SCRAPE_POSTS=30` · `BASELINE_MIN_N=10`. Everything else has a default; `server/.env.example` documents every knob by spec item.
+`SUPPORT_EMAIL=hello@futreeng.com` · `MAIL_FROM="Scalecraft <hello@futreeng.com>"` · `EMAIL_POSTAL_ADDRESS` · `APP_URL=https://scalecraft.onrender.com` (or the domain) · `ADMIN_EMAILS` (you + Haron) · `ADMIN_TOKEN` · promo codes only for comps/campaigns (`node scripts/promo.js create …`) — founders pricing is automatic, no code · `SCRAPE_POSTS=30` · `BASELINE_MIN_N=10`. Everything else has a default; `server/.env.example` documents every knob by spec item.
 
 Cost guardrails already on: `PAID_RUNS_PER_DAY`, `COMPETITOR_PULLS_PER_DAY`, `FREE_RUNS_PER_DAY_GLOBAL`, `EVALS_PER_IP_PER_HOUR`, `ROASTS_PER_IP_PER_HOUR`, `POST_REVIEW_*`, `WINBACK_BATCH`. Every scrape and LLM call lands in `growth_engine_costs`; `#/admin` shows spend vs revenue.
 

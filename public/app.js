@@ -362,9 +362,9 @@
     $view.querySelector('#foundersForm').addEventListener('submit', async e => {
       e.preventDefault(); const f = e.currentTarget; const email = f.email.value.trim();
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast('Add an email first.'); return; }
-      let r = null; try { r = await api('/waitlist', { method: 'POST', body: JSON.stringify({ email, platform: 'founders' }) }); } catch { }
-      if (r && r.promo) { sset('sc_promo', { code: r.promo.code, pending: true }); f.innerHTML = h`<div class="waitdone" style="flex:1">You're in. Your code is <b class="code">${r.promo.code}</b> — ${r.promo.description}. It's applied when you <a href="#/pricing">start the plan</a>.</div>`; }
-      else f.innerHTML = h`<div class="waitdone" style="flex:1">You're in. We'll email you when your month starts.</div>`;
+      try { await api('/waitlist', { method: 'POST', body: JSON.stringify({ email, platform: 'launch' }) }); } catch { }
+      const f2 = sget('sc_pricing', null)?.founders;
+      f.innerHTML = h`<div class="waitdone" style="flex:1">Noted — the launch note goes to ${email}. ${f2 ? `Founders pricing is live now: <a href="#/pricing">$${f2.monthlyPrice}/mo, ${fmtN(f2.left)} spots left</a>.` : ''}</div>`;
     });
     const scrollTo = sget('sc_scroll', null);
     if (scrollTo) { sessionStorage.removeItem('sc_scroll'); document.getElementById(scrollTo)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
