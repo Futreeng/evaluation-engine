@@ -488,6 +488,10 @@ async function updateReportRefreshDue(reportId, refreshDueAt) {
   await q(`UPDATE growth_engine_reports SET refresh_due_at = $1, updated_at = $2 WHERE report_id = $3`, [refreshDueAt, Date.now(), reportId]);
   return getReport(reportId);
 }
+async function listReportsWithEmailSince(fromTs) {
+  const r = await q(`SELECT * FROM growth_engine_reports WHERE generated_at >= $1 AND report_body LIKE '%"email":"%' ORDER BY generated_at DESC`, [fromTs]);
+  return r.rows.map(reportRow);
+}
 async function listReportsDueForRefresh(beforeTimestamp) {
   const r = await q(`SELECT * FROM growth_engine_reports WHERE refresh_due_at IS NOT NULL AND refresh_due_at <= $1 ORDER BY refresh_due_at ASC`, [beforeTimestamp]);
   return r.rows.map(reportRow);
@@ -877,6 +881,7 @@ module.exports = {
   listEmailLog,
   insertRoastRejection,
   listRoastRejections,
+  listReportsWithEmailSince,
   setUserProfile,
   listBusinessAccounts,
   // Jobs

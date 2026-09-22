@@ -69,19 +69,19 @@ async function allowed(userId, type) {
 }
 
 // Footer every email gets: postal address, support, unsubscribe.
-function footer(userId, type) {
-  const unsub = userId && type !== "transactional" ? ` · <a href="${unsubscribeLink(userId, type)}" style="color:#7A6A57">Unsubscribe from these</a> · <a href="${unsubscribeLink(userId, "all")}" style="color:#7A6A57">Pause all but receipts</a>` : "";
+function footer(userId, type, optOutUrl = null) {
+  const unsub = !userId && optOutUrl && type !== "transactional" ? ` · <a href="${optOutUrl}" style="color:#7A6A57">Unsubscribe</a>` : userId && type !== "transactional" ? ` · <a href="${unsubscribeLink(userId, type)}" style="color:#7A6A57">Unsubscribe from these</a> · <a href="${unsubscribeLink(userId, "all")}" style="color:#7A6A57">Pause all but receipts</a>` : "";
   const addr = POSTAL ? esc(POSTAL) : "Scalecraft";
   return `<tr><td style="padding:14px 28px 22px;border-top:1px solid #EADFCB;font-size:11px;line-height:1.7;color:#7A6A57">${addr}${SUPPORT ? ` · <a href="mailto:${esc(SUPPORT)}" style="color:#7A6A57">${esc(SUPPORT)}</a>` : ""} · <a href="${APP}/#/legal/privacy" style="color:#7A6A57">Privacy</a>${unsub}</td></tr>`;
 }
 
 // Send one email. `html` is the full document from mailer.layout(); the
 // footer row is injected before the closing table row marker.
-async function send({ to, userId = null, type = "transactional", subject, html, text = null, devLink = null }) {
+async function send({ to, userId = null, type = "transactional", subject, html, text = null, devLink = null, optOutUrl = null }) {
   if (!to) return { skipped: "no recipient" };
   if (!TYPES.includes(type)) type = "transactional";
   if (!(await allowed(userId, type))) { await log({ userId, to, type, subject, status: "skipped", error: "preference" }); return { skipped: "preference" }; }
-  const full = html.includes("<!--footer-->") ? html.replace("<!--footer-->", footer(userId, type)) : html;
+  const full = html.includes("<!--footer-->") ? html.replace("<!--footer-->", footer(userId, type, optOutUrl)) : html;
   try {
     const r = await provider().send({ to, subject, html: full, text, type, devLink });
     await log({ userId, to, type, subject, status: r.status, providerId: r.id });

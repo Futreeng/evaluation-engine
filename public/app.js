@@ -906,6 +906,7 @@
     $view.querySelectorAll('[data-nudge]').forEach(b => b.addEventListener('click', () => answer(b, { nudge: b.dataset.nudge, changed: b.dataset.changed === '1' }, 'Kept as is.')));
     if (subscriber && qs.get('checkin') && qs.get('changed') === '0' && !checkins['p' + qs.get('checkin')]) { const b = $view.querySelector('[data-checkin]'); if (b) b.click(); else answer({ disabled: false }, { phase: Number(qs.get('checkin')), changed: false }, 'Carrying on.'); }
     if (qs.get('nudge')) document.getElementById('nudge')?.scrollIntoView({ behavior: 'smooth' });
+    if (qs.get('done')) { const k = qs.get('done'); toast(k === 'invalid' ? "That link didn't work — mark the move done on the report." : 'Marked done. It counts toward your next rescore.'); const row = $view.querySelector(`[data-row="${k}"]`); if (row) { row.classList.add('on'); row.scrollIntoView({ behavior: 'smooth', block: 'center' }); } }
     // next posts: copy fields, regenerate one
     $view.querySelectorAll('.npost [data-copy]').forEach(b => b.addEventListener('click', async () => {
       const art = b.closest('.npost'); const i = Number(art.dataset.post); const p = (report.next_posts || [])[i] || {}; const text = p[b.dataset.copy] || '';

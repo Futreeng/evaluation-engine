@@ -13,6 +13,7 @@ const EVENTS = [
   "promo_applied", "checkin_answered", "move_done", "post_regenerated", "post_copied", "referral_signup",
   "rank_up", "milestone", "record", "moment_shared",
   "roast_opened", "roast_generated", "roast_rejected", "roast_skipped_minor", "roast_shared",
+  "monday_move_sent", "monday_move_done",
 ];
 // Funnel steps in order, for the admin conversion table.
 const FUNNEL = ["evaluate_started", "evaluate_completed", "report_viewed", "signup", "pricing_viewed", "subscribe"];

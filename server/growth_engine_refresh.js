@@ -115,6 +115,7 @@ async function sweep(jobQueue) {
   }
   let emailed = 0, cleaned = 0;
   try { emailed = await sendScheduledEmails(); } catch (err) { console.error("[Refresh] scheduled emails failed:", err.message); }
+  try { const n = await require("./growth_engine_monday").sendMondayMoves(); if (n) { emailed += n; console.log(`[Refresh] Monday moves sent: ${n}`); } } catch (err) { console.error("[Refresh] Monday moves failed:", err.message); }
   try { cleaned = await cleanupThumbnails(); if (cleaned) console.log(`[Refresh] removed thumbnails for ${cleaned} old free reports`); } catch (err) { console.error("[Refresh] thumbnail cleanup failed:", err.message); }
   if (queued || skipped || emailed) console.log(`[Refresh] queued ${queued}, skipped ${skipped}, emailed ${emailed} in ${Date.now() - started}ms`);
   return { queued, skipped };

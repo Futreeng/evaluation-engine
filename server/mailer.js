@@ -48,11 +48,11 @@ const scoreRow = (oldS, newS) => `<div style="margin-top:20px;font-family:'Brico
 
 // All sending goes through the email service (preferences, footer, log).
 // `tag` is the template name; `type` the preference bucket.
-const TYPE_OF = { report_ready: "transactional", password_reset: "transactional", checkin: "monday_move", score_changed: "weekly_score", plan_ended: "weekly_score", moment: "milestones" };
-async function send({ to, userId = null, subject, html, tag, devLink }) {
+const TYPE_OF = { report_ready: "transactional", password_reset: "transactional", checkin: "monday_move", monday_move: "monday_move", score_changed: "weekly_score", plan_ended: "weekly_score", moment: "milestones" };
+async function send({ to, userId = null, subject, html, tag, devLink, optOutUrl = null }) {
   let uid = userId;
   if (!uid && to) { try { uid = (await geDb.getUserByEmail(String(to).toLowerCase()))?.userId || null; } catch { /* anonymous recipient */ } }
-  return email.send({ to, userId: uid, type: TYPE_OF[tag] || "transactional", subject, html, devLink });
+  return email.send({ to, userId: uid, type: TYPE_OF[tag] || "transactional", subject, html, devLink, optOutUrl });
 }
 
 // ---------------------------------------------------------------- emails
@@ -89,6 +89,26 @@ function scoreChanged({ to, userId, handle, reportId, oldScore, newScore, dimens
   return send({ to, userId, subject: `${handle}: ${oldScore} → ${newScore}`, html: layout("Score changed", inner, { userId }), tag: "score_changed" });
 }
 
+// Monday move (spec 2.6): one action under 15 minutes with a one-tap done link.
+const moveDoneUrl = (reportId, key, s) => `${APP}/api/growth-engine/v1/email/move-done?r=${encodeURIComponent(reportId)}&k=${encodeURIComponent(key)}&s=${s}`;
+const optOutUrl = (reportId, s) => `${APP}/api/growth-engine/v1/email/optout?r=${encodeURIComponent(reportId)}&s=${s}`;
+function mondayMove({ to, userId, handle, reportId, paid, kind, move, doneUrl, optOutUrl: oo }) {
+  const url = reportUrl(reportId);
+  let inner, subject;
+  if (kind === "upgrade") {
+    subject = `Monday: the next move for @${handle} is on the plan`;
+    inner = h2("Your free move was last Monday.") + p(`The Growth Plan writes @${esc(handle)}'s next 90 days — a move every Monday, under 15 minutes, with a rescore every week to show what it changed. This is the only time we'll mention it.`) + button(`${url}?upgrade=1`, "See the plan") + ghost(url, "Open my report");
+  } else {
+    subject = `Monday move for @${handle}: ${move.action.slice(0, 60)}${move.action.length > 60 ? "…" : ""}`;
+    const steps = (move.how || []).slice(0, 4).map((h) => `<li style="margin:0 0 6px">${esc(h)}</li>`).join("");
+    inner = h2("This week's move.") + p(`${move.time ? `About ${esc(move.time)}. ` : "Under 15 minutes. "}${paid ? "One of the moves from your plan — tick it off and it counts toward your rescore." : "The first move from your free report."}`)
+      + moveCard(`PHASE ${move.phase} · MOVE ${String(move.n).padStart(2, "0")}`, move.action, move.why)
+      + (steps ? `<ol style="margin:14px 0 0;padding-left:20px;font-size:14px;line-height:1.55;color:#5B4C3B">${steps}</ol>` : "")
+      + button(doneUrl, "Mark done", "#2E7D5B") + ghost(url, "Open the plan");
+  }
+  return send({ to, userId, subject, html: layout("Monday move", inner, { userId }), tag: "monday_move", optOutUrl: oo });
+}
+
 // Rank-up or milestone after a rescore (spec 2.2, 2.5). Pref: milestones.
 function moment({ to, userId, handle, reportId, moment: m }) {
   const url = reportUrl(reportId);
@@ -115,4 +135,4 @@ function passwordReset({ to, resetUrl }) {
   return send({ to, subject: "Reset your Scalecraft password", html: layout("Reset your password", inner), tag: "password_reset", devLink: resetUrl });
 }
 
-module.exports = { send, reportReady, checkin, scoreChanged, planEnded, passwordReset, moment, reportUrl, pauseSig, layout, configured: () => email.configured() };
+module.exports = { send, reportReady, checkin, scoreChanged, planEnded, passwordReset, moment, mondayMove, moveDoneUrl, optOutUrl, reportUrl, pauseSig, layout, configured: () => email.configured() };

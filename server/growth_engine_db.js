@@ -868,6 +868,19 @@ async function listReportsByAccount(accountId) {
   }));
 }
 
+// Reports whose body carries an email (free and paid), newest first — the
+// Monday move picks the latest per email+handle from these.
+async function listReportsWithEmailSince(fromTs) {
+  if (!db) throw new Error("Database not initialized");
+  const result = db.exec(`SELECT * FROM growth_engine_reports WHERE generated_at >= ? AND report_body LIKE '%"email":"%' ORDER BY generated_at DESC`, [fromTs]);
+  if (!result || result.length === 0) return [];
+  const columns = result[0].columns;
+  return result[0].values.map((row) => ({
+    reportId: row[columns.indexOf("report_id")], accountId: row[columns.indexOf("account_id")], tier: row[columns.indexOf("tier")],
+    business: { handle: row[columns.indexOf("business_handle")], platform: row[columns.indexOf("business_platform")], category: row[columns.indexOf("business_category")] },
+    generatedAt: row[columns.indexOf("generated_at")], reportBody: JSON.parse(row[columns.indexOf("report_body")]),
+  }));
+}
 async function listReportsDueForRefresh(beforeTimestamp) {
   if (!db) throw new Error("Database not initialized");
 
@@ -1503,6 +1516,7 @@ module.exports = {
   listEmailLog,
   insertRoastRejection,
   listRoastRejections,
+  listReportsWithEmailSince,
   setUserProfile,
   listBusinessAccounts,
 };
