@@ -757,7 +757,7 @@ p { margin: 0; }
 .roast .eb { font-size: 11px; font-weight: 700; letter-spacing: .1em; color: #F2A470; margin-bottom: 8px; }
 .roast h3 { margin: 0 0 6px; font-size: 24px; line-height: 1.15; }
 .roast p { margin: 0 0 12px; font-size: 14px; opacity: .85; max-width: 60ch; }
-.roast .fine { font-size: 12px; opacity: .6; margin: 10px 0 0; }
+.roast .fine { font-size: 12px; color: #D9C9B6; margin: 10px 0 0; }
 .roast .heats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 12px 0 14px; }
 .roast .heat { text-align: left; padding: 12px 14px; border-radius: 12px; border: 1.5px solid rgba(255,246,233,.25); background: transparent; color: inherit; cursor: pointer; font: inherit; }
 .roast .heat b { display: block; font-size: 15px; } .roast .heat span { font-size: 12px; opacity: .7; }
