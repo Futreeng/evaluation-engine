@@ -976,6 +976,8 @@ details[open] > .body, details[open] > .rlist { animation: rise .26s ease-out bo
 /* ---------------------------------------------------------------- the Path */
 .pathwrap { max-width: 720px; margin: 0 auto; padding-block: 18px 40px; display: flex; flex-direction: column; gap: 14px; }
 .pathwrap .samplebar { margin: 0; }
+.pathwrap .samplebar span a { margin-left: 0; }
+.pathwrap .samplebar > span { flex: 1 1 320px; }
 .phead { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
 .phead h1 { font-family: var(--display); font-size: clamp(28px, 5vw, 40px); line-height: 1.05; font-weight: 700; margin-top: 8px; text-wrap: balance; }
 .phead .eb { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }

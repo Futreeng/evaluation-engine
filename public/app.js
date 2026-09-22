@@ -1653,7 +1653,7 @@
   function pathStepCard(s, path, { isSample, report }) {
     const post = s.post || null;
     const late = s.kind === 'slot' && s.due && new Date(s.due).setHours(0, 0, 0, 0) < new Date().setHours(0, 0, 0, 0);
-    return h`<article class="card pstep ${s.kind}" data-step="${s.key}">
+    return h`<article class="card pstep kind-${s.kind}" data-step="${s.key}">
       <div class="eb"><span>${s.kind === 'slot' ? `${s.day} · ${String(s.format).toUpperCase()}${s.source ? ` · ${s.source === 'new' ? 'NEW SHOOT' : s.source === 'archive' ? 'FROM ARCHIVE' : 'NO CAMERA'}` : ''}` : `MOVE ${String(s.n).padStart(2, '0')}`}</span><span>${s.kind === 'slot' ? raw(h`<b class="${late ? 'late' : ''}">${late ? 'Was due ' + dueLabel(s.due).toLowerCase() : dueLabel(s.due)}</b>`) : `Days ${String(s.phase_range).replace('-', '–')} · ${s.phase_label}`}</span></div>
       <h2>${s.kind === 'slot' && post ? post.hook : s.action || s.title}</h2>
       ${s.kind === 'slot' ? raw(h`<p class="a">${s.title}${s.action && s.action !== s.title ? raw(h` — ${s.action}`) : ''}</p>`) : s.title && s.title !== s.action && !s.opener ? raw(h`<p class="a">${s.title}</p>`) : ''}
@@ -1710,7 +1710,7 @@
       const pv = sget('sc_pricing', null); const founders = pv?.founders || null; const price = founders ? founders.monthlyPrice : (pv?.growth_plan ?? report.upsell?.monthly_price ?? 19);
       const streak = report.streak && report.streak.visible ? report.streak : null;
       $view.innerHTML = h`<div class="wrap"><div class="pathwrap">
-        ${isSample ? raw(h`<div class="samplebar"><b>Sample path.</b> The same plan as the <a href="#/report/sample">sample report</a>, one step at a time. Ticks you make here stay in this browser. <a href="#/" data-scroll="evalForm">Score my account →</a></div>`) : ''}
+        ${isSample ? raw(h`<div class="samplebar"><span><b>Sample path.</b> The same plan as the <a href="#/report/sample">sample report</a>, one step at a time. Ticks you make here stay in this browser.</span> <a href="#/" data-scroll="evalForm">Score my account →</a></div>`) : ''}
         <header class="phead">
           <div class="l"><div class="eb">YOUR PATH · @${biz.handle}${path.plan_day ? raw(h` · DAY ${path.plan_day}`) : ''}</div>
             <h1>${path.free ? 'Start here.' : path.caught_up ? "You're caught up." : nowSteps.length > 1 ? `${nowSteps.length} things today.` : first && first.kind === 'slot' ? 'Post today.' : 'One thing today.'}</h1></div>
