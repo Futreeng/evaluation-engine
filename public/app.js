@@ -287,7 +287,7 @@
         </section>
 
         <section class="founders" id="founders">
-          <div class="t"><h3>Founding creators</h3><p>The first 50 accounts get the Growth Plan free for a month. Tell us what worked.</p></div>
+          <div class="t"><h3>Founders pricing</h3><p>${(() => { const f = sget('sc_pricing', null)?.founders; return f ? `${fmtN(f.left)} of ${fmtN(f.cap)} spots left — Growth at $${f.monthlyPrice}/mo, locked in for as long as you stay. Leave your email for the launch note.` : 'The first subscribers lock Growth at the launch price for as long as they stay. Leave your email for the launch note.'; })()} <a href="#/pricing">See pricing →</a></p></div>
           <form id="foundersForm"><input type="email" name="email" placeholder="you@email.com" aria-label="Email"><button class="btn light" type="submit">Count me in</button></form>
         </section>
 
