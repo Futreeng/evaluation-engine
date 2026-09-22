@@ -118,8 +118,7 @@ function validateSubscriptionRequest(req, res, next) {
 
   // Only tiers whose pipeline actually exists can be bought. Pro (multi-platform)
   // and the business tiers unlock via env flags once they deliver what they promise.
-  const validTiers = ["social_snapshot", "growth_plan",
-    ...(process.env.ENABLE_GROWTH_PLAN_PRO === "true" ? ["growth_plan_pro"] : []),
+  const validTiers = ["social_snapshot", "growth_plan", "growth_plan_pro",
     ...(process.env.ENABLE_BUSINESS_CHECKOUT === "true" ? ["business_growth", "business_evaluator", "agency"] : [])];
   if (!validTiers.includes(tier)) {
     return sendError(

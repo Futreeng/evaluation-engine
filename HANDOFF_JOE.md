@@ -28,7 +28,7 @@ New tables (both backends create them on boot): `growth_engine_events`, `_costs`
 ## Your part
 
 1. **Merge #5 and #6** → Render redeploys → set the env below → `SMOKE_BASE=https://scalecraft.onrender.com node scripts/smoke.js` (expect 20/20 once the Stripe placeholder is gone).
-2. **Stripe for real** — `growth_engine_billing.js` is mock unless `STRIPE_API_KEY` looks real. Stubs for you, each already receiving the right arguments:
+2. **Stripe for real** — `growth_engine_billing.js` is mock unless `STRIPE_API_KEY` looks real. **Pricing add-on (P.1–P.7) is in:** Growth $19/$190, Pro $39/$390, Maintenance $5, founders $12/$108 for the first 400 (live counter), pre-update subscribers keep their price, weekly fair-use limits, downgrades at period end. All of it in `growth_engine_plans.js` (env overrides `PLAN_PRICES_JSON` / `PLAN_LIMITS_JSON`). In Stripe create **new** Price objects for 1900/19000/3900/39000/500 and founders 1200/10800 — never edit or delete the existing $12 prices. Stubs for you, each already receiving the right arguments (`priceCents`, `cycle`, `founder` are on the entitlement after every subscribe):
    - `_createStripeSubscription` (monthly and annual; annual amount is precomputed).
    - `pauseSubscription` / `unpauseSubscription` already call `subscriptions.update({ pause_collection… })` when live — just needs the subscription id stored on the entitlement.
    - `switchTier` throws when live: swap the subscription item to the maintenance / growth_plan price ids.

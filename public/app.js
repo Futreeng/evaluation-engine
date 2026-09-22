@@ -123,7 +123,18 @@
       if (e.target.closest('[data-goal-skip]') && onSkip) onSkip();
     });
   }
-  function rememberPricing(p) { try { const g = (p.tiers || []).find(t => t.tier === 'growth_plan'); sset('sc_pricing', { variant: p.variant || 'control', growth_plan: g?.monthlyPrice, plan_unlock: p.one_time?.[0]?.price }); } catch { } }
+  // Fair-use limit (P.4): the server's message already names the reset date; add the upgrade path.
+  function limitNotice(e, where) {
+    if (!e || (e.code !== 'LIMIT_REACHED' && e.code !== 'UPGRADE_REQUIRED')) return false;
+    const up = e.upgrade || e.required_tier || null;
+    const host = where || document.querySelector('.report') || $view;
+    let n = host.querySelector('.limitnote'); if (!n) { n = document.createElement('div'); n.className = 'notice limitnote'; host.prepend(n); }
+    n.innerHTML = h`<span>${e.message}</span>${up ? raw(h` <button type="button" class="btn sm" data-upgrade="${up}">${up === 'growth_plan_pro' ? 'Upgrade to Pro' : 'See plans'}</button>`) : ''}`;
+    n.querySelector('[data-upgrade]')?.addEventListener('click', () => { sset('sc_intent_tier', up); if (up === 'growth_plan_pro') sset('sc_pro_open', true); go('#/pricing'); });
+    n.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return true;
+  }
+  function rememberPricing(p) { try { const g = (p.tiers || []).find(t => t.tier === 'growth_plan'); sset('sc_pricing', { variant: p.variant || 'control', growth_plan: g?.monthlyPrice, plan_unlock: p.one_time?.[0]?.price, one_time_sold: !!(p.one_time || []).length, founders: p.founders && p.founders.left > 0 ? p.founders : null, pro: (p.tiers || []).find(t => t.tier === 'growth_plan_pro')?.monthlyPrice }); } catch { } }
   // Admin link in the nav: ask /auth/me once per token and remember the answer.
   async function refreshAdminFlag() {
     if (!token()) { try { localStorage.removeItem('sc_admin'); } catch { } return; }
@@ -142,7 +153,7 @@
   }
 
   // ------------------------------------------------------------ api
-  class ApiError extends Error { constructor(status, body) { super(body?.error || ('HTTP ' + status)); this.status = status; this.body = body; } }
+  class ApiError extends Error { constructor(status, body) { super(body?.error || ('HTTP ' + status)); this.status = status; this.body = body;  if (body && typeof body === 'object') for (const k of ['code', 'upgrade', 'resets_at', 'limit', 'used', 'required_tier']) if (body[k] !== undefined) this[k] = body[k]; } }
   async function api(path, init = {}, opts = {}) {
     const url = path.startsWith('/api/') || path.startsWith('http') ? path : API + path;
     const headers = { 'Content-Type': 'application/json', ...(init.headers || {}) };
@@ -729,8 +740,9 @@
     const done = isSample ? {} : { ...(lget(doneKey, {})), ...(report.moves_done || {}) };
     const isDone = k => !!done[k];
     const pv = sget('sc_pricing', null);
-    const price = pv?.growth_plan ?? report.upsell?.monthly_price ?? 12;
-    const oneTime = pv?.plan_unlock ?? report.upsell?.one_time_price ?? 15;
+    const founders = pv?.founders || null;
+    const price = founders ? founders.monthlyPrice : (pv?.growth_plan ?? report.upsell?.monthly_price ?? 19);
+    const oneTime = pv ? (pv.one_time_sold ? pv.plan_unlock : null) : (report.upsell?.one_time_price ?? null);
     const thisWeek = phases[0];
     const nextPhase = phases[1];
     const followers = biz.followers || report.followers || (report.post_insights && report.post_insights.followers) || null;
@@ -884,8 +896,8 @@
           : paid ? raw(h`<div class="refresh"><div class="t"><h3>This plan refreshes weekly</h3><p>${Object.keys(done).length ? `You did ${Object.keys(done).length} move${Object.keys(done).length === 1 ? '' : 's'} — we'll re-score you and tell you what changed.` : 'Run it again any time — the moves and calendar are rewritten against your latest posts.'}</p></div><a class="btn green" href="#/" data-scroll="evalForm">Run a fresh evaluation</a></div>`)
           : raw(h`<div class="upsell"><h3>Unlock your full Growth Plan</h3><p>${report.upsell?.unlock_count || 12} locked items: the remaining moves and your week-by-week calendar, written from your own posts — and around four quick answers about your next 90 days, so it's a plan you can actually do.</p>
               <div class="paths">
-                <div class="path main"><div class="pn">Growth Plan · <b>$${price}/mo</b></div><div class="pd">All 90 days, written around your life. Re-scored every week with check-ins at day 30 and 60.</div><button class="btn" data-action="unlock">Start the plan →</button></div>
-                <div class="path"><div class="pn">60-day plan · <b>$${oneTime} once</b></div><div class="pd">Phases 1 and 2 — moves 01–09 and 8 weeks of calendar, written once. No subscription.</div><button class="btn light" data-action="unlock-once">Get the 60-day plan</button></div>
+                <div class="path main"><div class="pn">Growth · <b>$${price}/mo</b>${founders ? raw(h` <span class="fine">founders price · ${fmtN(founders.left)} spots left</span>`) : ''}</div><div class="pd">Your full plan, posts written for you every week, and a score that moves — rescored weekly with check-ins at day 30 and 60.</div><button class="btn" data-action="unlock">Start the plan →</button></div>
+                ${oneTime ? raw(h`<div class="path"><div class="pn">60-day plan · <b>$${oneTime} once</b></div><div class="pd">Phases 1 and 2 — moves 01–09 and 8 weeks of calendar, written once. No subscription.</div><button class="btn light" data-action="unlock-once">Get the 60-day plan</button></div>`) : ''}
               </div>
               <div class="fine">Cancel anytime. Keep the report either way.</div></div>`)}
 
@@ -999,7 +1011,7 @@
       try {
         const r = await api('/reports/' + encodeURIComponent(report.report_id) + '/posts/regenerate', { method: 'POST', body: JSON.stringify({ index: i }) });
         report.next_posts[i] = r.post; sset('sc_report_' + report.report_id, report); toast('Rewritten.'); route();
-      } catch (e2) { if (e2.status === 401) return; toast(e2.message || 'Could not rewrite.'); b.disabled = false; b.textContent = 'Regenerate'; }
+      } catch (e2) { if (e2.status === 401) return; if (!limitNotice(e2)) toast(e2.message || 'Could not rewrite.'); b.disabled = false; b.textContent = 'Regenerate'; }
     }));
     $view.querySelector('#compForm')?.addEventListener('submit', async e => {
       e.preventDefault(); const f = e.currentTarget; const btn = f.querySelector('button'); const out = $view.querySelector('#compResult');
@@ -1079,45 +1091,50 @@
       const annual = billing === 'annual';
       const pcode = promoState && promoState.code;
       const pOk = promoState && !promoState.pending && promoState.checked_for === 'growth_plan:' + billing;
-      const growthLine = pOk && promoState.product === 'growth_plan' ? (promoState.free_months ? `$0 for your first ${promoState.free_months === 1 ? 'month' : promoState.free_months + ' months'}, then $${annual ? yr(growth) : growth.monthlyPrice}${annual ? '/yr' : '/mo'}` : `$${(promoState.amount_cents / 100).toFixed(promoState.amount_cents % 100 ? 2 : 0)} ${annual ? 'your first year' : 'your first month'}, then $${annual ? yr(growth) : growth.monthlyPrice}`) : null;
+      const fd = pricing.founders && pricing.founders.left > 0 ? pricing.founders : null;
+      const gPrice = fd ? (annual ? fd.annualPrice : fd.monthlyPrice) : (annual ? yr(growth) : growth.monthlyPrice);
+      const gList = annual ? yr(growth) : growth.monthlyPrice;
+      const growthLine = pOk && promoState.product === 'growth_plan' ? (promoState.free_months ? `$0 for your first ${promoState.free_months === 1 ? 'month' : promoState.free_months + ' months'}, then $${gPrice}${annual ? '/yr' : '/mo'}` : `$${(promoState.amount_cents / 100).toFixed(2)} ${annual ? 'for your first year' : 'for your first month'}`) : '';
       const proOpen = sget('sc_pro_open', false);
+      const lim = pricing.limits || {};
+      const limLine = t => { const l = lim[t]; return l ? `${l.written_posts_per_week} posts written a week · ${l.post_regens_per_week} rewrites · ${l.post_reviews_per_week} post reviews · ${l.competitor_handles} competitors · rescored every ${l.rescore_days} day${l.rescore_days === 1 ? '' : 's'}` : ''; };
+      const col = (t, extra) => h`<div class="feats">${raw((t.features || []).map(f => h`<div>${f}</div>`).join(''))}</div>${extra ? raw(extra) : ''}`;
       $view.innerHTML = h`<div class="wrap"><div class="pricing">
         ${limitMsg ? raw(h`<div class="notice" style="margin-bottom:18px">${limitMsg}</div>`) : ''}
         <h1>Pay when the plan is worth doing.</h1>
         <p class="lede">Score first, free. Unlock the rest when you've read it and decided it's right.</p>
-        <div class="toggle" role="tablist"><button type="button" class="${annual ? '' : 'on'}" data-billing="monthly">Monthly</button><button type="button" class="${annual ? 'on' : ''}" data-billing="annual">Annual · ${Math.round(disc * 100)}% off</button></div>
-        <div class="tiers">
+        ${fd ? raw(h`<div class="founders-bar"><b>Founders pricing:</b> ${fmtN(fd.left)} of ${fmtN(fd.cap)} spots left — Growth at $${fd.monthlyPrice}/mo or $${fd.annualPrice}/yr, locked in for as long as you stay subscribed.</div>`) : ''}
+        <div class="toggle" role="tablist"><button type="button" class="${annual ? '' : 'on'}" data-billing="monthly">Monthly</button><button type="button" class="${annual ? 'on' : ''}" data-billing="annual">Annual · ${pricing.discount?.annual || '2 months free'}</button></div>
+        <div class="tiers three">
           <div class="card tier">
-            <div class="n">Free Snapshot</div>
+            <div class="n">${free.name || 'Free'}</div>
             <div class="p">$0</div>
-            <div class="note">${free.note || 'One report per email'}</div>
-            <div class="feats">${raw((free.features || []).map(f => h`<div>${f}</div>`).join(''))}</div>
-            <a class="btn ghost" href="#/" data-scroll="evalForm">Score my account</a>
+            <div class="note">${free.note || 'One free Snapshot per handle'}</div>
+            ${raw(col(free))}
+            <a class="btn ghost" href="#/" data-scroll="evalForm">${free.cta || 'Score my account'}</a>
           </div>
           <div class="tier dark ${cur('growth_plan') ? 'cur' : ''}">
-            <div class="th"><span class="n">${growth.name || 'Growth Plan'}</span><span class="tag act">${cur('growth_plan') ? 'YOUR PLAN' : 'MOST POPULAR'}</span></div>
-            <div class="price"><span class="p">$${annual ? yr(growth) : growth.monthlyPrice}</span><span class="per">${annual ? '/ year' : '/ month'}</span></div>
-            <div class="note">${growthLine ? raw(h`<span class="promoline">${promoState.code}: ${growthLine}</span>`) : annual ? 'Two and a bit months free' : `Or $${yr(growth)} a year — ${Math.round(disc * 100)}% off`}</div>
-            <div class="feats">${raw((growth.features || []).map(f => h`<div>${f}</div>`).join(''))}</div>
-            <button type="button" class="btn" data-subscribe="growth_plan" ${cur('growth_plan') ? 'disabled' : ''}>${cur('growth_plan') ? 'Current plan' : 'Unlock the plan'}</button>
-            <div class="fine center">Cancel anytime. Keep the report either way.${SHIPPED ? raw(' · <a href="#/report/sample">See a full report</a>') : ''}</div>
+            <div class="th"><span class="n">${growth.name || 'Growth'}</span><span class="tag act">${cur('growth_plan') ? 'YOUR PLAN' : 'MOST POPULAR'}</span></div>
+            <div class="price"><span class="p">$${gPrice}</span><span class="per">${annual ? '/ year' : '/ month'}</span>${fd && gPrice !== gList ? raw(h`<span class="was">$${gList}</span>`) : ''}</div>
+            <div class="note">${growthLine ? raw(h`<span class="promoline">${promoState.code}: ${growthLine}</span>`) : fd ? `Founders price · ${fmtN(fd.left)} spots left` : annual ? 'Two months free' : `Or $${yr(growth)} a year — 2 months free`}</div>
+            ${raw(col(growth, h`<div class="fine">${limLine('growth_plan')}</div>`))}
+            <button type="button" class="btn" data-subscribe="growth_plan" ${cur('growth_plan') ? 'disabled' : ''}>${cur('growth_plan') ? 'Current plan' : (growth.cta || 'Start Growth')}</button>
+            <div class="fine center">Cancel in two clicks. Keep the report either way.${SHIPPED ? raw(' · <a href="#/report/sample">See a full report</a>') : ''}</div>
           </div>
-          <div class="side">
-            ${pro ? raw(h`<div class="card procard ${proOpen ? 'open' : ''}">
-              <button type="button" class="prohead" data-expand><div><div class="n">${pro.name}</div><div class="note">$${annual ? yr(pro) + '/yr' : pro.monthlyPrice + '/mo'} · all platforms together</div></div><span class="caret">${proOpen ? '–' : '+'}</span></button>
-              ${proOpen ? raw(h`<div class="probody"><div class="feats">${raw((pro.features || []).map(f => h`<div>${f}</div>`).join(''))}</div><button type="button" class="btn ghost block" data-subscribe="growth_plan_pro" ${cur('growth_plan_pro') ? 'disabled' : ''}>${cur('growth_plan_pro') ? 'Current plan' : 'Choose Pro'}</button></div>`) : ''}
-            </div>`) : ''}
-            ${raw((pricing.one_time || []).map(o => h`<div class="card tier once"><div class="th"><span class="n">${o.name}</span><span class="tag fair">ONE-TIME</span></div><div class="price"><span class="p">$${o.price}</span><span class="per">once</span></div><div class="note">${o.description}</div><div class="feats">${raw((o.features || []).map(f => h`<div>${f}</div>`).join(''))}</div>${(o.not_included || []).length ? raw(h`<div class="notfeats"><div class="l">Not included</div>${raw(o.not_included.map(f => h`<div>${f}</div>`).join(''))}</div>`) : ''}<a class="btn ghost" href="${token() ? '#/reports' : '#/'}" ${token() ? '' : raw('data-scroll="evalForm"')}>${token() ? 'Pick a report to unlock' : 'Score first, then unlock'}</a></div>`).join(''))}
-            ${(CFG.testimonials || []).length ? raw((CFG.testimonials || []).slice(0, 1).map(t => h`<div class="quote">
-              <p class="q">“${t.quote}”</p>
-              <div class="who"><span class="av"></span><div><div class="nm">${t.name}</div><div class="hd">${t.meta || ''}</div></div></div>
-            </div>`).join('')) : ''}
-          </div>
+          ${pro ? raw(h`<div class="card tier procard ${proOpen ? 'open' : ''} ${cur('growth_plan_pro') ? 'cur' : ''}">
+            <button type="button" class="prohead" data-expand><div><div class="n">${pro.name}</div><div class="price"><span class="p">$${annual ? yr(pro) : pro.monthlyPrice}</span><span class="per">${annual ? '/ year' : '/ month'}</span></div><div class="note">${pro.description || ''}</div></div><span class="caret">${proOpen ? '−' : '+'}</span></button>
+            <div class="probody">${raw(col(pro, h`<div class="fine">${limLine('growth_plan_pro')}</div>`))}<button type="button" class="btn ghost block" data-subscribe="growth_plan_pro" ${cur('growth_plan_pro') ? 'disabled' : ''}>${cur('growth_plan_pro') ? 'Current plan' : (pro.cta || 'Start Pro')}</button></div>
+          </div>`) : ''}
         </div>
+        ${(pricing.one_time || []).length ? raw((pricing.one_time || []).map(o => h`<div class="card tier once"><div class="th"><span class="n">${o.name}</span><span class="tag fair">ONE-TIME</span></div><div class="price"><span class="p">$${o.price}</span><span class="per">once</span></div><div class="note">${o.description}</div><div class="feats">${raw((o.features || []).map(f => h`<div>${f}</div>`).join(''))}</div><a class="btn ghost" href="#/" data-scroll="evalForm">${o.cta}</a></div>`).join('')) : ''}
+        ${(CFG.testimonials || []).length ? raw((CFG.testimonials || []).slice(0, 1).map(t => h`<div class="quote">
+          <p class="q">“${t.quote}”</p>
+          <div class="who"><span class="av"></span><div><div class="nm">${t.name}</div><div class="hd">${t.meta || ''}</div></div></div>
+        </div>`).join('')) : ''}
         <div class="promobox" id="promoBox">${pcode && !promoState.pending && promoState.checked_for === 'growth_plan:' + billing
           ? raw(h`<span>Code <b>${pcode}</b> applied — ${promoState.description}.</span> <a href="#" data-promo="clear">Remove</a>`)
-          : raw(h`<a href="#" data-promo="open">${pcode ? `Apply code ${pcode}` : 'Have a code?'}</a><form id="promoForm" ${pcode ? '' : 'hidden'}><input type="text" name="code" placeholder="CODE" autocomplete="off" autocapitalize="characters" value="${pcode || ''}"><button class="btn dark sm" type="submit">Apply</button><span class="fine" id="promoMsg"></span></form>`)}</div>
-        <div class="pfoot"><div>All tiers keep your report history. Cancel in two clicks.</div><div>${pricing.refund || 'Not useful in the first 7 days? Reply to any email and we refund it.'}${supportEmail() ? raw(h` Or write to <a href="mailto:${supportEmail()}">${supportEmail()}</a>.`) : ''}</div><div class="fine">Business accounts are priced separately — $39 and $99. <a href="#/business">For businesses →</a></div></div>
+          : raw(h`<a href="#" data-promo="open">${pcode ? `Apply code ${pcode}` : 'Have a code?'}</a><form id="promoForm" ${pcode ? '' : 'hidden'}><input type="text" name="code" placeholder="CODE" autocomplete="off" autocapitalize="characters" maxlength="24"><button class="btn ghost sm" type="submit">Apply</button><span class="fine" id="promoMsg"></span></form>`)}</div>
+        <div class="pfoot"><div>All tiers keep your report history. Cancel in two clicks. <a href="#/business">Business pricing →</a></div><div>${pricing.refund || 'Not useful in the first 7 days? Reply to any email and we refund it.'}${supportEmail() ? raw(h` Or write to <a href="mailto:${supportEmail()}">${supportEmail()}</a>.`) : ''}</div></div>
       </div></div>${raw(footer())}`;
       $view.querySelectorAll('[data-billing]').forEach(b => b.addEventListener('click', () => { billing = b.dataset.billing; sset('sc_billing', billing); render(); }));
       $view.querySelector('[data-expand]')?.addEventListener('click', () => { sset('sc_pro_open', !proOpen); render(); });
@@ -1270,7 +1287,9 @@
       const pending = subn.status === 'cancel_pending';
       const paused = subn.status === 'paused';
       const maint = subn.current_tier === 'maintenance';
-      return h`<div class="card plancard ${pending ? 'pending' : ''}"><div class="t"><div class="n">Your plan</div><h2>${subn.tier_name || 'Free Snapshot'}${free ? '' : raw(h` <span class="pr">· $${subn.monthly_price}/mo</span>`)}</h2>
+      const shown = subn.price_cents != null && !free ? (subn.price_cents / 100) : subn.monthly_price;
+      const downg = subn.status === 'downgrade_pending';
+      return h`<div class="card plancard ${pending ? 'pending' : ''}"><div class="t"><div class="n">Your plan${subn.founder ? raw(h` <span class="tag act founder">FOUNDER</span>`) : ''}</div><h2>${subn.tier_name || 'Free Snapshot'}${free ? '' : raw(h` <span class="pr">· $${shown}${subn.billing_cycle === 'annual' ? '/yr' : '/mo'}${subn.founder ? ' locked' : ''}</span>`)}</h2>${downg ? raw(h`<p class="fine">Moving to ${subn.pending_tier === 'maintenance' ? 'Maintenance' : subn.pending_tier === 'growth_plan' ? 'Growth' : subn.pending_tier} on ${fmtDate(subn.pending_tier_at)} — everything you have stays until then, and Pro data is kept if you come back.</p>`) : ''}
         <p>${free ? 'One free score per account. The Growth Plan writes the whole 90 days and re-scores you weekly.' : paused ? `Paused until ${fmtDate(subn.paused_until)}. Nothing is charged, nothing runs, and your history and streak are kept exactly as they are. Resume any time.` : maint ? 'Weekly rescore and score history only. Switch back whenever you want the plan, Monday moves and post writing again.' : pending ? `Cancelled. You keep everything until ${fmtDate(subn.cancel_at)}, then the weekly refresh stops. Your reports stay.` : subn.billing_period_end ? `Renews ${fmtDate(subn.billing_period_end)}. Cancel any time — you keep the plan to the end of the period and every report after.` : 'Cancel any time — you keep the plan to the end of the period and every report after.'}</p></div>
         <div class="acts">${free ? raw(h`<a class="btn" href="#/pricing">See the plan</a>`) : paused ? raw(h`<button type="button" class="btn green" data-action="unpause-plan">Resume now</button>`) : pending ? raw(h`<button type="button" class="btn green" data-action="resume-plan">Resume the plan</button>`) : maint ? raw(h`<button type="button" class="btn" data-action="switch-growth">Back to the Growth Plan</button><button type="button" class="btn ghost" data-action="cancel-plan">Cancel</button>`) : raw(h`<button type="button" class="btn ghost" data-action="cancel-plan">Cancel plan</button>`)}</div>
         ${raw(emailPrefsHTML(subn.email_prefs))}</div>`;

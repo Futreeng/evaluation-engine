@@ -15,15 +15,9 @@ const geDb = require("./growth_engine_db_select");
 const crypto = require("crypto");
 
 // Tier pricing (in cents, monthly)
-const TIER_PRICING = {
-  social_snapshot: 0, // Free
-  maintenance: Number(process.env.MAINTENANCE_PRICE_CENTS || 500), // $5/month — weekly rescore + history only (spec 4.2)
-  growth_plan: 1200, // $12/month — creators
-  growth_plan_pro: 2900, // $29/month — creators, every platform scored together
-  business_growth: 3900, // $39/month — businesses (phase 2)
-  business_evaluator: 9900, // $99/month — businesses
-  agency: 24900, // $249/month base
-};
+// Prices live in growth_engine_plans.js (pricing add-on); this map keeps the old import shape.
+const plans = require("./growth_engine_plans");
+const TIER_PRICING = Object.fromEntries(plans.TIER_ORDER.map((t) => [t, plans.priceFor(t, "monthly")]));
 // One-time products (not subscriptions)
 const ONE_TIME_PRICING = {
   plan_unlock: 1500, // $15 — the full plan for one report, no refresh, no competitors. Priced so a second unlock costs more than a month of the plan.
@@ -91,27 +85,37 @@ class BillingManager {
       return await geDb.upgradeTier(accountId, tier);
     }
 
-    const priceInCents = (tier === "growth_plan" && priceOverride) || TIER_PRICING[tier];
-    if (!priceInCents) {
-      throw new Error(`Unknown tier: ${tier}`);
-    }
+    if (!TIER_PRICING[tier]) throw new Error(`Unknown tier: ${tier}`);
+    const cycle = billingCycle === "annual" ? "annual" : "monthly";
 
-    // Calculate amount based on billing cycle
-    let amount = priceInCents;
-    if (billingCycle === "annual") {
-      amount = Math.floor(priceInCents * 12 * (1 - ANNUAL_DISCOUNT));
-    }
+    // P.3: a current subscriber who re-subscribes without lapsing keeps their price.
+    // P.2: founders pricing for Growth while spots remain (excluded from A/B variants).
+    // Otherwise the plan price (a variant may override Growth's monthly).
+    const ent = await geDb.getOrCreateEntitlement(accountId);
+    let amount, founder = false;
+    const keeps = ent.currentTier === tier && ent.priceCents != null && !ent.lapsedAt;
+    if (keeps) amount = ent.priceCents;
+    else if (tier === "growth_plan" && (await this.foundersLeft()) > 0) { amount = cycle === "annual" ? plans.FOUNDERS.growth_annual : plans.FOUNDERS.growth_monthly; founder = true; }
+    else if (tier === "growth_plan" && priceOverride && cycle === "monthly") amount = priceOverride;
+    else if (tier === "growth_plan" && priceOverride && cycle === "annual") amount = priceOverride * 10;
+    else amount = plans.priceFor(tier, cycle);
 
     // Promo already validated by the route: { code, amountCents, freeMonths, description }
     const charged = promo ? promo.amountCents : amount;
+    const lock = async () => { await geDb.setSubscriptionPrice(accountId, { priceCents: amount, cycle, founder: founder ? true : (ent.founder && tier === "growth_plan" ? null : false) }); };
 
     if (this.isProduction && this.stripe) {
-      // Production: use real Stripe (pass promo.stripeCouponId as the coupon)
-      return await this._createStripeSubscription(accountId, tier, stripeCustomerId, charged, billingCycle, promo);
+      // Production: use real Stripe (pass promo.stripeCouponId as the coupon).
+      // New Price objects per price (P.3) — never edit existing ones.
+      const r = await this._createStripeSubscription(accountId, tier, stripeCustomerId, charged, cycle, promo);
+      await lock();
+      return { ...r, founder, priceCents: amount };
     }
 
     // Mock mode: Simulate payment processing
-    const r = await this._createMockSubscription(accountId, tier, charged, billingCycle);
+    const r = await this._createMockSubscription(accountId, tier, charged, cycle);
+    await lock();
+    r.founder = founder; r.priceCents = amount;
     if (promo) {
       r.promo = { code: promo.code, description: promo.description, listAmountInCents: amount };
       // Free months: the paid-through date is pushed out by the free period.
@@ -252,17 +256,38 @@ class BillingManager {
    * mock: a fresh mock subscription at the new price.
    */
   async switchTier(accountId, tier) {
-    if (!["maintenance", "growth_plan"].includes(tier)) throw new Error("Only maintenance and growth_plan can be switched to");
+    if (!["maintenance", "growth_plan", "growth_plan_pro"].includes(tier)) throw new Error("Only maintenance, growth_plan and growth_plan_pro can be switched to");
     const ent = await geDb.getOrCreateEntitlement(accountId);
     if (ent.currentTier === "social_snapshot") throw new Error("Start a plan first");
-    if (ent.currentTier === tier) return { status: "active", currentTier: tier, unchanged: true };
-    if (this.isProduction && this.stripe && ent.stripeSubscriptionId) {
-      throw new Error("[Stripe] Tier switch not wired yet: update the subscription item to the maintenance/growth_plan price id");
+    if (ent.currentTier === tier) { if (ent.pendingTier) await geDb.setPendingTier(accountId, null, null); return { status: "active", currentTier: tier, unchanged: true }; }
+    const cycle = ent.billingCycle || "monthly";
+    // P.5: downgrades take effect at the end of the paid period; extra data is kept, just hidden.
+    if (plans.rankOf(tier) < plans.rankOf(ent.currentTier)) {
+      const at = ent.billingPeriodEnd || Date.now() + 30 * 24 * 60 * 60 * 1000;
+      if (this.isProduction && this.stripe && ent.stripeSubscriptionId) {
+        throw new Error("[Stripe] Downgrade not wired yet: schedule the subscription item swap to the new price id at period end");
+      }
+      await geDb.setPendingTier(accountId, tier, at);
+      await geDb.setCancelAt(accountId, null);
+      console.log(`[Billing] ${accountId} downgrade ${ent.currentTier} → ${tier} at ${new Date(at).toISOString()}`);
+      return { status: "downgrade_pending", currentTier: ent.currentTier, pendingTier: tier, effectiveAt: at };
     }
-    const r = await this._createMockSubscription(accountId, tier, TIER_PRICING[tier], "monthly");
+    if (this.isProduction && this.stripe && ent.stripeSubscriptionId) {
+      throw new Error("[Stripe] Upgrade not wired yet: update the subscription item to the new price id with proration");
+    }
+    const amount = plans.priceFor(tier, cycle);
+    const r = await this._createMockSubscription(accountId, tier, amount, cycle);
     await geDb.setCancelAt(accountId, null);
+    // Founder status survives an upgrade (they never cancelled); it only ends when the subscription lapses.
+    await geDb.setSubscriptionPrice(accountId, { priceCents: amount, cycle, founder: null });
     console.log(`[Billing] ${accountId} switched ${ent.currentTier} → ${tier}`);
     return { ...r, status: "active", currentTier: tier, from: ent.currentTier };
+  }
+
+  /** Founders spots left (P.2). Never faked: counts entitlements flagged founder. */
+  async foundersLeft() {
+    const taken = await geDb.countFounders();
+    return Math.max(0, plans.FOUNDERS.cap - taken);
   }
 
   /** Undo a pending cancellation before the period ends. */
@@ -345,107 +370,40 @@ class BillingManager {
    * Get pricing information
    */
   // variantPrices: { variant, growth_plan, plan_unlock } from growth_engine_pricing
-  getPricing(variantPrices = null) {
-    const GP = variantPrices?.growth_plan || TIER_PRICING.growth_plan;
+  // Everything the pricing page and the app need, from growth_engine_plans.js.
+  // `founders` is async (live count) — see getPricingAsync; this sync version omits it.
+  getPricing(variantPrices = null, founders = null) {
+    const GP = variantPrices?.growth_plan || plans.priceFor("growth_plan", "monthly");
     const OT = variantPrices?.plan_unlock || ONE_TIME_PRICING.plan_unlock;
-    const yr = (cents) => Math.floor((cents * 12 * (1 - ANNUAL_DISCOUNT)) / 100);
+    const growth = plans.publicTier("growth_plan", { monthly: GP, annual: GP * 10 });
+    const free = plans.publicTier("social_snapshot");
+    const pro = plans.publicTier("growth_plan_pro");
     return {
       audience: "creators",
-      // Offered on the cancel screen only (spec 4.1, 4.2).
       pause: { months: Array.from({ length: Number(process.env.PAUSE_MAX_MONTHS || 3) }, (_, i) => i + 1) },
-      maintenance: { tier: "maintenance", name: "Maintenance", monthlyPrice: TIER_PRICING.maintenance / 100, description: "Keep the weekly rescore and your score history. No plan, no post writing.", features: ["Re-scored every week", "Score history and trend", "Streak and milestones kept", "No moves, calendar or posts"] },
-      tiers: [
-        {
-          tier: "social_snapshot",
-          name: "Snapshot",
-          description: "See where your account stands and why.",
-          monthlyPrice: 0,
-          annualPrice: 0,
-          note: "No card, ever",
-          features: [
-            "Your score and the four dimensions, explained",
-            "Your best and worst posts",
-            "The first move of each 30-day phase",
-            "One account, once",
-          ],
-          cta: "Score my account",
-        },
-        {
-          tier: "growth_plan",
-          name: "Growth Plan",
-          description: "Your account, re-scored every week, with the whole 90 days written from your own posts.",
-          monthlyPrice: GP / 100,
-          annualPrice: yr(GP),
-          popular: true,
-          features: [
-            "All 90 days: every move, 01 through 13, with the how and a paste-ready example",
-            "Your 12-week posting calendar with a brief per post",
-            "Written around your next 90 days — time, goal, what you can shoot",
-            "Re-scored every week — see what each move changed",
-            "Day-30 and day-60 check-ins that reshape the plan if life changes",
-            "Up to 5 competitors, scored the same way",
-            "Score and follower history, and a fresh plan every 90 days",
-          ],
-          cta: "Start Growth Plan",
-        },
-        ...(process.env.ENABLE_GROWTH_PLAN_PRO === "true" ? [{
-          tier: "growth_plan_pro",
-          name: "Growth Plan Pro",
-          description: "Every platform you're on, scored together.",
-          monthlyPrice: TIER_PRICING.growth_plan_pro / 100,
-          annualPrice: yr(TIER_PRICING.growth_plan_pro),
-          optional: true,
-          features: [
-            "Everything in Growth Plan",
-            "All your platforms in one report",
-            "Priority refresh",
-          ],
-          cta: "Start Pro",
-        }] : []),
-      ],
-      // Business tiers are phase 2. Until the business pipeline exists they are
-      // listed for the page but not purchasable (see /billing/subscribe).
+      maintenance: { ...plans.publicTier("maintenance"), hidden: true },
+      tiers: [free, growth, pro],
+      founders: founders ? { cap: plans.FOUNDERS.cap, taken: founders.taken, left: founders.left, monthlyPrice: plans.FOUNDERS.growth_monthly / 100, annualPrice: plans.FOUNDERS.growth_annual / 100, tier: "growth_plan" } : null,
+      limits: Object.fromEntries(["social_snapshot", "growth_plan", "growth_plan_pro", "maintenance"].map((t) => [t, plans.LIMITS[t]])),
       support_email: process.env.SUPPORT_EMAIL || null,
       variant: variantPrices?.variant || "control",
       business_checkout_enabled: process.env.ENABLE_BUSINESS_CHECKOUT === "true",
-      business: [
-        {
-          tier: "business_growth",
-          name: "Business Growth Plan",
-          description: "Scored against your category; the plan is written for bookings.",
-          monthlyPrice: TIER_PRICING.business_growth / 100,
-          annualPrice: yr(TIER_PRICING.business_growth),
-          features: ["Everything in Growth Plan", "Category benchmarks for businesses", "Moves written for bookings, not followers"],
-          cta: "Start Business Growth Plan",
-        },
-        {
-          tier: "business_evaluator",
-          name: "Business Evaluator",
-          description: "The plan answers to the P&L, not just the feed.",
-          monthlyPrice: TIER_PRICING.business_evaluator / 100,
-          annualPrice: yr(TIER_PRICING.business_evaluator),
-          features: ["Everything in Business Growth Plan", "Margin-aware recommendations", "Action plan checklist with owners and dates", "Bi-weekly refresh"],
-          cta: "Start Business Evaluator",
-        },
-      ],
-      one_time: [
-        {
-          product: "plan_unlock",
-          name: "60-day plan",
-          days: 60,
-          description: "Phases 1 and 2 of this report's plan, written once. No subscription, no refresh.",
-          price: OT / 100,
-          features: ["Days 1–60: moves 01 through 09, with the how and examples", "Your 8-week calendar", "Keep it forever"],
-          not_included: ["Days 61–90 (phase 3)", "Weekly re-score and what changed", "Day-30 and day-60 check-ins", "Competitors", "Score and follower history", "A fresh plan every 90 days"],
-          cta: "Get the 60-day plan",
-        },
-      ],
-      discount: {
-        annual: `${Math.round(ANNUAL_DISCOUNT * 100)}% off`,
-        note: "Annual billing includes 25% discount",
-      },
+      business: [plans.publicTier("business_growth"), plans.publicTier("business_evaluator")],
+      one_time: plans.ONE_TIME_UNLOCK_ENABLED ? [{
+        product: "plan_unlock", name: "60-day plan", days: 60,
+        description: "Phases 1 and 2 of this report's plan, written once. No subscription, no refresh.",
+        price: OT / 100,
+        features: ["Days 1–60: moves 01 through 09, with the how and examples", "Your 8-week calendar", "Keep it forever"],
+        not_included: ["Days 61–90 (phase 3)", "Weekly re-score and what changed", "Day-30 and day-60 check-ins", "Competitors", "Score and follower history", "A fresh plan every 90 days"],
+        cta: "Get the 60-day plan",
+      }] : [],
+      discount: { annual: "2 months free", note: "Annual is 10 months' price for 12" },
       refund: "Not useful in the first 7 days? Reply to any email and we refund it.",
     };
+  }
+  async getPricingAsync(variantPrices = null) {
+    const left = await this.foundersLeft();
+    return this.getPricing(variantPrices, { taken: plans.FOUNDERS.cap - left, left });
   }
 
   /**
@@ -459,15 +417,10 @@ class BillingManager {
       const perClientMonthly = 25;
       const totalMonthly = baseMonthly + perClientMonthly * clientCount;
 
-      if (billingCycle === "annual") {
-        return Math.floor(totalMonthly * 12 * (1 - ANNUAL_DISCOUNT));
-      }
+      if (billingCycle === "annual") return totalMonthly * 10; // annual = 10 months
       return totalMonthly;
     }
-
-    if (billingCycle === "annual") {
-      return Math.floor(monthlyPrice * 12 * (1 - ANNUAL_DISCOUNT));
-    }
+    if (billingCycle === "annual") return plans.priceFor(tier, "annual") / 100;
     return monthlyPrice;
   }
 }

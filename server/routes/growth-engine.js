@@ -9,6 +9,7 @@ const { signup, login, verifyJWT, requestPasswordReset, resetPassword } = requir
 const mailer = require("../mailer");
 const promos = require("../growth_engine_promos");
 const events = require("../growth_engine_events");
+const entitlements = require("../growth_engine_entitlements");
 const costs = require("../growth_engine_costs");
 const pricingAB = require("../growth_engine_pricing");
 // Which price variant this request sees: the account's stored one, else a
@@ -28,7 +29,7 @@ async function resolvePromo(code, product, billingCycle, accountId, variantPrice
   const usable = promos.checkUsable(promo, product, { redeemedByAccount: accountId ? await geDb.hasRedeemed(c, accountId) : false });
   if (!usable.ok) return { error: usable.reason };
   const gp = variantPrices?.growth_plan || TIER_PRICING.growth_plan, ot = variantPrices?.plan_unlock || ONE_TIME_PRICING.plan_unlock;
-  const base = product === "growth_plan" ? (billingCycle === "annual" ? Math.floor(gp * 12 * 0.75) : gp) : ot;
+  const base = product === "growth_plan" ? (billingCycle === "annual" ? gp * 10 : gp) : ot;
   const qte = promos.quote(promo, product, base, billingCycle);
   if (!qte) return { error: "That code doesn't apply here." };
   if (!qte.applicable) return { error: qte.description };
@@ -191,6 +192,7 @@ router.get("/auth/me", authMiddleware, async (req, res) => {
       ref_code: user.refCode || null,
       goal: user.goal || null,
       goal_target: user.goalTarget ?? null,
+      founder: !!(await geDb.getEffectiveEntitlement(user.userId).catch(() => null))?.founder,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -233,7 +235,12 @@ router.get("/account/subscription-status", authMiddleware, async (req, res) => {
       billing_period_end: ent.billingPeriodEnd,
       cancel_at: ent.cancelAt || null,
       paused_until: ent.pausedUntil || null,
-      status: ent.currentTier === "social_snapshot" ? "free" : ent.pausedUntil ? "paused" : ent.cancelAt ? "cancel_pending" : "active",
+      billing_cycle: ent.billingCycle || null,
+      price_cents: (await entitlements.effective(req.user.id)).price_cents,
+      founder: !!ent.founder,
+      pending_tier: ent.pendingTier || null, pending_tier_at: ent.pendingTierAt || null,
+      limits: require("../growth_engine_plans").LIMITS[ent.currentTier] || null,
+      status: ent.currentTier === "social_snapshot" ? "free" : ent.pausedUntil ? "paused" : ent.cancelAt ? "cancel_pending" : ent.pendingTier ? "downgrade_pending" : "active",
       email_paused: !!(await geDb.getUserById(req.user.id))?.emailPaused,
       email_prefs: await require("../growth_engine_email").prefsFor(req.user.id),
     });
@@ -381,6 +388,7 @@ router.post("/billing/switch", authMiddleware, async (req, res) => {
     const tier = String(req.body?.tier || "");
     const ent = await geDb.getEffectiveEntitlement(req.user.id);
     const r = await billingManager.switchTier(req.user.id, tier);
+    if (r.status === "downgrade_pending") { events.track("tier_switch", { ...events.attribution(req), props: { from: ent.currentTier, to: tier, at: r.effectiveAt } }); return res.json(r); }
     if (!r.unchanged) { try { await geDb.insertCancelReason({ accountId: req.user.id, tier: ent.currentTier, action: `switch_${tier}`, reasonCode: CANCEL_REASONS.some(([k]) => k === req.body?.reason_code) ? req.body.reason_code : null, reasonText: null }); } catch { /* fine */ } }
     events.track("tier_switch", { ...events.attribution(req), props: { from: ent.currentTier, to: tier } });
     res.json(r);
@@ -423,7 +431,9 @@ async function evaluationTierFor(accountId) {
   try {
     const ent = await geDb.getEffectiveEntitlement(accountId);
     const t = ent?.current_tier || ent?.currentTier || "social_snapshot";
-    if (t && t !== "social_snapshot") return "growth_plan"; // every paid tier runs the plan pipeline today
+    if (t === "maintenance") return "maintenance";
+    if (t === "growth_plan_pro" || t === "business_evaluator") return "growth_plan_pro"; // same plan pipeline, Pro limits
+    if (t && t !== "social_snapshot") return "growth_plan"; // every other paid tier runs the plan pipeline today
   } catch (err) {
     console.warn("[Growth Engine] Entitlement lookup failed, defaulting to snapshot:", err.message);
   }
@@ -673,10 +683,12 @@ router.post("/reports/:reportId/competitors", authMiddleware, async (req, res) =
     const report = await geDb.getReport(req.params.reportId);
     if (!report) return sendError(res, 404, "REPORT_NOT_FOUND", "Report not found");
     if (report.accountId !== req.user.id) return sendError(res, 403, "NOT_YOUR_REPORT", "This report belongs to another account");
-    const access = await billingManager.checkEntitlement(req.user.id, "growth_plan");
-    if (!access.hasAccess) return res.status(402).json({ error: "Competitor comparison is part of the Growth Plan.", code: "UPGRADE_REQUIRED", required_tier: "growth_plan", status: 402 });
+    const centW = await entitlements.effective(req.user.id);
+    const maxH = centW.limits.competitor_handles;
+    if (!entitlements.has(centW, "competitors") || !maxH) return res.status(402).json({ error: "Competitor comparison is part of Growth.", code: "UPGRADE_REQUIRED", required_tier: "growth_plan", status: 402 });
     const handles = Array.isArray(req.body.handles) ? req.body.handles : [];
-    if (!handles.length || handles.length > MAX_COMPETITORS) return sendError(res, 400, "INVALID_HANDLES", `Provide 1–${MAX_COMPETITORS} competitor handles`);
+    if (!handles.length) return sendError(res, 400, "INVALID_HANDLES", `Provide 1–${maxH} competitor handles`);
+    if (handles.length > maxH) { const d = entitlements.denial({ code: "LIMIT_REACHED", used: handles.length, limit: maxH, resets_at: Date.now(), upgrade: require("../growth_engine_plans").upgradeFor(centW.tier, "competitor_handles") }, "competitor handles"); events.track("limit_hit", { ...events.attribution(req), props: { key: "competitor_handles", used: handles.length, limit: maxH, tier: centW.tier } }); return res.status(429).json({ ...d.body, error: `That's ${handles.length} handles; ${centW.plan.name} compares up to ${maxH}${d.body.upgrade ? ` — Pro compares up to ${require("../growth_engine_plans").limitFor(d.body.upgrade, "competitor_handles")}` : ""}.` }); }
     // (8) Competitor pulls are metered per day; the 24h profile cache means
     // re-running the same set is free, so this only bites on churning handles.
     const climit = Number(process.env.COMPETITOR_PULLS_PER_DAY || 15);
@@ -684,7 +696,7 @@ router.post("/reports/:reportId/competitors", authMiddleware, async (req, res) =
     if (cused + handles.length > climit) return res.status(429).json({ error: `That's ${cused + handles.length} competitor pulls today; the limit is ${climit}. Try again tomorrow.`, code: "COMPETITOR_LIMIT_REACHED", status: 429 });
     await geDb.bumpUsage(req.user.id, "competitor", handles.length);
     const comparison = await costs.run({ accountId: req.user.id, reportId: report.reportId, feature: "competitors" }, () => compareCompetitors({
-      handle: report.business.handle, platform: report.business.platform, category: report.business.category, handles,
+      handle: report.business.handle, platform: report.business.platform, category: report.business.category, handles, max: maxH,
     }));
     // The owner's row should match the report they're looking at, not a re-pull.
     const own = report.reportBody?.scores;
@@ -723,6 +735,7 @@ router.post("/reports/:reportId/unlock", authMiddleware, async (req, res) => {
     // cases, and an explicit unlock from the owner's email covers the rest.
     if (report.accountId !== req.user.id && report.accountId !== "demo-account") return sendError(res, 403, "NOT_YOUR_REPORT", "This report belongs to another account");
     if (report.tier && report.tier !== "social_snapshot") return res.json({ already_unlocked: true, report_id: report.reportId });
+    if (!require("../growth_engine_plans").ONE_TIME_UNLOCK_ENABLED) return sendError(res, 404, "NOT_SOLD", "The one-time plan isn't on sale. Growth is $19/month, cancel any time.");
 
     let promo = null;
     if (req.body?.promo_code) {
@@ -816,13 +829,11 @@ router.post("/reports/:reportId/posts/regenerate", authMiddleware, async (req, r
     if (!report) return sendError(res, 404, "REPORT_NOT_FOUND", "Report not found");
     if (report.accountId !== req.user.id) return sendError(res, 403, "NOT_YOUR_REPORT", "This report belongs to another account");
     const body = report.reportBody || {};
-    if (!report.tier || report.tier === "social_snapshot") return res.status(402).json({ error: "Post writing is part of the Growth Plan.", code: "UPGRADE_REQUIRED", required_tier: "growth_plan", status: 402 });
     const index = Number(req.body?.index);
     if (!Array.isArray(body.next_posts) || !Number.isInteger(index) || index < 0 || index >= body.next_posts.length) return sendError(res, 400, "INVALID_INDEX", "index must point at an existing post");
-    const limit = Number(process.env.POST_REGENS_PER_DAY || 20);
-    const used = await geDb.getUsage(req.user.id, "post_regen");
-    if (used >= limit) return res.status(429).json({ error: `That's ${used} rewrites today; the limit is ${limit}. Try again tomorrow.`, code: "REGEN_LIMIT_REACHED", status: 429 });
-    await geDb.bumpUsage(req.user.id, "post_regen");
+    // Fair use (P.4): weekly rewrites per tier, friendly message with the reset date and the upgrade.
+    const gate = await entitlements.gate(res, req.user.id, "post_regens_per_week", "post rewrites"); if (!gate) return;
+    await entitlements.use(req.user.id, "post_regens_per_week");
     const { rewriteOnePost } = require("../growth_engine_evaluator");
     const post = await costs.run({ accountId: req.user.id, reportId: report.reportId, feature: "post_writing" }, () => rewriteOnePost(req.user.id, body, index));
     const next = [...body.next_posts]; next[index] = post;
@@ -956,6 +967,20 @@ router.get("/benchmarks/:category", async (req, res) => {
 router.get("/admin/state-of-creators", requireAdmin, async (_req, res) => {
   try { res.json(await require("../growth_engine_stats").nicheStats()); } catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
 });
+// Fair-use limit hits by key and tier (P.4) — are the numbers too tight?
+router.get("/admin/limits", requireAdmin, async (req, res) => {
+  try { const days = Math.min(365, Number(req.query.days) || 30); res.json({ days, limits: require("../growth_engine_plans").LIMITS, hits: await geDb.limitHitSummary(Date.now() - days * 86400000) }); } catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
+});
+// Price test report (P.7): per variant — visitors, subscribes, conversion, revenue per visitor, month-two retention.
+router.get("/admin/price-test", requireAdmin, async (req, res) => {
+  try {
+    const days = Math.min(365, Number(req.query.days) || 30);
+    const funnel = await geDb.variantFunnel(Date.now() - days * 86400000);
+    const ret = await geDb.paidRetention();
+    const out = Object.entries(funnel).map(([variant, f]) => ({ variant: variant || "control", pricing_viewed: f.pricing_viewed || 0, subscribe: f.subscribe || 0, conversion: f.pricing_viewed ? Math.round((f.subscribe / f.pricing_viewed) * 1000) / 10 : null, revenue_cents: Math.round(f.revenue_cents || 0), revenue_per_visitor_cents: f.pricing_viewed ? Math.round((f.revenue_cents || 0) / f.pricing_viewed) : null }));
+    res.json({ days, variants: require("../growth_engine_pricing").VARIANTS, founders_excluded: true, rows: out, month_two_retention: ret });
+  } catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
+});
 // Signups and paid accounts by marketing source (spec 5.4).
 router.get("/admin/sources", requireAdmin, async (_req, res) => {
   try {
@@ -987,7 +1012,7 @@ router.get("/levels", (_req, res) => {
 
 router.get("/billing/pricing", optionalAuth, async (req, res) => {
   try {
-    res.json(billingManager.getPricing(pricingAB.prices(await variantFor(req))));
+    res.json(await billingManager.getPricingAsync(pricingAB.prices(await variantFor(req))));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

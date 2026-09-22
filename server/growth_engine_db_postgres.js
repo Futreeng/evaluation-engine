@@ -140,6 +140,11 @@ async function initSchema() {
     await client.query(`ALTER TABLE entitlements ADD COLUMN IF NOT EXISTS pause_started_at BIGINT`);
     await client.query(`ALTER TABLE entitlements ADD COLUMN IF NOT EXISTS pause_ended_at BIGINT`);
     await client.query(`ALTER TABLE entitlements ADD COLUMN IF NOT EXISTS lapsed_at BIGINT`);
+    await client.query(`ALTER TABLE entitlements ADD COLUMN IF NOT EXISTS price_cents INTEGER`);
+    await client.query(`ALTER TABLE entitlements ADD COLUMN IF NOT EXISTS billing_cycle TEXT`);
+    await client.query(`ALTER TABLE entitlements ADD COLUMN IF NOT EXISTS founder BOOLEAN DEFAULT FALSE`);
+    await client.query(`ALTER TABLE entitlements ADD COLUMN IF NOT EXISTS pending_tier TEXT`);
+    await client.query(`ALTER TABLE entitlements ADD COLUMN IF NOT EXISTS pending_tier_at BIGINT`);
     await client.query(`
       CREATE TABLE IF NOT EXISTS growth_engine_cancel_reasons (
         id TEXT PRIMARY KEY, account_id TEXT NOT NULL, tier TEXT, action TEXT NOT NULL, reason_code TEXT, reason_text TEXT, created_at BIGINT NOT NULL
@@ -567,6 +572,7 @@ function entRow(row) {
         billingPeriodEnd: row.billing_period_end ? Number(row.billing_period_end) : null, billing_period_end: row.billing_period_end ? Number(row.billing_period_end) : null,
         stripeSubscriptionId: row.stripe_subscription_id || null,
         cancelAt: row.cancel_at ? Number(row.cancel_at) : null, cancel_at: row.cancel_at ? Number(row.cancel_at) : null,
+        priceCents: row.price_cents != null ? Number(row.price_cents) : null, billingCycle: row.billing_cycle || null, founder: !!row.founder, pendingTier: row.pending_tier || null, pendingTierAt: row.pending_tier_at ? Number(row.pending_tier_at) : null,
         pausedUntil: row.paused_until ? Number(row.paused_until) : null, pauseStartedAt: row.pause_started_at ? Number(row.pause_started_at) : null, pauseEndedAt: row.pause_ended_at ? Number(row.pause_ended_at) : null, lapsedAt: row.lapsed_at ? Number(row.lapsed_at) : null,
       }
     : null;
@@ -575,7 +581,12 @@ async function getEffectiveEntitlement(accountId) {
   const ent = await getOrCreateEntitlement(accountId);
   if (ent.cancelAt && ent.cancelAt <= Date.now() && ent.currentTier !== "social_snapshot") {
     await upgradeTier(accountId, "social_snapshot");
-    await q(`UPDATE entitlements SET cancel_at = NULL, lapsed_at = $1, updated_at = $2 WHERE user_id = $3`, [ent.cancelAt, Date.now(), accountId]);
+    await q(`UPDATE entitlements SET cancel_at = NULL, lapsed_at = $1, founder = FALSE, price_cents = NULL, updated_at = $2 WHERE user_id = $3`, [ent.cancelAt, Date.now(), accountId]);
+    return getEntitlement(accountId);
+  }
+  if (ent.pendingTier && ent.pendingTierAt && ent.pendingTierAt <= Date.now() && ent.currentTier !== ent.pendingTier) {
+    await upgradeTier(accountId, ent.pendingTier);
+    await q(`UPDATE entitlements SET pending_tier = NULL, pending_tier_at = NULL, price_cents = NULL, updated_at = $1 WHERE user_id = $2`, [Date.now(), accountId]);
     return getEntitlement(accountId);
   }
   if (ent.pausedUntil && ent.pausedUntil <= Date.now()) {
@@ -583,6 +594,31 @@ async function getEffectiveEntitlement(accountId) {
     return getEntitlement(accountId);
   }
   return ent;
+}
+async function setSubscriptionPrice(accountId, { priceCents, cycle, founder }) {
+  await getOrCreateEntitlement(accountId);
+  if (founder == null) await q(`UPDATE entitlements SET price_cents = $1, billing_cycle = $2, pending_tier = NULL, pending_tier_at = NULL, updated_at = $3 WHERE user_id = $4`, [priceCents ?? null, cycle || null, Date.now(), accountId]);
+  else await q(`UPDATE entitlements SET price_cents = $1, billing_cycle = $2, founder = $3, pending_tier = NULL, pending_tier_at = NULL, updated_at = $4 WHERE user_id = $5`, [priceCents ?? null, cycle || null, !!founder, Date.now(), accountId]);
+  return getEntitlement(accountId);
+}
+async function setPendingTier(accountId, tier, at) {
+  await getOrCreateEntitlement(accountId);
+  await q(`UPDATE entitlements SET pending_tier = $1, pending_tier_at = $2, updated_at = $3 WHERE user_id = $4`, [tier || null, at || null, Date.now(), accountId]);
+  return getEntitlement(accountId);
+}
+async function countFounders() { return Number((await q(`SELECT COUNT(*) AS n FROM entitlements WHERE founder = TRUE`)).rows[0]?.n || 0); }
+async function getUsageSince(accountId, kind, sinceTs) {
+  const day = new Date(sinceTs).toISOString().slice(0, 10);
+  return Number((await q(`SELECT COALESCE(SUM(count), 0) AS n FROM growth_engine_usage WHERE account_id = $1 AND kind = $2 AND day >= $3`, [accountId, kind, day])).rows[0]?.n || 0);
+}
+async function paidPlatformsFor(accountId) {
+  return (await q(`SELECT DISTINCT platform AS p FROM growth_engine_reports WHERE account_id = $1 AND tier <> 'social_snapshot' AND platform IS NOT NULL`, [accountId])).rows.map((r) => r.p);
+}
+async function limitHitSummary(sinceTs) {
+  const r = await q(`SELECT account_id, props FROM growth_engine_events WHERE name = 'limit_hit' AND created_at >= $1`, [sinceTs]);
+  const by = {};
+  for (const x of r.rows) { const p = parseJson(x.props) || {}; const k = `${p.key || "?"}|${p.tier || "?"}`; by[k] = by[k] || { key: p.key || null, tier: p.tier || null, hits: 0, accounts: new Set() }; by[k].hits++; if (x.account_id) by[k].accounts.add(x.account_id); }
+  return Object.values(by).map((v) => ({ key: v.key, tier: v.tier, hits: v.hits, accounts: v.accounts.size })).sort((a, b) => b.hits - a.hits);
 }
 async function setPause(accountId, until) {
   await getOrCreateEntitlement(accountId);
@@ -944,6 +980,12 @@ module.exports = {
   listRoastRejections,
   setGoal,
   setPause,
+  setSubscriptionPrice,
+  setPendingTier,
+  countFounders,
+  getUsageSince,
+  paidPlatformsFor,
+  limitHitSummary,
   insertCancelReason,
   listCancelReasons,
   listLapsedEntitlements,

@@ -112,8 +112,8 @@ class JobQueue {
       if (tier === "social_snapshot" || tier === "maintenance") {
         // Maintenance (spec 4.2): weekly score + history only, no plan.
         reportBody = await evaluator.evaluateTier0(accountId, inputParams, onStage);
-      } else if (tier === "growth_plan") {
-        reportBody = await evaluator.evaluateTier1(accountId, inputParams, onStage);
+      } else if (tier === "growth_plan" || tier === "growth_plan_pro") {
+        reportBody = await evaluator.evaluateTier1(accountId, inputParams, onStage, { tier });
       } else if (tier === "business_evaluator") {
         reportBody = await evaluator.evaluateTier2(accountId, inputParams);
       } else {

@@ -812,7 +812,7 @@ async function evaluateTier0(accountId, inputParams, onStage) {
   return reportBody;
 }
 
-async function evaluateTier1(accountId, inputParams, onStage = () => {}) {
+async function evaluateTier1(accountId, inputParams, onStage = () => {}, { tier: runTier = "growth_plan" } = {}) {
   // Tier 1: Growth Plan — the free snapshot plus every locked item, from the same data.
   const { reportBody, structured, postSummary, benchmarks, keys } = await runSnapshot(accountId, inputParams, onStage);
   await onStage("writing", 4);
@@ -938,8 +938,10 @@ async function evaluateTier1(accountId, inputParams, onStage = () => {}) {
   }
   planPhases = planPhases.map((ph) => ({ ...ph, range: normRange(ph.range), moves: Array.isArray(ph.moves) ? ph.moves : [] }));
 
-  reportBody.tier = "growth_plan";
-  reportBody.refresh_due_at = inputParams.one_time_unlock ? null : Date.now() + (reportBody.plan_incomplete ? 1 : 7) * 24 * 60 * 60 * 1000;
+  reportBody.tier = runTier;
+  // Rescore cadence by tier (P.1: Pro every 3 days) — plan config, not a constant.
+  const rescoreDays = require("./growth_engine_plans").limitFor(runTier, "rescore_days") || 7;
+  reportBody.refresh_due_at = inputParams.one_time_unlock ? null : Date.now() + (reportBody.plan_incomplete ? 1 : rescoreDays) * 24 * 60 * 60 * 1000;
   if (!reportBody.growth_path) reportBody.growth_path = { phases: [] };
   reportBody.growth_path.phases = reportBody.growth_path.phases.map((p, i) => {
     if (i >= PHASES_BOUGHT) {
@@ -966,7 +968,9 @@ async function evaluateTier1(accountId, inputParams, onStage = () => {}) {
   reportBody.plan_context = planContext;
   // Your next posts (spec 1.12): written now so the report arrives complete.
   reportBody.plan_started_at = reportBody.plan_started_at || Date.now();
-  reportBody.next_posts = await writeNextPosts(accountId, reportBody);
+  // Written posts per tier (P.4): 6 on Growth, 12 on Pro; counted toward the weekly allowance.
+  reportBody.next_posts = await writeNextPosts(accountId, reportBody, { count: require("./growth_engine_plans").limitFor(runTier, "written_posts_per_week") || Number(process.env.NEXT_POSTS_COUNT || 6) });
+  if (reportBody.next_posts?.length && accountId && accountId !== "demo-account") { try { await require("./growth_engine_db_select").bumpUsage(accountId, "written_posts", reportBody.next_posts.length); } catch { /* fine */ } }
   reportBody.upsell = { cta_label: "Upgrade to Business Evaluator", target_tier: "business_evaluator", unlock_count: 0 };
   return reportBody;
 }

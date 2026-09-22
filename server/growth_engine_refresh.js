@@ -104,10 +104,10 @@ async function sweep(jobQueue) {
       // Paused (spec 4.1): nothing runs; the due date moves past the pause.
       try { const ent = await geDb.getEffectiveEntitlement(r.accountId); if (ent?.pausedUntil && ent.pausedUntil > Date.now()) { await geDb.updateReportRefreshDue(r.reportId, ent.pausedUntil + 60 * 1000); skipped++; continue; } } catch { /* fine */ }
       const input = { handle: b.handle, platform: b.platform, category: b.category, email: r.reportBody?.email || null, scheduled: true, refresh_of: r.reportId, tz: r.reportBody?.tz || null };
-      const jobTier = tier === "maintenance" ? "maintenance" : "growth_plan";
+      const jobTier = tier === "maintenance" ? "maintenance" : (tier === "growth_plan_pro" || tier === "business_evaluator") ? "growth_plan_pro" : "growth_plan";
       const { jobId } = await geDb.createJob(r.accountId, jobTier, input);
       // Push the due date forward now so a slow job doesn't get picked up twice.
-      await geDb.updateReportRefreshDue(r.reportId, Date.now() + 7 * 24 * 60 * 60 * 1000);
+      await geDb.updateReportRefreshDue(r.reportId, Date.now() + (require("./growth_engine_plans").limitFor(tier, "rescore_days") || 7) * 24 * 60 * 60 * 1000);
       jobQueue.processJob(jobId, r.accountId, jobTier, input).catch((err) => console.error(`[Refresh] job ${jobId} failed:`, err.message));
       queued++;
     }

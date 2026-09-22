@@ -162,6 +162,10 @@ const assert = require("assert");
   assert.ok(Array.isArray(await db.listReportsSince(0)));
   await db.setUserUtm(u.userId, { source: "joe-site", campaign: "launch" });
   { const src = await db.sourceSummary(); assert.ok(src.some((x) => x.utm?.source === "joe-site")); }
+  { const e1 = await db.setSubscriptionPrice(u.userId, { priceCents: 1200, cycle: "monthly", founder: true }); assert.equal(e1.priceCents, 1200); assert.equal(e1.founder, true); assert.equal(await db.countFounders(), 1);
+    await db.bumpUsage(u.userId, "post_regen", 3); assert.equal(await db.getUsageSince(u.userId, "post_regen", Date.now() - 7 * 86400000), 3);
+    await db.setPendingTier(u.userId, "maintenance", Date.now() - 1000); const e2 = await db.getEffectiveEntitlement(u.userId); assert.equal(e2.currentTier, "maintenance"); assert.equal(e2.pendingTier, null);
+    assert.ok(Array.isArray(await db.paidPlatformsFor(u.userId))); assert.ok(Array.isArray(await db.limitHitSummary(0))); }
   await db.insertRoastRejection({ reportId: "r1", accountId: "a1", heat: "medium", reason: "blocklist", flagged: "[2]", text: "[]" });
   assert.equal((await db.listRoastRejections(5))[0].reason, "blocklist");
 

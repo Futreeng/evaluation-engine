@@ -170,6 +170,12 @@ function initSchema() {
   try { db.run(`ALTER TABLE entitlements ADD COLUMN pause_started_at INTEGER`); } catch { /* exists */ }
   try { db.run(`ALTER TABLE entitlements ADD COLUMN pause_ended_at INTEGER`); } catch { /* exists */ }
   try { db.run(`ALTER TABLE entitlements ADD COLUMN lapsed_at INTEGER`); } catch { /* exists */ }
+  // Pricing add-on: the price a subscriber locked in (P.2/P.3), founder flag, and a downgrade waiting for period end (P.5).
+  try { db.run(`ALTER TABLE entitlements ADD COLUMN price_cents INTEGER`); } catch { /* exists */ }
+  try { db.run(`ALTER TABLE entitlements ADD COLUMN billing_cycle TEXT`); } catch { /* exists */ }
+  try { db.run(`ALTER TABLE entitlements ADD COLUMN founder INTEGER DEFAULT 0`); } catch { /* exists */ }
+  try { db.run(`ALTER TABLE entitlements ADD COLUMN pending_tier TEXT`); } catch { /* exists */ }
+  try { db.run(`ALTER TABLE entitlements ADD COLUMN pending_tier_at INTEGER`); } catch { /* exists */ }
   // Exit answers from the cancel screen (spec 4.3).
   db.run(`
     CREATE TABLE IF NOT EXISTS growth_engine_cancel_reasons (
@@ -1285,6 +1291,11 @@ async function getEntitlement(accountId) {
     pauseStartedAt: columns.includes("pause_started_at") ? row[columns.indexOf("pause_started_at")] || null : null,
     pauseEndedAt: columns.includes("pause_ended_at") ? row[columns.indexOf("pause_ended_at")] || null : null,
     lapsedAt: columns.includes("lapsed_at") ? row[columns.indexOf("lapsed_at")] || null : null,
+    priceCents: columns.includes("price_cents") && row[columns.indexOf("price_cents")] != null ? Number(row[columns.indexOf("price_cents")]) : null,
+    billingCycle: columns.includes("billing_cycle") ? row[columns.indexOf("billing_cycle")] || null : null,
+    founder: columns.includes("founder") ? !!row[columns.indexOf("founder")] : false,
+    pendingTier: columns.includes("pending_tier") ? row[columns.indexOf("pending_tier")] || null : null,
+    pendingTierAt: columns.includes("pending_tier_at") ? row[columns.indexOf("pending_tier_at")] || null : null,
     createdAt: row[columns.indexOf("created_at")],
     updatedAt: row[columns.indexOf("updated_at")],
   };
@@ -1296,7 +1307,14 @@ async function getEffectiveEntitlement(accountId) {
   const ent = await getOrCreateEntitlement(accountId);
   if (ent.cancelAt && ent.cancelAt <= Date.now() && ent.currentTier !== "social_snapshot") {
     await upgradeTier(accountId, "social_snapshot");
-    db.run(`UPDATE entitlements SET cancel_at = NULL, lapsed_at = ?, updated_at = ? WHERE account_id = ?`, [ent.cancelAt, Date.now(), accountId]);
+    db.run(`UPDATE entitlements SET cancel_at = NULL, lapsed_at = ?, founder = 0, price_cents = NULL, updated_at = ? WHERE account_id = ?`, [ent.cancelAt, Date.now(), accountId]);
+    saveDb();
+    return getEntitlement(accountId);
+  }
+  // A downgrade scheduled for period end (P.5): apply it, keep the founder flag only if still on Growth.
+  if (ent.pendingTier && ent.pendingTierAt && ent.pendingTierAt <= Date.now() && ent.currentTier !== ent.pendingTier) {
+    await upgradeTier(accountId, ent.pendingTier);
+    db.run(`UPDATE entitlements SET pending_tier = NULL, pending_tier_at = NULL, price_cents = NULL, updated_at = ? WHERE account_id = ?`, [Date.now(), accountId]);
     saveDb();
     return getEntitlement(accountId);
   }
@@ -1314,6 +1332,40 @@ async function setCancelAt(accountId, cancelAt) {
   db.run(`UPDATE entitlements SET cancel_at = ?, updated_at = ? WHERE account_id = ?`, [cancelAt || null, Date.now(), accountId]);
   saveDb();
   return getEntitlement(accountId);
+}
+async function setSubscriptionPrice(accountId, { priceCents, cycle, founder }) {
+  if (!db) throw new Error("Database not initialized");
+  await getOrCreateEntitlement(accountId);
+  db.run(`UPDATE entitlements SET price_cents = ?, billing_cycle = ?, founder = CASE WHEN ? IS NULL THEN founder ELSE ? END, pending_tier = NULL, pending_tier_at = NULL, updated_at = ? WHERE account_id = ?`,
+    [priceCents ?? null, cycle || null, founder == null ? null : (founder ? 1 : 0), founder == null ? null : (founder ? 1 : 0), Date.now(), accountId]);
+  saveDb();
+  return getEntitlement(accountId);
+}
+async function setPendingTier(accountId, tier, at) {
+  if (!db) throw new Error("Database not initialized");
+  await getOrCreateEntitlement(accountId);
+  db.run(`UPDATE entitlements SET pending_tier = ?, pending_tier_at = ?, updated_at = ? WHERE account_id = ?`, [tier || null, at || null, Date.now(), accountId]);
+  saveDb();
+  return getEntitlement(accountId);
+}
+async function countFounders() {
+  if (!db) throw new Error("Database not initialized");
+  return Number(one(`SELECT COUNT(*) AS n FROM entitlements WHERE founder = 1`).n || 0);
+}
+// Usage summed over a window (weekly fair-use limits). Rows are per day (YYYY-MM-DD).
+async function getUsageSince(accountId, kind, sinceTs) {
+  if (!db) throw new Error("Database not initialized");
+  const day = new Date(sinceTs).toISOString().slice(0, 10);
+  return Number(one(`SELECT COALESCE(SUM(count), 0) AS n FROM growth_engine_usage WHERE account_id = ? AND kind = ? AND day >= ?`, [accountId, kind, day]).n || 0);
+}
+// Platforms an account holds paid reports on (Growth is one platform; Pro is all).
+async function paidPlatformsFor(accountId) {
+  if (!db) throw new Error("Database not initialized");
+  return rowsOf(`SELECT DISTINCT business_platform AS p FROM growth_engine_reports WHERE account_id = ? AND tier != 'social_snapshot' AND business_platform IS NOT NULL`, [accountId]).map((r) => r.p);
+}
+async function limitHitSummary(sinceTs) {
+  if (!db) throw new Error("Database not initialized");
+  return rowsOf(`SELECT json_extract(props, '$.key') AS key, json_extract(props, '$.tier') AS tier, COUNT(*) AS hits, COUNT(DISTINCT account_id) AS accounts FROM growth_engine_events WHERE name = 'limit_hit' AND created_at >= ? GROUP BY key, tier ORDER BY hits DESC`, [sinceTs]).map((r) => ({ ...r, hits: Number(r.hits), accounts: Number(r.accounts) }));
 }
 async function setPause(accountId, until) {
   if (!db) throw new Error("Database not initialized");
@@ -1640,6 +1692,12 @@ module.exports = {
   listRoastRejections,
   setGoal,
   setPause,
+  setSubscriptionPrice,
+  setPendingTier,
+  countFounders,
+  getUsageSince,
+  paidPlatformsFor,
+  limitHitSummary,
   insertCancelReason,
   listCancelReasons,
   listLapsedEntitlements,

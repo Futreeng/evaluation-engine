@@ -848,3 +848,15 @@ p { margin: 0; }
 .stance .it b { display: block; font-size: 15px; margin-bottom: 4px; } .stance .it p { margin: 0; font-size: 13px; color: var(--body); line-height: 1.5; }
 .darkform .formlead { font-weight: 700; font-size: 14px; margin-bottom: 10px; opacity: .9; }
 @media (max-width: 720px) { .stance { grid-template-columns: 1fr; } }
+
+/* ---- pricing add-on ---- */
+.tiers.three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.tiers.three .tier { margin: 0; }
+.founders-bar { margin: 14px 0 0; padding: 10px 14px; border-radius: 12px; background: #FBEED2; color: #6B5310; font-size: 14px; }
+.price .was { margin-left: 8px; font-size: 14px; color: var(--muted); text-decoration: line-through; }
+.tag.founder { margin-left: 6px; font-size: 10px; }
+.notice.limitnote { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+.procard .prohead { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; width: 100%; text-align: left; background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; }
+.procard .probody { margin-top: 12px; }
+@media (max-width: 860px) { .tiers.three { grid-template-columns: 1fr; } .procard:not(.open) .probody { display: none; } }
+@media (min-width: 861px) { .procard .caret { display: none; } .procard .prohead { cursor: default; } }

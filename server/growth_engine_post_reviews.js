@@ -102,7 +102,7 @@ async function writeReview(accountId, st) {
 }
 
 // Review the new posts on one report row. Returns the reviews written.
-async function reviewReport(report, { now = Date.now(), posts = null } = {}) {
+async function reviewReport(report, { now = Date.now(), posts = null, room = null } = {}) {
   const body = report.reportBody || {};
   const handle = body.business?.handle, platform = body.business?.platform || "instagram";
   const fresh = posts || await fetchPosts(handle, platform);
@@ -110,7 +110,7 @@ async function reviewReport(report, { now = Date.now(), posts = null } = {}) {
   const reviewed = new Set((body.post_reviews || []).map((r) => String(r.post_id)));
   const candidates = fresh.filter((p) => !known.has(String(p.id)) && !reviewed.has(String(p.id)) && !p.is_pinned)
     .filter((p) => { const age = now - Date.parse(p.posted_at); return age >= AGE_HOURS * H && age <= MAX_AGE_DAYS * DAY; })
-    .sort((a, b) => Date.parse(b.posted_at) - Date.parse(a.posted_at)).slice(0, PER_CHECK);
+    .sort((a, b) => Date.parse(b.posted_at) - Date.parse(a.posted_at)).slice(0, Math.max(0, Math.min(PER_CHECK, room ?? PER_CHECK)));
   const written = [];
   for (const post of candidates) {
     const st = statsFor(post, body);
@@ -118,7 +118,7 @@ async function reviewReport(report, { now = Date.now(), posts = null } = {}) {
     written.push({ post_id: post.id, posted_at: post.posted_at, type: post.type, caption: String(post.caption || "").slice(0, 140), permalink: post.permalink, metrics: { likes: post.likes, comments: post.comments, views: post.views, vs_avg: st.vs_avg, vs_same_format: st.vs_same_format }, review, reviewed_at: now });
   }
   const patch = { post_check_at: now };
-  if (written.length) patch.post_reviews = [...written, ...(body.post_reviews || [])].slice(0, KEEP);
+  if (written.length) { patch.post_reviews = [...written, ...(body.post_reviews || [])].slice(0, KEEP); if (report.accountId) { try { await require("./growth_engine_entitlements").use(report.accountId, "post_reviews_per_week", written.length); } catch { /* fine */ } } }
   await geDb.patchReportBody(report.reportId, patch);
   for (const w of written) {
     events.track("post_reviewed", { accountId: report.accountId, reportId: report.reportId, props: { post_id: w.post_id, vs_avg: w.metrics.vs_avg, source: w.review.source } });
@@ -140,9 +140,12 @@ async function checkPaidAccounts({ now = Date.now(), limit = Number(process.env.
     if (!r.accountId || r.accountId === "demo-account" || !b.business?.handle) continue;
     if (now - (b.post_check_at || r.generatedAt) < CHECK_HOURS * H) continue;
     if (b.one_time_unlock && (now - (b.plan_started_at || r.generatedAt)) / DAY > (b.plan_days || 60)) continue;
-    try { const ent = await (geDb.getEffectiveEntitlement || geDb.getOrCreateEntitlement)(r.accountId); const tier = ent?.currentTier || ent?.current_tier; if (!b.one_time_unlock && (!tier || tier === "social_snapshot" || tier === "maintenance")) continue; if (ent?.pausedUntil && ent.pausedUntil > now) continue; } catch { continue; }
+    const E = require("./growth_engine_entitlements");
+    try { const ent = await E.effective(r.accountId); if (!b.one_time_unlock && (!E.has(ent, "post_reviews") || ent.paused)) continue; } catch { continue; }
+    // Fair use (P.4): reviews per week by tier; the check is logged when it bites.
+    const lim = await E.checkLimit(r.accountId, "post_reviews_per_week", { now }); if (!lim.ok) { await geDb.patchReportBody(r.reportId, { post_check_at: now }).catch(() => { }); continue; }
     try {
-      const n = (await costs.run({ accountId: r.accountId, reportId: r.reportId, feature: "post_review" }, () => reviewReport(r, { now }))).length;
+      const n = (await costs.run({ accountId: r.accountId, reportId: r.reportId, feature: "post_review" }, () => reviewReport(r, { now, room: lim.limit != null ? lim.limit - lim.used : null }))).length;
       done++; if (n) console.log(`[PostReview] @${b.business.handle}: ${n} review${n === 1 ? "" : "s"}`);
     } catch (err) { console.warn(`[PostReview] @${b.business?.handle} failed:`, err.message); }
   }
