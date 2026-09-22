@@ -774,6 +774,21 @@ router.delete("/admin/account/:userId", requireAdmin, async (req, res) => {
   try { const user = await geDb.getUserById(req.params.userId); if (!user) return sendError(res, 404, "NOT_FOUND", "No such account"); console.log(`[Admin] ${req.admin.via} deleted ${user.email}`); res.json(await geDb.deleteAccount(user.userId)); }
   catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
 });
+// Baselines: export the seeded set from one database, import it into another
+// (local → Render) so a niche average doesn't cost a second Apify run.
+router.get("/admin/baselines/export", requireAdmin, async (req, res) => {
+  try { res.json({ exported_at: Date.now(), rows: await geDb.listBaselines() }); } catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
+});
+router.post("/admin/baselines/import", requireAdmin, async (req, res) => {
+  try {
+    const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+    if (!rows.length || rows.length > 5000) return sendError(res, 400, "INVALID", "rows[] required (max 5000)");
+    let n = 0;
+    for (const r of rows) { if (r && r.category && r.platform && r.handle && Number.isFinite(Number(r.overall))) { await geDb.recordBaseline({ category: String(r.category), platform: String(r.platform), handle: String(r.handle), overall: Number(r.overall), dimensions: Array.isArray(r.dimensions) ? r.dimensions : [] }); n++; } }
+    console.log(`[Admin] ${req.admin.via} imported ${n} baseline rows`);
+    res.json({ imported: n, summary: await geDb.getBaselineSummary() });
+  } catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
+});
 router.get("/admin/promos", requireAdmin, async (req, res) => {
   try { res.json({ promos: await geDb.listPromos() }); } catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
 });

@@ -9,3 +9,4 @@ reports/
 server/data/
 server.log
 .gstack/
+server/scripts/baselines.export.json
