@@ -17,6 +17,15 @@ const LEVELS = (() => {
   return rows.map((l, i) => ({ ...l, max: i + 1 < rows.length ? rows[i + 1].min - 1 : 100, rank: i + 1 }));
 })();
 
+// 2.4 personal records: the metric a "best post" is measured on.
+const RECORD_METRIC = process.env.RECORD_METRIC === "views" ? "views" : "engagement";
+// 2.3 streaks: freezes cover a missed week automatically.
+const STREAK = {
+  freeze_every_weeks: Number(process.env.STREAK_FREEZE_EVERY_WEEKS || 4),
+  max_freezes: Number(process.env.STREAK_MAX_FREEZES || 2),
+  start_freezes: Number(process.env.STREAK_START_FREEZES || 1),
+};
+
 const MILESTONES = {
   followers: Number(process.env.MILESTONE_FOLLOWERS || 1000),
   score: Number(process.env.MILESTONE_SCORE || 70),
@@ -55,6 +64,17 @@ function detectMoments(reportBody, prevBody) {
   if (Number.isFinite(score) && score >= MILESTONES.score && Number.isFinite(prevScore) && prevScore < MILESTONES.score) {
     push({ kind: "milestone", key: `score_${MILESTONES.score}`, title: `Score over ${MILESTONES.score}`, line: `${prevScore} → ${score} · into the ${levelFor(score)?.name || ""} band`, score });
   }
+  // 2.4 a new post beat the previous best on the main metric (within the posts we store).
+  const posts = Array.isArray(reportBody.posts) ? reportBody.posts : [];
+  const prevPosts = Array.isArray(prevBody?.posts) ? prevBody.posts : [];
+  if (posts.length && prevPosts.length) {
+    const prevBest = Math.max(...prevPosts.map(metricOf));
+    const since = prevBody.generated_at || 0;
+    const best = posts.filter((p) => !p.is_pinned && Date.parse(p.posted_at || 0) > since).sort((a, b) => metricOf(b) - metricOf(a))[0];
+    if (best && metricOf(best) > prevBest && prevBest > 0) {
+      push({ kind: "record", key: `record_${best.id}`, title: "New personal record", line: `${fmtN(metricOf(best))} ${RECORD_METRIC === "views" ? "views" : "likes + comments"} · beat your previous best of ${fmtN(prevBest)}`, score, post: { id: best.id, permalink: best.permalink || null, caption: String(best.caption || "").slice(0, 120), posted_at: best.posted_at, type: best.type } });
+    }
+  }
   const streak = reportBody.streak?.weeks;
   const prevStreak = prevBody?.streak?.weeks;
   if (Number.isFinite(streak) && streak >= MILESTONES.streak_weeks && (!Number.isFinite(prevStreak) || prevStreak < MILESTONES.streak_weeks)) {
@@ -63,6 +83,29 @@ function detectMoments(reportBody, prevBody) {
   return out;
 }
 
+function metricOf(p) { return RECORD_METRIC === "views" ? Number(p.views || 0) : Number(p.likes || 0) + Number(p.comments || 0); }
+function fmtN(n) { return Number(n || 0).toLocaleString("en-US"); }
+
+// 2.3 weekly streak, evaluated at the rescore. An on-plan week = posted on at
+// least the planned number of days in the last 7. Hidden until the first
+// on-plan week; a freeze covers a missed week automatically; no punishing
+// language anywhere — the object just says what happened.
+function computeStreak(reportBody, prevBody) {
+  const prev = prevBody?.streak || null;
+  const now = Date.now();
+  const planned = (reportBody.calendar?.posting_days || []).length || 3;
+  if (!prev) return { weeks: 0, best: 0, freezes: STREAK.start_freezes, planned_days: planned, posted_days: null, visible: false, evaluated_at: now, history: [] };
+  // Only one evaluation per week even if the account is rescored more often.
+  if (now - (prev.evaluated_at || 0) < 6 * 86400000) return { ...prev, planned_days: planned };
+  const days = new Set((reportBody.posts || []).filter((p) => { const t = Date.parse(p.posted_at || 0); return t > now - 7 * 86400000 && t <= now; }).map((p) => String(p.posted_at).slice(0, 10)));
+  const onPlan = days.size >= planned;
+  let weeks = prev.weeks || 0, freezes = prev.freezes ?? STREAK.start_freezes, status;
+  if (onPlan) { weeks += 1; status = "on_plan"; if (weeks % STREAK.freeze_every_weeks === 0) freezes = Math.min(STREAK.max_freezes, freezes + 1); }
+  else if (freezes > 0 && weeks > 0) { freezes -= 1; status = "frozen"; }
+  else { weeks = 0; status = "missed"; }
+  return { weeks, best: Math.max(prev.best || 0, weeks), freezes, planned_days: planned, posted_days: days.size, visible: !!prev.visible || onPlan, evaluated_at: now, last: status, history: [...(prev.history || []), { at: now, status, posted_days: days.size }].slice(-12) };
+}
+
 function fmtK(n) { return n >= 1000 ? `${Math.round(n / 100) / 10}k`.replace(".0k", "k") : String(n); }
 
-module.exports = { LEVELS, MILESTONES, levelFor, detectMoments };
+module.exports = { LEVELS, MILESTONES, STREAK, RECORD_METRIC, levelFor, detectMoments, computeStreak };

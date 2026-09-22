@@ -780,3 +780,6 @@ p { margin: 0; }
 @keyframes roastIn { to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .roast ol.lines li, .roast .fix { animation: none; opacity: 1; transform: none; } }
 @media (max-width: 560px) { .roast .heats { grid-template-columns: 1fr; } .roast ol.lines li { font-size: 19px; } }
+.scorebox .streak { display: inline-flex; align-items: baseline; gap: 6px; font-size: 12px; font-weight: 600; padding: 4px 9px; border-radius: 999px; background: var(--ground); color: var(--body); }
+.scorebox .streak.on { background: #FBEED2; color: #6B5310; }
+.scorebox .streak em { font-style: normal; font-weight: 500; color: var(--muted); }

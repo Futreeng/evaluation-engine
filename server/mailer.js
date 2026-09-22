@@ -93,7 +93,7 @@ function scoreChanged({ to, userId, handle, reportId, oldScore, newScore, dimens
 function moment({ to, userId, handle, reportId, moment: m }) {
   const url = reportUrl(reportId);
   const inner = h2(esc(m.title)) + p(esc(m.line))
-    + p(m.kind === "rank_up" ? `That's the score band for @${esc(handle)} moving up. The card is ready if you want to post it.` : `Milestone logged for @${esc(handle)}. Your plan keeps going — the next move is on the report.`)
+    + p(m.kind === "rank_up" ? `That's the score band for @${esc(handle)} moving up. The card is ready if you want to post it.` : m.kind === "record" ? `A post from this week beat everything we'd seen from @${esc(handle)} before${m.post?.caption ? ` — “${esc(m.post.caption.slice(0, 80))}”` : ""}. The card is ready if you want to post it.` : `Milestone logged for @${esc(handle)}. Your plan keeps going — the next move is on the report.`)
     + button(`${url}?moment=${encodeURIComponent(m.key)}`, "See the card");
   return send({ to, userId, subject: `@${handle}: ${m.title}`, html: layout(m.title, inner, { userId }), tag: "moment" });
 }

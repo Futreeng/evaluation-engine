@@ -194,12 +194,14 @@ class JobQueue {
                 if (prevReport?.reportBody?.moves_done && !reportBody.moves_done) reportBody.moves_done = prevReport.reportBody.moves_done;
                 if (prevReport?.reportBody?.moments_seen) reportBody.moments_seen = prevReport.reportBody.moments_seen;
               }
-              // Rank-ups and milestones (spec 2.2, 2.5): only when a rescore shows the change.
+              // Weekly streak (spec 2.3) — paid plans only; carried and evaluated at each rescore.
+              if (tier !== "social_snapshot") reportBody.streak = moments.computeStreak(reportBody, prevReport?.reportBody || null);
+              // Rank-ups, milestones, records (spec 2.2, 2.4, 2.5): only when a rescore shows the change.
               const found = moments.detectMoments(reportBody, prevReport?.reportBody || null);
               if (found.length) {
                 reportBody.moments = found;
                 reportBody.moments_seen = [...(reportBody.moments_seen || []), ...found.map((m) => ({ key: m.key, at: m.at }))];
-                for (const m of found) events.track(m.kind === "rank_up" ? "rank_up" : "milestone", { accountId, reportId: null, props: { key: m.key, handle: inputParams.handle } });
+                for (const m of found) events.track(m.kind === "rank_up" ? "rank_up" : m.kind === "record" ? "record" : "milestone", { accountId, reportId: null, props: { key: m.key, handle: inputParams.handle } });
               }
               const nudge = detectNudge(reportBody, prevReport, inputParams);
               if (nudge) { reportBody.nudge = nudge; reportBody.nudges_sent = [...(reportBody.nudges_sent || []), { key: nudge.key, phase: nudge.phase, at: Date.now() }]; }
@@ -264,6 +266,7 @@ class JobQueue {
 
       // Level is just a name for the score band — always attached (spec 2.2).
       if (reportBody.scores && Number.isFinite(reportBody.scores.overall)) reportBody.scores.level = moments.levelFor(reportBody.scores.overall);
+      if (tier !== "social_snapshot" && !reportBody.streak) reportBody.streak = moments.computeStreak(reportBody, null);
 
       // Emails: report ready on a fresh run; score changed on a weekly refresh.
       try {

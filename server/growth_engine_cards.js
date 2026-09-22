@@ -73,7 +73,7 @@ function drawMoment(ctx, W, H, d, size) {
   ctx.fillStyle = COLORS.bg; ctx.textBaseline = "top";
   const dsp = (px) => `700 ${px}px ${DISPLAY}`; const sans = (px, wt = 500) => `${wt} ${px}px ${SANS}`;
   ctx.font = sans(sq ? 34 : 40, 600); ctx.globalAlpha = 0.85;
-  ctx.fillText(`@${d.handle}  ·  ${d.kind === "rank_up" ? "RANK UP" : "MILESTONE"}`.toUpperCase(), P, P); ctx.globalAlpha = 1;
+  ctx.fillText(`@${d.handle}  ·  ${d.kind === "rank_up" ? "RANK UP" : d.kind === "record" ? "PERSONAL RECORD" : "MILESTONE"}`.toUpperCase(), P, P); ctx.globalAlpha = 1;
   let y = sq ? 250 : 560;
   // Title wraps by words to the card width.
   const tpx = sq ? 132 : 168; ctx.font = dsp(tpx);
