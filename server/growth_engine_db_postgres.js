@@ -148,6 +148,7 @@ async function initSchema() {
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_business BOOLEAN DEFAULT FALSE`);
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS goal TEXT`);
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS goal_target INTEGER`);
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS utm TEXT`);
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS niche TEXT`);
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS price_variant TEXT`);
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_prefs TEXT`);
@@ -521,6 +522,17 @@ async function getNicheBrief(category, platform, week) {
 async function upsertNicheBrief({ category, platform, week, n, body }) {
   await q(`DELETE FROM growth_engine_niche_briefs WHERE category = $1 AND platform = $2 AND week = $3`, [category, platform, week]);
   await q(`INSERT INTO growth_engine_niche_briefs (id, category, platform, week, n, body, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7)`, ["nb_" + uid(), category, platform, week, n || 0, JSON.stringify(body), Date.now()]);
+}
+async function listReportsSince(fromTs) {
+  const r = await q(`SELECT * FROM growth_engine_reports WHERE generated_at >= $1 ORDER BY generated_at DESC`, [fromTs]);
+  return r.rows.map(reportRow);
+}
+async function setUserUtm(userId, utm) {
+  await q(`UPDATE users SET utm = $1, updated_at = $2 WHERE user_id = $3 AND (utm IS NULL OR utm = '')`, [utm ? JSON.stringify(utm).slice(0, 600) : null, Date.now(), userId]);
+}
+async function sourceSummary() {
+  const r = await q(`SELECT u.utm, u.created_at, e.current_tier FROM users u LEFT JOIN entitlements e ON e.user_id = u.user_id WHERE u.utm IS NOT NULL AND u.utm <> ''`);
+  return r.rows.map((x) => ({ utm: parseJson(x.utm), created_at: Number(x.created_at), tier: x.current_tier || "social_snapshot" }));
 }
 async function listReportsDueForRefresh(beforeTimestamp) {
   const r = await q(`SELECT * FROM growth_engine_reports WHERE refresh_due_at IS NOT NULL AND refresh_due_at <= $1 ORDER BY refresh_due_at ASC`, [beforeTimestamp]);
@@ -937,6 +949,9 @@ module.exports = {
   listLapsedEntitlements,
   listReportsWithEmailSince,
   listReportsByCategorySince,
+  listReportsSince,
+  setUserUtm,
+  sourceSummary,
   getNicheBrief,
   upsertNicheBrief,
   setUserProfile,

@@ -23,16 +23,24 @@ let geDb = null;
 const db = () => (geDb ||= require("./growth_engine_db_select"));
 
 // Fire-and-forget. Never throws; a failed analytics write must not fail a request.
-function track(name, { accountId = null, anon = null, ref = null, reportId = null, props = null, ip = null } = {}) {
+function track(name, { accountId = null, anon = null, ref = null, reportId = null, props = null, ip = null, utm = null } = {}) {
   if (!EVENTS.includes(name)) { console.warn(`[Events] unknown event ${name}`); return; }
+  if (utm) props = { ...(props && typeof props === "object" ? props : {}), utm }; // marketing source rides on every attributed event
   const safe = props && typeof props === "object" ? JSON.stringify(props).slice(0, 2000) : null;
   db().insertEvent({ name, accountId: accountId || null, anon: anon ? String(anon).slice(0, 64) : null, ref: ref ? String(ref).slice(0, 32) : null, reportId: reportId || null, props: safe, ip: ip ? String(ip).slice(0, 64) : null })
     .catch((e) => console.warn("[Events] write failed:", e.message));
 }
 
 // Pull attribution out of an Express request (headers set by app.js).
+// x-utm: JSON {source, medium, campaign, content, term, src} captured by the
+// app on first visit (spec 5.4). Kept small and only known keys.
+const UTM_KEYS = ["source", "medium", "campaign", "content", "term", "src"];
+function utmFrom(req) {
+  try { const raw = req.get("x-utm"); if (!raw || raw.length > 600) return null; const o = JSON.parse(raw); const out = {}; for (const k of UTM_KEYS) if (typeof o[k] === "string" && o[k].trim()) out[k] = o[k].trim().slice(0, 80); return Object.keys(out).length ? out : null; } catch { return null; }
+}
 function attribution(req) {
-  return { accountId: req.user?.id || null, anon: req.get("x-anon-id") || null, ref: req.get("x-ref") || null, ip: req.ip || null };
+  const utm = utmFrom(req);
+  return { accountId: req.user?.id || null, anon: req.get("x-anon-id") || null, ref: req.get("x-ref") || null, ip: req.ip || null, utm };
 }
 
-module.exports = { EVENTS, FUNNEL, track, attribution };
+module.exports = { EVENTS, FUNNEL, track, attribution, utmFrom };

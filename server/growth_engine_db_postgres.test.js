@@ -159,6 +159,9 @@ const assert = require("assert");
   await db.insertCancelReason({ accountId: u.userId, tier: "growth_plan", action: "cancel", reasonCode: "price", reasonText: "too much" });
   assert.equal((await db.listCancelReasons(5))[0].reason_code, "price");
   assert.ok(Array.isArray(await db.listLapsedEntitlements(0, Date.now())));
+  assert.ok(Array.isArray(await db.listReportsSince(0)));
+  await db.setUserUtm(u.userId, { source: "joe-site", campaign: "launch" });
+  { const src = await db.sourceSummary(); assert.ok(src.some((x) => x.utm?.source === "joe-site")); }
   await db.insertRoastRejection({ reportId: "r1", accountId: "a1", heat: "medium", reason: "blocklist", flagged: "[2]", text: "[]" });
   assert.equal((await db.listRoastRejections(5))[0].reason, "blocklist");
 

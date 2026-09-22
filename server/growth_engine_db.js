@@ -190,6 +190,7 @@ function initSchema() {
   // Goal onboarding (spec 3.3): what they want, and a follower target when that's the goal.
   try { db.run(`ALTER TABLE users ADD COLUMN goal TEXT`); } catch { /* exists */ }
   try { db.run(`ALTER TABLE users ADD COLUMN goal_target INTEGER`); } catch { /* exists */ }
+  try { db.run(`ALTER TABLE users ADD COLUMN utm TEXT`); } catch { /* exists */ }
   try { db.run(`ALTER TABLE users ADD COLUMN price_variant TEXT`); } catch { /* exists */ }
   try { db.run(`ALTER TABLE users ADD COLUMN email_prefs TEXT`); } catch { /* exists */ }
   db.run(`
@@ -937,6 +938,29 @@ async function upsertNicheBrief({ category, platform, week, n, body }) {
   db.run(`INSERT INTO growth_engine_niche_briefs (id, category, platform, week, n, body, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, ["nb_" + uid(), category, platform, week, n || 0, JSON.stringify(body), Date.now()]);
   saveDb();
 }
+// Every report since a time (aggregate stats, spec 5.3/5.4) — bodies included, so keep the window sane.
+async function listReportsSince(fromTs) {
+  if (!db) throw new Error("Database not initialized");
+  const result = db.exec(`SELECT * FROM growth_engine_reports WHERE generated_at >= ? ORDER BY generated_at DESC`, [fromTs]);
+  if (!result || result.length === 0) return [];
+  const columns = result[0].columns;
+  return result[0].values.map((row) => ({
+    reportId: row[columns.indexOf("report_id")], accountId: row[columns.indexOf("account_id")], tier: row[columns.indexOf("tier")],
+    business: { handle: row[columns.indexOf("business_handle")], platform: row[columns.indexOf("business_platform")], category: row[columns.indexOf("business_category")] },
+    generatedAt: row[columns.indexOf("generated_at")], reportBody: JSON.parse(row[columns.indexOf("report_body")]),
+  }));
+}
+// Marketing attribution (spec 5.4): UTM/source captured on first visit, stamped at signup.
+async function setUserUtm(userId, utm) {
+  if (!db) throw new Error("Database not initialized");
+  db.run(`UPDATE users SET utm = ?, updated_at = ? WHERE user_id = ? AND (utm IS NULL OR utm = '')`, [utm ? JSON.stringify(utm).slice(0, 600) : null, Date.now(), userId]);
+  saveDb();
+}
+async function sourceSummary() {
+  if (!db) throw new Error("Database not initialized");
+  const rows = rowsOf(`SELECT u.utm, u.created_at, e.current_tier FROM users u LEFT JOIN entitlements e ON e.account_id = u.user_id WHERE u.utm IS NOT NULL AND u.utm != ''`, []);
+  return rows.map((r) => { let utm = null; try { utm = JSON.parse(r.utm); } catch { utm = null; } return { utm, created_at: Number(r.created_at), tier: r.current_tier || "social_snapshot" }; });
+}
 async function listReportsDueForRefresh(beforeTimestamp) {
   if (!db) throw new Error("Database not initialized");
 
@@ -1621,6 +1645,9 @@ module.exports = {
   listLapsedEntitlements,
   listReportsWithEmailSince,
   listReportsByCategorySince,
+  listReportsSince,
+  setUserUtm,
+  sourceSummary,
   getNicheBrief,
   upsertNicheBrief,
   setUserProfile,

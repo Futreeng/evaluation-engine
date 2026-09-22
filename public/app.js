@@ -73,6 +73,9 @@
   // code from the first ?ref= link seen (spec 1.8 formalises referrals).
   const anonId = () => { try { let a = localStorage.getItem('sc_anon'); if (!a) { a = 'anon_' + Math.random().toString(36).slice(2, 12) + Date.now().toString(36); localStorage.setItem('sc_anon', a); } return a; } catch { return null; } };
   (() => { try { const r = new URLSearchParams(location.search).get('ref') || new URLSearchParams(location.hash.split('?')[1] || '').get('ref'); if (r && !localStorage.getItem('sc_ref')) localStorage.setItem('sc_ref', r.trim().slice(0, 32)); } catch { } })();
+  // Marketing attribution (spec 5.4): utm_* and ?src= from the first visit, kept until signup.
+  (() => { try { if (localStorage.getItem('sc_utm')) return; const q = new URLSearchParams(location.search); const h = new URLSearchParams(location.hash.split('?')[1] || ''); const get = k => q.get(k) || h.get(k); const o = {}; for (const k of ['source', 'medium', 'campaign', 'content', 'term']) { const v = get('utm_' + k); if (v) o[k] = v.trim().slice(0, 80); } const src = get('src'); if (src) o.src = src.trim().slice(0, 80); if (Object.keys(o).length) localStorage.setItem('sc_utm', JSON.stringify(o)); } catch { } })();
+  const utmHeader = () => { try { const v = localStorage.getItem('sc_utm'); return v && v.length < 600 ? v : null; } catch { return null; } };
   const refCode = () => { try { return localStorage.getItem('sc_ref') || ''; } catch { return ''; } };
   // Fire-and-forget event; never blocks the UI.
   function track(name, props, reportId) { try { api('/events', { method: 'POST', body: JSON.stringify({ name, props: props || undefined, report_id: reportId || undefined }) }, { allow401: true }).catch(() => { }); } catch { } }
@@ -146,6 +149,7 @@
     const t = token(); if (t) headers.Authorization = 'Bearer ' + t;
     const a = anonId(); if (a) headers['x-anon-id'] = a;
     const r = refCode(); if (r) headers['x-ref'] = r;
+    const u = utmHeader(); if (u) headers['x-utm'] = u;
     const doFetch = CFG.useMock && window.scalecraftMockFetch ? window.scalecraftMockFetch : fetch;
     const res = await doFetch(url, { ...init, headers });
     let body = null; try { body = await res.json(); } catch { }
@@ -1415,6 +1419,7 @@
     try { [ov, reports, failed, funnel, costs] = await Promise.all([api('/admin/overview'), api('/admin/reports?limit=50'), api('/admin/failed-jobs?limit=30'), api('/admin/funnel?days=30').catch(() => null), api('/admin/costs?days=30').catch(() => null)]); }
     catch (e) {
     const roastRej = await api('/admin/roast-rejections?limit=30').then(r => r.rejections || []).catch(() => []);
+    const sources = await api('/admin/sources').then(r => r.sources || []).catch(() => []);
       if (e.status === 401) return;
       if (e.status === 403 || e.status === 404) { lset('sc_admin', false); $view.innerHTML = h`<div class="center-msg"><h2>This account isn't an admin.</h2>Add your email to <code>ADMIN_EMAILS</code> on the server, then sign in again.</div>`; return; }
       $view.innerHTML = h`<div class="center-msg"><h2>Couldn't load admin.</h2>${e.message}</div>`; return;
@@ -1498,6 +1503,9 @@
         <div class="alist">${raw(reports.reports.map(reportRow).join('') || '<div class="fine">None yet.</div>')}</div>
       </section>
 
+      <section class="card"><h2>Sources <span class="fine">signups and paid accounts by marketing source (utm / src)</span></h2>
+        ${sources.length ? raw(h`<div class="tbl"><table><thead><tr><th>Source</th><th>Campaign</th><th>Signups</th><th>Paid</th></tr></thead><tbody>${raw(sources.map(r => h`<tr><td>${r.source}</td><td>${r.campaign || '—'}</td><td>${r.signups}</td><td>${r.paid}</td></tr>`).join(''))}</tbody></table></div>`) : raw('<p class="fine">No tagged signups yet. Links from the marketing site carry utm_* or ?src= — see docs/MARKETING_SITE.md.</p>')}
+      </section>
       <section class="card"><h2>Rejected roasts <span class="fine">failed a guardrail · for review</span></h2>
         ${roastRej.length ? raw(h`<div class="tbl"><table><thead><tr><th>When</th><th>Report</th><th>Heat</th><th>Reason</th><th>Flagged</th><th>Lines</th></tr></thead><tbody>${raw(roastRej.map(r => h`<tr><td>${fmtShort(r.created_at)}</td><td class="mono">${(r.report_id || '').slice(0, 12)}</td><td>${r.heat || ''}</td><td>${r.reason}</td><td>${r.flagged || ''}</td><td class="wrap">${(() => { try { return JSON.parse(r.text || '[]').map(l => l.text || l).join(' · ').slice(0, 300); } catch { return String(r.text || '').slice(0, 300); } })()}</td></tr>`).join(''))}</tbody></table></div>`) : raw('<p class="fine">None yet.</p>')}
       </section>

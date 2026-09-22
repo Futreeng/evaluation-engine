@@ -119,7 +119,9 @@ router.post("/auth/signup", authLimiter, validateAuthRequest, async (req, res) =
     const profile = { isBusiness: req.body.is_business === true || req.body.is_business === "yes", niche: typeof req.body.niche === "string" ? req.body.niche.slice(0, 40) : undefined, priceVariant: pricingAB.assign(req.get("x-anon-id") || req.ip || "") };
     const result = await signup(email, password, company_name, profile);
     const newId = result?.user?.user_id || null;
-    events.track("signup", { ...events.attribution(req), accountId: newId, props: { has_company: !!company_name } });
+    const utm = events.utmFrom(req);
+    events.track("signup", { ...events.attribution(req), accountId: newId, props: { has_company: !!company_name, ...(utm ? { utm } : {}) } });
+    if (newId && utm) geDb.setUserUtm(newId, utm).catch(() => { });
     // Referral attribution (spec 1.8): the ref code stored on first visit → the referrer's account.
     const refCode = String(req.get("x-ref") || "").toLowerCase();
     if (newId && refCode) { try { const referrer = await geDb.getUserByRefCode(refCode); if (referrer) { await geDb.recordReferralSignup({ refCode, referrerId: referrer.userId, referredId: newId }); events.track("referral_signup", { ...events.attribution(req), accountId: newId, props: { referrer: referrer.userId } }); } } catch (e) { console.warn("[Referral] signup attribution failed:", e.message); } }
@@ -941,6 +943,29 @@ router.get("/baselines/:category", async (req, res) => {
 });
 
 // Get pricing
+// Public benchmark per niche for the marketing site (spec 5.4): aggregates only,
+// only niches at BASELINE_MIN_N. Read-only, cached an hour.
+router.get("/benchmarks/:category", async (req, res) => {
+  try {
+    const category = String(req.params.category || "").slice(0, 60), platform = String(req.query.platform || "instagram").slice(0, 20);
+    res.set({ "cache-control": "public, max-age=3600", "access-control-allow-origin": "*" });
+    res.json(await require("../growth_engine_stats").benchmark(category, platform));
+  } catch (err) { sendError(res, 500, "BENCHMARK_ERROR", err.message); }
+});
+// State of Small Creators (spec 5.3): the admin export the report template fills from.
+router.get("/admin/state-of-creators", requireAdmin, async (_req, res) => {
+  try { res.json(await require("../growth_engine_stats").nicheStats()); } catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
+});
+// Signups and paid accounts by marketing source (spec 5.4).
+router.get("/admin/sources", requireAdmin, async (_req, res) => {
+  try {
+    const rows = await geDb.sourceSummary();
+    const by = {};
+    for (const r of rows) { const k = r.utm?.src || r.utm?.source || "unknown"; const c = r.utm?.campaign || ""; const key = c ? `${k} · ${c}` : k; by[key] = by[key] || { source: k, campaign: c || null, signups: 0, paid: 0 }; by[key].signups++; if (r.tier && r.tier !== "social_snapshot") by[key].paid++; }
+    res.json({ sources: Object.values(by).sort((a, b) => b.signups - a.signups) });
+  } catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
+});
+
 // Weekly trend brief (spec 3.4): anonymised aggregate for a niche, public.
 router.get("/briefs/:category", async (req, res) => {
   try {
