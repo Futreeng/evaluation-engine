@@ -507,7 +507,7 @@
     ctx.fillStyle = cs.getPropertyValue('--ground').trim() || '#FBF4EA'; ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = cs.getPropertyValue('--act').trim() || '#D5673B'; ctx.textBaseline = 'top';
     const sq = size === 'square';
-    ctx.font = `600 ${sq ? 34 : 40}px Inter, system-ui, sans-serif`; ctx.fillText(`@${s.handle} · ${m.kind === 'rank_up' ? 'RANK UP' : 'MILESTONE'}`.toUpperCase(), P, P);
+    ctx.font = `600 ${sq ? 34 : 40}px Inter, system-ui, sans-serif`; ctx.fillText(`@${s.handle} · ${m.kind === 'rank_up' ? 'RANK UP' : m.kind === 'roast' ? 'ROASTED · ' + (m.heat_label || '') : 'MILESTONE'}`.toUpperCase(), P, P);
     let y = sq ? 250 : 560; const tpx = sq ? 132 : 168; ctx.font = `700 ${tpx}px Inter, system-ui, sans-serif`;
     let line = ''; for (const w of String(m.title).split(' ')) { const t = line ? line + ' ' + w : w; if (ctx.measureText(t).width > W - P * 2 && line) { ctx.fillText(line, P - 6, y); y += tpx * 1.02; line = w; } else line = t; }
     if (line) { ctx.fillText(line, P - 6, y); y += tpx * 1.02; }
@@ -523,7 +523,7 @@
     el.innerHTML = h`<div class="panel" role="dialog" aria-label="Share your score"><div class="grab"></div>
       <div class="row">
         <div class="preview"><canvas id="shareCanvas"></canvas></div>
-        <div class="opts"><h3>${moment ? moment.title : 'Post your score'}</h3>
+        <div class="opts"><h3>${moment ? (moment.kind === 'roast' ? 'Post the roast' : moment.title) : 'Post your score'}</h3>
           <div class="sizes"><button type="button" class="pill dark" data-size="story">Story 1080×1920</button><button type="button" class="pill" data-size="square">Square</button></div>
           ${!moment && prev != null && prev !== s.overall ? raw(h`<label class="check"><input type="checkbox" id="thenNow" checked> Show ${prev} → ${s.overall}</label>`) : ''}
           <button type="button" class="btn" data-share="post">Post your score</button>
@@ -540,7 +540,7 @@
     const thenNowOn = () => { const tn = el.querySelector('#thenNow'); return !!(tn && tn.checked); };
     const makeShare = async () => {
       if (CFG.useMock || isSample) return null;
-      try { return await api('/reports/' + encodeURIComponent(report.report_id) + '/share', { method: 'POST', body: JSON.stringify(moment ? { kind: 'moment', moment_key: moment.key } : { kind: 'score', then_now: thenNowOn() }) }, { allow401: true }); } catch (e) { console.warn('[share] card unavailable:', e && e.message); return null; }
+      try { return await api('/reports/' + encodeURIComponent(report.report_id) + '/share', { method: 'POST', body: JSON.stringify(moment ? (moment.kind === 'roast' ? { kind: 'roast' } : { kind: 'moment', moment_key: moment.key }) : { kind: 'score', then_now: thenNowOn() }) }, { allow401: true }); } catch (e) { console.warn('[share] card unavailable:', e && e.message); return null; }
     };
     const redraw = async () => {
       if (moment) drawMomentCard(canvas, s, size, moment); else drawShareCard(canvas, s, size, thenNowOn() ? { prev, span: report.history?.previous?.generated_at ? 'since ' + fmtShort(report.history.previous.generated_at) : 'in six weeks' } : {});
@@ -559,7 +559,7 @@
     });
     el.querySelector('[data-share=post]').addEventListener('click', async () => {
       const blob = await toBlob(); const file = new File([blob], `scalecraft-${s.handle}.png`, { type: 'image/png' });
-      if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file], text: moment ? `${moment.title} — ${moment.line} on Scalecraft` : `My account scored ${s.overall}/100 on Scalecraft`, url: share ? share.url : undefined }); return; } catch { } }
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file], text: moment ? (moment.kind === 'roast' ? `I got roasted by Scalecraft: “${moment.title}”` : `${moment.title} — ${moment.line} on Scalecraft`) : `My account scored ${s.overall}/100 on Scalecraft`, url: share ? share.url : undefined }); return; } catch { } }
       el.querySelector('[data-share=save]').click(); toast('Saved — post it from your camera roll.');
     });
     el.querySelector('[data-share=copy]').addEventListener('click', async () => {
@@ -709,13 +709,14 @@
         ${isSample ? raw(h`<div class="samplebar"><b>Sample report.</b> A real Growth Plan for a real account, scored ${fmtDate(report.created_at)}. Yours is written from your own posts. <a href="#/" data-scroll="evalForm">Score my account →</a></div>`) : ''}
         <div class="rhead">
           <div class="l"><span class="h">@${biz.handle || ''}</span><span class="ctx">${platName(biz.platform)} · ${niche} · ${fmtDate(report.created_at)}</span>${paid ? raw(h`<span class="tag dark">${once ? '60-DAY PLAN' : 'GROWTH PLAN'}</span>`) : ''}</div>
-          <div class="r">${isSample ? '' : raw(h`<button class="btn ghost sm" data-action="email-report">Email me this report</button>`)}<button class="btn dark sm" data-action="share">${isSample ? 'Share this sample' : 'Share my score'}</button></div>
+          <div class="r">${isSample ? '' : raw(h`<button class="btn ghost sm" data-action="email-report">Email me this report</button>`)}${isSample || !CFG.roast ? '' : raw(h`<button class="btn sm roastbtn" data-action="roast">${report.roast ? 'See my roast' : 'Roast me'} 🔥</button>`)}<button class="btn dark sm" data-action="share">${isSample ? 'Share this sample' : 'Share my score'}</button></div>
         </div>
         ${paid ? raw(h`<div class="ctxrow">${ctx ? raw(contextChips(ctx) + (ctx.notes ? h`<span class="chip note">“${ctx.notes}”</span>` : '')) : raw(h`<span class="chip empty">Written without your answers</span>`)}${isSample ? '' : once ? '' : raw(h`<a class="edit" href="#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=edit">${ctx ? 'Plans changed? Update' : 'Tell us about your next 90 days'} →</a>`)}</div>`)
         : raw(h`<div class="ctxrow free">${ctx && ctx.horizon ? raw(h`<span class="chip">${ctxLabel('horizon', ctx.horizon)}</span><span class="ex">Your three first moves were written around this. The Growth Plan asks four more — time, goal, how you make content — so every move and calendar slot fits.</span>`) : raw(h`<span class="chip empty">Written as business as usual</span><span class="ex">The Growth Plan asks four short questions — your next 90 days, time, goal, how you make content — so every move and calendar slot fits your life.</span>`)}</div>`)}
         ${duePhase ? raw(h`<div class="checkin"><div class="t"><div class="eb">DAY ${Math.round(ageDays)} · CHECK-IN</div><h3>Phase ${duePhase} starts. Anything change?</h3><p>The next 30 days were written when you started. If your time, goal or next few weeks changed, the plan is rewritten tonight.</p></div><div class="acts"><button class="btn green" data-checkin="${duePhase}" data-changed="0">Nothing changed</button><a class="btn ghost" href="#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=checkin&phase=${duePhase}">Something changed</a></div></div>`) : ''}
         ${nudge ? raw(h`<div class="checkin nudge" id="nudge"><div class="t"><div class="eb">FROM THIS WEEK'S RE-SCORE</div><h3>${nudge.title}</h3><p>${nudge.text}</p></div><div class="acts"><button class="btn" data-nudge="${nudge.key}" data-changed="1">${nudge.cta}</button><button class="btn ghost" data-nudge="${nudge.key}" data-changed="0">Keep the plan as is</button></div></div>`) : ''}
         ${raw(momentsToShow.map(m => h`<div class="moment ${m.kind}" data-moment="${m.key}"><div class="t"><div class="eb">${m.kind === 'rank_up' ? 'RANK UP' : 'MILESTONE'} · FROM THIS RE-SCORE</div><h3>${m.title}</h3><p>${m.line}</p></div><div class="acts"><button class="btn dark" data-moment-share="${m.key}">Share the card</button><button class="btn ghost" data-moment-dismiss="${m.key}">Later</button></div></div>`).join(''))}
+        <div class="roastwrap" id="roastWrap" hidden></div>
         <div class="report">
           <div class="toprow">
             <div class="card scorebox">
@@ -851,6 +852,44 @@
     $view.querySelector('[data-action=share]').addEventListener('click', () => { if (!isSample) track('share_clicked', { overall }, report.report_id); openShareSheet(report); });
     $view.querySelectorAll('[data-moment-share]').forEach(b => b.addEventListener('click', () => { const m = (report.moments || []).find(x => x.key === b.dataset.momentShare); if (m) openShareSheet(report, m); }));
     $view.querySelectorAll('[data-moment-dismiss]').forEach(b => b.addEventListener('click', () => { try { localStorage.setItem('sc_moment_' + report.report_id + '_' + b.dataset.momentDismiss, '1'); } catch { } b.closest('.moment')?.remove(); }));
+    // Roast mode (spec 2.1): opt-in, heat first, then a line-by-line reveal.
+    const roastWrap = $view.querySelector('#roastWrap');
+    if (roastWrap) {
+      let heat = (report.roast && report.roast.heat) || 'medium'; let timers = [];
+      const HEATS = [['mild', 'Mild', 'A friend with a dig'], ['medium', 'Medium', 'A tight five on your feed'], ['extra_crispy', 'Extra Crispy', 'No survivors (content only)']];
+      const reroastOpen = r => !r || !r.reroast_after || Date.now() >= r.reroast_after;
+      const show = html => { timers.forEach(clearTimeout); timers = []; roastWrap.hidden = false; roastWrap.innerHTML = html; roastWrap.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+      const pick = () => show(h`<div class="roast pick"><div class="eb">ROAST MODE · OPT-IN</div><h3>How hot?</h3><p>Same facts as the report, told with no mercy. It roasts what you post — never who you are.</p>
+        <div class="heats">${raw(HEATS.map(([k, l, d]) => h`<button type="button" class="heat ${k === heat ? 'on' : ''}" data-heat="${k}"><b>${l}</b><span>${d}</span></button>`).join(''))}</div>
+        <div class="acts"><button class="btn dark" data-roast="go">Roast me</button><button class="btn ghost" data-roast="close">Never mind</button></div><p class="fine">Tip: screen-record the reveal.</p></div>`);
+      const reveal = (r, instant = false) => {
+        const lines = r.lines || [];
+        show(h`<div class="roast reveal"><div class="eb">ROASTED · ${r.heat_label || ''}${r.previous ? raw(h` · THEN ${r.previous.overall} → NOW ${r.overall}`) : ''}</div><ol class="lines">${raw(lines.map((l, i) => h`<li style="animation-delay:${instant ? 0 : i * 1.1}s">${l.text}</li>`).join(''))}</ol>
+          <div class="fix" style="animation-delay:${instant ? 0 : lines.length * 1.1 + 0.4}s"><h3>${r.closer || "Okay, here's how we fix it"}</h3>${r.first_move ? raw(h`<p class="a">${r.first_move.action}</p><p class="w">${r.first_move.why}</p>`) : ''}
+          <div class="acts"><button class="btn dark" data-roast="share">Share the roast</button><button class="btn ghost" data-roast="close">Back to the report</button>${reroastOpen(r) ? raw(h`<button class="btn ghost" data-roast="again">Roast me again</button>`) : raw(h`<span class="fine">Roast me again opens ${fmtDate(r.reroast_after)}</span>`)}</div></div></div>`);
+      };
+      const unavailable = why => show(h`<div class="roast off"><div class="eb">ROAST MODE</div><h3>${why === 'minor' ? 'No roast for this account.' : why === 'safety' ? "The roast didn't pass our check." : 'The roast is unavailable right now.'}</h3><p>${why === 'minor' ? "The bio reads as under 18, so it's the normal report only." : why === 'safety' ? 'Every roast is screened for jokes about the person instead of the content. This one failed twice, so you get the normal report.' : 'Try again in a few minutes — the report is still all yours.'}</p><div class="acts"><button class="btn ghost" data-roast="close">Back to the report</button></div></div>`);
+      const run = async (reroast = false) => {
+        show(h`<div class="roast loading"><div class="eb">ROAST MODE · ${(HEATS.find(x => x[0] === heat) || [])[1] || ''}</div><h3>Reading your posts…</h3><p>Every line has to lean on something you actually posted.</p></div>`);
+        try {
+          const res = await api('/reports/' + encodeURIComponent(report.report_id) + '/roast', { method: 'POST', body: JSON.stringify({ heat, reroast }) }, { allow401: true });
+          if (res.unavailable) return unavailable(res.unavailable);
+          report.roast = res.roast; sset('sc_report_' + report.report_id, report);
+          const b = $view.querySelector('[data-action=roast]'); if (b) b.textContent = 'See my roast 🔥';
+          reveal(res.roast);
+        } catch (e) { if (e.status === 429) toast(e.message); else toast('Roast unavailable: ' + e.message); roastWrap.hidden = true; }
+      };
+      roastWrap.addEventListener('click', e => {
+        const hb = e.target.closest('[data-heat]'); if (hb) { heat = hb.dataset.heat; roastWrap.querySelectorAll('[data-heat]').forEach(x => x.classList.toggle('on', x === hb)); return; }
+        const a = e.target.closest('[data-roast]'); if (!a) return;
+        if (a.dataset.roast === 'go') run(false);
+        else if (a.dataset.roast === 'again') { heat = report.roast?.heat || heat; pick(); }
+        else if (a.dataset.roast === 'close') { timers.forEach(clearTimeout); roastWrap.hidden = true; roastWrap.innerHTML = ''; }
+        else if (a.dataset.roast === 'share') { const r = report.roast; if (r) openShareSheet(report, { kind: 'roast', key: 'roast', title: r.lines?.[0]?.text || '', line: r.lines?.[1]?.text || '', score: r.overall, at: r.generated_at, heat_label: r.heat_label }); }
+      });
+      $view.querySelector('[data-action=roast]')?.addEventListener('click', () => { if (report.roast) reveal(report.roast); else pick(); });
+      if (new URLSearchParams(location.hash.split('?')[1] || '').get('roast') === '1') { if (report.roast) reveal(report.roast); else pick(); }
+    }
     // Both paid paths go through the 60-second intake first.
     $view.querySelector('[data-action=unlock]')?.addEventListener('click', () => { sset('sc_intent_tier', 'growth_plan'); sset('sc_form', { handle: biz.handle, platform: biz.platform, category: biz.category, email: sget('sc_form', {}).email || report.email || '' }); go(`#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=subscribe`); });
     $view.querySelector('[data-action=unlock-once]')?.addEventListener('click', () => { sset('sc_once_price', oneTime); go(`#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=once`); });
@@ -1281,6 +1320,7 @@
     let funnel = null, costs = null;
     try { [ov, reports, failed, funnel, costs] = await Promise.all([api('/admin/overview'), api('/admin/reports?limit=50'), api('/admin/failed-jobs?limit=30'), api('/admin/funnel?days=30').catch(() => null), api('/admin/costs?days=30').catch(() => null)]); }
     catch (e) {
+    const roastRej = await api('/admin/roast-rejections?limit=30').then(r => r.rejections || []).catch(() => []);
       if (e.status === 401) return;
       if (e.status === 403 || e.status === 404) { lset('sc_admin', false); $view.innerHTML = h`<div class="center-msg"><h2>This account isn't an admin.</h2>Add your email to <code>ADMIN_EMAILS</code> on the server, then sign in again.</div>`; return; }
       $view.innerHTML = h`<div class="center-msg"><h2>Couldn't load admin.</h2>${e.message}</div>`; return;
@@ -1364,6 +1404,9 @@
         <div class="alist">${raw(reports.reports.map(reportRow).join('') || '<div class="fine">None yet.</div>')}</div>
       </section>
 
+      <section class="card"><h2>Rejected roasts <span class="fine">failed a guardrail · for review</span></h2>
+        ${roastRej.length ? raw(h`<div class="tbl"><table><thead><tr><th>When</th><th>Report</th><th>Heat</th><th>Reason</th><th>Flagged</th><th>Lines</th></tr></thead><tbody>${raw(roastRej.map(r => h`<tr><td>${fmtShort(r.created_at)}</td><td class="mono">${(r.report_id || '').slice(0, 12)}</td><td>${r.heat || ''}</td><td>${r.reason}</td><td>${r.flagged || ''}</td><td class="wrap">${(() => { try { return JSON.parse(r.text || '[]').map(l => l.text || l).join(' · ').slice(0, 300); } catch { return String(r.text || '').slice(0, 300); } })()}</td></tr>`).join(''))}</tbody></table></div>`) : raw('<p class="fine">None yet.</p>')}
+      </section>
       <section class="card"><h2>Failed jobs <span class="fine">last 24h and older</span></h2>
         <div class="alist">${raw(failed.jobs.map(j => h`<div class="arow fail"><span>${fmtDate(j.created_at)}</span><span class="h">@${j.handle || '—'}</span><span class="t">${platName(j.platform)} · ${tierName(j.tier)} · ${j.stage || ''}</span><span class="e">${j.email || ''}</span><span class="err">${j.error || ''}</span></div>`).join('') || '<div class="fine">No failures.</div>')}</div>
       </section>

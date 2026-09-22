@@ -34,6 +34,8 @@
     // Platforms the backend's validateEvaluationRequest accepts today.
     // Others still render in the form but are marked "soon" and can't be submitted.
     supportedPlatforms: ['instagram', 'tiktok'],
+    // Roast mode (spec 2.1) — the button on every report. Server has its own ROAST_ENABLED.
+    roast: true,
     // Mock-only knobs
     mock: {
       queuedMs: 3000,        // time spent "queued" before running

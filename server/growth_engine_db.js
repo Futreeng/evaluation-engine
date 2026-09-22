@@ -187,6 +187,20 @@ function initSchema() {
     )
   `);
 
+  // Roasts that failed a guardrail (spec 2.1) — kept for review.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS growth_engine_roast_rejections (
+      id TEXT PRIMARY KEY,
+      report_id TEXT,
+      account_id TEXT,
+      heat TEXT,
+      reason TEXT NOT NULL,
+      flagged TEXT,
+      text TEXT,
+      created_at INTEGER NOT NULL
+    )
+  `);
+
   // Password reset tokens: sha256 of the emailed token, single use, 1h.
   db.run(`
     CREATE TABLE IF NOT EXISTS growth_engine_password_resets (
@@ -1384,6 +1398,16 @@ async function insertEmailLog(e) {
     ["em_" + uid(), e.userId || null, e.to, e.type, (e.subject || "").slice(0, 200), e.status, e.provider || null, e.providerId || null, e.error ? String(e.error).slice(0, 300) : null, Date.now()]);
   saveDb();
 }
+async function insertRoastRejection(r) {
+  if (!db) throw new Error("Database not initialized");
+  db.run(`INSERT INTO growth_engine_roast_rejections (id, report_id, account_id, heat, reason, flagged, text, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ["rr_" + uid(), r.reportId || null, r.accountId || null, r.heat || null, r.reason, r.flagged || null, r.text || null, Date.now()]);
+  saveDb();
+}
+async function listRoastRejections(limit = 100) {
+  if (!db) throw new Error("Database not initialized");
+  return rowsOf(`SELECT * FROM growth_engine_roast_rejections ORDER BY created_at DESC LIMIT ?`, [limit]).map((r) => ({ ...r, created_at: Number(r.created_at) }));
+}
 async function listEmailLog(limit = 100) {
   if (!db) throw new Error("Database not initialized");
   return rowsOf(`SELECT * FROM growth_engine_email_log ORDER BY created_at DESC LIMIT ?`, [limit]).map((r) => ({ ...r, created_at: Number(r.created_at) }));
@@ -1477,6 +1501,8 @@ module.exports = {
   setEmailPrefs,
   insertEmailLog,
   listEmailLog,
+  insertRoastRejection,
+  listRoastRejections,
   setUserProfile,
   listBusinessAccounts,
 };

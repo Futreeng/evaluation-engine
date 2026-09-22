@@ -647,6 +647,10 @@ router.post("/reports/:reportId/share", optionalAuth, async (req, res) => {
       if (!m) return sendError(res, 404, "NO_MOMENT", "That moment isn't on this report");
       data = cards.momentDataFrom(report.reportBody || {}, m);
       events.track("moment_shared", { ...events.attribution(req), reportId: report.reportId, props: { key: m.key } });
+    } else if (kind === "roast") {
+      if (!report.reportBody?.roast?.lines?.length) return sendError(res, 404, "NO_ROAST", "This report hasn't been roasted");
+      data = cards.roastDataFrom(report.reportBody);
+      events.track("roast_shared", { ...events.attribution(req), reportId: report.reportId, props: { heat: data.heat_label } });
     } else data = cards.scoreDataFrom(report.reportBody || {}, { thenNow: !!req.body?.then_now });
     if (!Number.isFinite(data.overall)) return sendError(res, 400, "NO_SCORE", "This report has no score to share");
     const ref = req.user?.id ? await geDb.ensureRefCode(req.user.id).catch(() => null) : null;
@@ -655,6 +659,35 @@ router.post("/reports/:reportId/share", optionalAuth, async (req, res) => {
     events.track("share_clicked", { ...events.attribution(req), reportId: report.reportId, props: { kind, share_id: share.shareId } });
     res.json({ share_id: share.shareId, url: `${base}/s/${share.shareId}`, png: { story: `${base}/cards/${share.shareId}.png?size=story`, square: `${base}/cards/${share.shareId}.png?size=square` } });
   } catch (err) { sendError(res, 500, "SHARE_ERROR", err.message); }
+});
+
+// Roast my account (spec 2.1): opt-in, free for everyone, only on your own
+// report (free reports are anonymous — the unguessable id is the ownership).
+const roastLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: Number(process.env.ROASTS_PER_IP_PER_HOUR || 6), standardHeaders: true, legacyHeaders: false, message: { error: "That's a lot of roasts from one connection. Try again in an hour.", code: "IP_LIMIT_REACHED", status: 429 } });
+router.post("/reports/:reportId/roast", roastLimiter, optionalAuth, async (req, res) => {
+  try {
+    const roastSvc = require("../growth_engine_roast");
+    if (!roastSvc.ENABLED) return sendError(res, 404, "ROAST_OFF", "Roast mode is off");
+    const report = await geDb.getReport(req.params.reportId);
+    if (!report) return sendError(res, 404, "REPORT_NOT_FOUND", "Report not found");
+    const anon = !report.accountId || report.accountId === "demo-account";
+    if (!anon && report.accountId !== req.user?.id) return sendError(res, req.user ? 403 : 401, "NOT_YOUR_REPORT", "Only the account that was scored can be roasted");
+    const body = report.reportBody || {};
+    const heat = String(req.body?.heat || "medium");
+    if (body.roast && !roastSvc.canReroast(body.roast) && body.roast.heat === heat) return res.json({ roast: body.roast, cached: true });
+    if (body.roast && !roastSvc.canReroast(body.roast) && req.body?.reroast) return res.status(429).json({ error: `Roast me again opens ${roastSvc.REROAST_DAYS} days after the last one.`, code: "REROAST_TOO_SOON", status: 429, reroast_after: body.roast.reroast_after });
+    events.track("roast_opened", { ...events.attribution(req), reportId: report.reportId, props: { heat } });
+    const accountId = anon ? null : report.accountId;
+    const out = await costs.run({ accountId, reportId: report.reportId, feature: "roast" }, () => roastSvc.roast(accountId, report, heat));
+    if (out.unavailable) return res.json({ unavailable: out.unavailable });
+    // Keep the old one so a re-roast can compare then and now.
+    const history = [...(body.roast_history || []), ...(body.roast ? [{ generated_at: body.roast.generated_at, overall: body.roast.overall, heat: body.roast.heat }] : [])].slice(-6);
+    await geDb.patchReportBody(report.reportId, { roast: out.roast, roast_history: history });
+    res.json({ roast: out.roast });
+  } catch (err) { sendError(res, 500, "ROAST_ERROR", err.message); }
+});
+router.get("/admin/roast-rejections", requireAdmin, async (req, res) => {
+  try { res.json({ rejections: await geDb.listRoastRejections(Math.min(500, Number(req.query.limit) || 100)) }); } catch (err) { sendError(res, 500, "ADMIN_ERROR", err.message); }
 });
 
 // Your next posts (spec 1.12): rewrite one post. Paid reports only; metered.

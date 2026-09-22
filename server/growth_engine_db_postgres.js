@@ -156,6 +156,10 @@ async function initSchema() {
         provider TEXT, provider_id TEXT, error TEXT, created_at BIGINT NOT NULL
       )`);
     await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_roast_rejections (
+        id TEXT PRIMARY KEY, report_id TEXT, account_id TEXT, heat TEXT, reason TEXT NOT NULL, flagged TEXT, text TEXT, created_at BIGINT NOT NULL
+      )`);
+    await client.query(`
       CREATE TABLE IF NOT EXISTS growth_engine_password_resets (
         token_hash TEXT PRIMARY KEY,
         user_id TEXT NOT NULL,
@@ -309,6 +313,11 @@ async function insertEmailLog(e) {
   await q(`INSERT INTO growth_engine_email_log (id, user_id, to_email, type, subject, status, provider, provider_id, error, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
     ["em_" + uid(), e.userId || null, e.to, e.type, (e.subject || "").slice(0, 200), e.status, e.provider || null, e.providerId || null, e.error ? String(e.error).slice(0, 300) : null, Date.now()]);
 }
+async function insertRoastRejection(r) {
+  await q(`INSERT INTO growth_engine_roast_rejections (id, report_id, account_id, heat, reason, flagged, text, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    ["rr_" + uid(), r.reportId || null, r.accountId || null, r.heat || null, r.reason, r.flagged || null, r.text || null, Date.now()]);
+}
+async function listRoastRejections(limit = 100) { return (await q(`SELECT * FROM growth_engine_roast_rejections ORDER BY created_at DESC LIMIT $1`, [limit])).rows.map((r) => ({ ...r, created_at: Number(r.created_at) })); }
 async function listEmailLog(limit = 100) { return (await q(`SELECT * FROM growth_engine_email_log ORDER BY created_at DESC LIMIT $1`, [limit])).rows.map((r) => ({ ...r, created_at: Number(r.created_at) })); }
 async function setEmailPaused(userId, paused) {
   await q(`UPDATE users SET email_paused = $1, updated_at = $2 WHERE user_id = $3`, [!!paused, Date.now(), userId]);
@@ -866,6 +875,8 @@ module.exports = {
   setEmailPrefs,
   insertEmailLog,
   listEmailLog,
+  insertRoastRejection,
+  listRoastRejections,
   setUserProfile,
   listBusinessAccounts,
   // Jobs

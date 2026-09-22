@@ -755,3 +755,28 @@ p { margin: 0; }
 .moment .acts { display: flex; gap: 8px; flex-wrap: wrap; }
 .moment .btn.dark { background: #fff; color: var(--act); border-color: #fff; }
 .moment .btn.ghost { color: #fff; border-color: rgba(255,255,255,.55); }
+
+/* ---- roast mode (spec 2.1) ---- */
+.roastbtn { background: #2A2118; color: #FFD9C2; border-color: #2A2118; }
+.roastwrap { margin: 0 0 14px; }
+.roast { padding: 22px 22px 18px; border-radius: 18px; background: #2A2118; color: #FFF6E9; }
+.roast .eb { font-size: 11px; font-weight: 700; letter-spacing: .1em; color: #F2A470; margin-bottom: 8px; }
+.roast h3 { margin: 0 0 6px; font-size: 24px; line-height: 1.15; }
+.roast p { margin: 0 0 12px; font-size: 14px; opacity: .85; max-width: 60ch; }
+.roast .fine { font-size: 12px; opacity: .6; margin: 10px 0 0; }
+.roast .heats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 12px 0 14px; }
+.roast .heat { text-align: left; padding: 12px 14px; border-radius: 12px; border: 1.5px solid rgba(255,246,233,.25); background: transparent; color: inherit; cursor: pointer; font: inherit; }
+.roast .heat b { display: block; font-size: 15px; } .roast .heat span { font-size: 12px; opacity: .7; }
+.roast .heat.on { border-color: #F2A470; background: rgba(242,164,112,.12); }
+.roast .acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+.roast .btn.dark { background: #F2A470; color: #2A2118; border-color: #F2A470; }
+.roast .btn.ghost { color: #FFF6E9; border-color: rgba(255,246,233,.4); }
+.roast ol.lines { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 12px; counter-reset: rl; }
+.roast ol.lines li { font-family: var(--display, inherit); font-size: 22px; line-height: 1.25; font-weight: 700; opacity: 0; transform: translateY(8px); animation: roastIn .5s ease forwards; counter-increment: rl; padding-left: 40px; position: relative; max-width: 30ch; }
+.roast ol.lines li::before { content: counter(rl, decimal-leading-zero); position: absolute; left: 0; top: .35em; font-size: 12px; letter-spacing: .08em; color: #F2A470; font-family: inherit; }
+.roast .fix { margin-top: 22px; padding-top: 18px; border-top: 1px solid rgba(255,246,233,.18); opacity: 0; animation: roastIn .5s ease forwards; }
+.roast .fix h3, .roast.reveal .fix h3 { color: #FFF6E9; }
+.roast .fix .a { font-weight: 600; opacity: 1; font-size: 16px; } .roast .fix .w { font-size: 14px; }
+@keyframes roastIn { to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .roast ol.lines li, .roast .fix { animation: none; opacity: 1; transform: none; } }
+@media (max-width: 560px) { .roast .heats { grid-template-columns: 1fr; } .roast ol.lines li { font-size: 19px; } }

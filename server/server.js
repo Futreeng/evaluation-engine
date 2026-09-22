@@ -139,7 +139,7 @@ app.get("/s/:id", async (req, res) => {
     require("./growth_engine_events").track("share_page_visited", { anon: req.get("x-anon-id") || null, ref: share.ref || null, reportId: share.reportId, ip: req.ip, props: { share_id: share.shareId, kind: share.kind } });
     const base = (process.env.APP_URL || `${req.protocol}://${req.get("host")}`).replace(/\/$/, "");
     const d = share.data; const cta = `${base}/${share.ref ? `?ref=${encodeURIComponent(share.ref)}` : ""}`;
-    const title = share.kind === "moment" ? `@${d.handle}: ${d.title} on Scalecraft` : `@${d.handle} scored ${d.overall}/100 on Scalecraft`;
+    const title = share.kind === "moment" ? `@${d.handle}: ${d.title} on Scalecraft` : share.kind === "roast" ? `@${d.handle} got roasted (${d.heat_label}) on Scalecraft` : `@${d.handle} scored ${d.overall}/100 on Scalecraft`;
     res.type("html").send(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title)}</title><meta name="description" content="Scalecraft scores a public social account 0–100 and writes the plan. Score yours free.">
 <meta property="og:type" content="website"><meta property="og:title" content="${esc(title)}"><meta property="og:description" content="Score yours at ${esc(base.replace(/^https?:\/\//, ""))} — free, about a minute."><meta property="og:image" content="${base}/cards/${share.shareId}.png?size=square"><meta property="og:image:width" content="1080"><meta property="og:image:height" content="1080"><meta property="og:url" content="${base}/s/${share.shareId}">

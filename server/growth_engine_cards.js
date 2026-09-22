@@ -90,7 +90,28 @@ function drawMoment(ctx, W, H, d, size) {
   ctx.fillText(`${fmtDate(d.date)}  ·  Score yours at ${SITE}`, P, sq ? H - 62 : H - P - 30); ctx.globalAlpha = 1;
 }
 
-const KINDS = { score: drawScore, moment: drawMoment };
+// Roast card (spec 2.1): the two best lines, the score, "Get roasted at".
+function drawRoast(ctx, W, H, d, size) {
+  const P = 84, sq = size === "square";
+  ctx.fillStyle = COLORS.ink; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = COLORS.bg; ctx.textBaseline = "top";
+  const dsp = (px) => `700 ${px}px ${DISPLAY}`; const sans = (px, wt = 500) => `${wt} ${px}px ${SANS}`;
+  ctx.font = sans(sq ? 34 : 40, 600); ctx.globalAlpha = 0.85;
+  ctx.fillText(`@${d.handle}  ·  ROASTED  ·  ${String(d.heat_label || "").toUpperCase()}`, P, P); ctx.globalAlpha = 1;
+  const wrap = (text, px, y, lh) => { ctx.font = dsp(px); let line = ""; for (const w of String(text).split(" ")) { const t = line ? `${line} ${w}` : w; if (ctx.measureText(t).width > W - P * 2 && line) { ctx.fillText(line, P, y); y += px * lh; line = w; } else line = t; } if (line) { ctx.fillText(line, P, y); y += px * lh; } return y; };
+  let y = sq ? 190 : 330;
+  const px = sq ? 58 : 76;
+  for (const l of (d.lines || []).slice(0, 2)) { y = wrap(`“${l}”`, px, y, 1.12); y += sq ? 34 : 60; }
+  y += sq ? 10 : 40;
+  if (Number.isFinite(d.overall)) {
+    ctx.font = dsp(sq ? 150 : 240); ctx.fillText(String(d.overall), P - 8, y);
+    ctx.font = sans(sq ? 32 : 40, 600); ctx.globalAlpha = 0.85; ctx.fillText("MY SCALECRAFT SCORE", P + (sq ? 220 : 340), y + (sq ? 100 : 160)); ctx.globalAlpha = 1;
+  }
+  ctx.font = sans(sq ? 28 : 34, 500); ctx.globalAlpha = 0.85;
+  ctx.fillText(`Get roasted at ${SITE}`, P, sq ? H - 62 : H - P - 30); ctx.globalAlpha = 1;
+}
+
+const KINDS = { score: drawScore, moment: drawMoment, roast: drawRoast };
 const cache = new Map(); const CACHE_MAX = 200;
 function render(kind, data, size = "story", cacheKey = null) {
   fonts();
@@ -118,4 +139,8 @@ function scoreDataFrom(reportBody, { thenNow = false } = {}) {
 function momentDataFrom(reportBody, m) {
   return { handle: reportBody.business?.handle, platform: reportBody.business?.platform, niche: reportBody.business?.category, date: m.at || reportBody.generated_at || Date.now(), kind: m.kind, key: m.key, title: m.title, line: m.line, overall: Number.isFinite(m.score) ? m.score : reportBody.scores?.overall };
 }
-module.exports = { render, scoreDataFrom, momentDataFrom, KINDS: Object.keys(KINDS) };
+function roastDataFrom(reportBody) {
+  const r = reportBody.roast || {};
+  return { handle: reportBody.business?.handle, niche: reportBody.business?.category, date: r.generated_at || Date.now(), heat_label: r.heat_label, lines: (r.lines || []).slice(0, 2).map((l) => l.text), overall: Number.isFinite(r.overall) ? r.overall : reportBody.scores?.overall };
+}
+module.exports = { render, scoreDataFrom, momentDataFrom, roastDataFrom, KINDS: Object.keys(KINDS) };
