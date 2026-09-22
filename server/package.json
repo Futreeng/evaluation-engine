@@ -31,6 +31,7 @@
     "qs": "6.16.0"
   },
   "devDependencies": {
+    "axe-core": "^4.13.0",
     "pg-mem": "^3.0.14"
   }
 }
