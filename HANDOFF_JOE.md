@@ -1,61 +1,57 @@
-# Scalecraft — handoff to Joe (updated 2026-09-21)
+# Scalecraft — handoff to Joe (updated 2026-09-22)
 
 ## Where the code is
 
-- **`main`** — has PR #1, PR #2 and the whole `redesign/field-guide` branch (you hand-merged it; PR #3 is still open, just close it). Plus your own tidy-ups (Twitter/X removed, `API_KEYS_SETUP.md`, root `package.json`).
-- **`feat/sample-report`** — 21 commits on top of `main`, pushed, **no PR yet**. Everything in the "Built since" list below is here. Branch from `main` → review → merge. Nothing on it conflicts with `main`.
+- **`main`** — everything through PR #4 (sample report, intake, check-ins, 60-day plan, cancel/reset, mailer, admin, promo codes). Render (`scalecraft.onrender.com`) runs this.
+- **PR #5 `feat/baselines-import`** — small: baseline export/import, Instagram seed list, and the **Stripe placeholder guard** (a `sk_test_…_KEY` placeholder no longer switches billing to live mode and 500s). Render still has that placeholder, so unlock/subscribe 500 there until this lands or the var is unset.
+- **PR #6 `feat/next-build`** — the whole build spec, Waves 1–5, stacked on #5 (77 commits, 82 files). Merge #5 first (or just merge #6 — it contains #5). Every feature was built and verified locally against the real backend plus the mock; the pg-mem test covers both DB modules; `scripts/smoke.js` and `scripts/shape_diff.js` are the regression checks.
+- PR #3 (`redesign/field-guide`) is long since hand-merged — close it.
 
-**Render** (`scalecraft.onrender.com`) is up on `main` with Postgres and all four LLM keys — nice. That means none of this branch is in prod yet: no sample page, intake, check-ins, cancel, reset, mailer, admin or promo codes, and the one-time still reads "Unlock this report" instead of "60-day plan". Merging this branch is the highest-value thing on the board. After merge, add the new env vars (`ADMIN_EMAILS`, `SUPPORT_EMAIL`, `FOUNDERS_PROMO_CODE`, `RESEND_API_KEY`/`MAIL_FROM`/`APP_URL`) and run `scripts/smoke.js` against Render with a throwaway handle.
+Demo (mock data, no backend): `scalecraft-demo.vercel.app`, deployed with `scripts/deploy_demo.sh` — same `public/` as prod, mock switched on by hostname.
 
-QA on 2026-09-21 (`.gstack/qa-reports/`, local): every user flow passes end to end; 4 issues found and fixed (blank locked-move rows, review placeholders live on pricing, Gemini 503 storms stalling runs 12+ min → circuit breaker, phone-width overflow).
+## What's on PR #6 (spec numbering)
 
-## Built since the last handoff (all on `feat/sample-report`)
+**Wave 1 — go live and core.** 1.1 `?mock=1` dev switch + mock/real shape parity (`shape_diff.js`) · 1.2 cost tracking per report/feature + admin cost vs revenue · 1.3 30-post scrape with per-post fields · 1.4 evidence thumbnails on every claim, LLM explanations validated against the inputs · 1.5 free-limit loophole closed (per email + per IP) · 1.6 Resend mailer with prefs, CAN-SPAM footer, log · 1.7 card engine (score / then-vs-now) + public share page · 1.8 referral codes + attribution · 1.9 signup questions (business flag, niche) · 1.10 best time to post · 1.11 weekly rescore loop with history chart + niche percentile · 1.12 post writing (6 posts per paid report, regenerate one) · 1.13 funnel events + admin funnel · 1.14 price A/B variants · 1.15 move outcomes data.
 
-**Product**
-1. **Public sample report** — `#/report/sample`, a real Growth Plan for `@talon__wilson` (Haron's account, so no consent issue), competitor `@blackmenhikela` (also ours). Data ships in `public/sample-report.js`; regenerate with `node server/scripts/export_sample_report.js <report_id>`. Landing score card and pricing link to it.
-2. **Moves carry the how** — every move (and each phase's Move 01) has 3–5 platform-specific steps, a paste-ready example in the creator's own voice, a "done when" check and a time cost. Plan Writer is now three parallel per-phase LLM calls instead of one (a flaky call loses a phase, not the plan; can't truncate). Rows expand on tap.
-3. **Intake** — four taps + optional line at `#/plan-setup`, asked between "start the plan" and payment: next 90 days · hours/week · goal · how they make content, plus link (sell/bookings) or brand contact (deals). Saved per account+handle in `growth_engine_plan_context`; turned into hard rules for the snapshot openers and the Plan Writer. Every calendar slot is tagged `new` / `archive` / `no_camera`. Free form asks just the first question (optional); free report explains the paid plan asks four more.
-4. **Check-ins** — day 30 and 60: card on the report + email. "Nothing changed" is one tap; "Something changed" opens the prefilled intake and rewrites the plan (`POST /reports/:id/checkin`). Weekly refresh **nudges** when answers stop matching behaviour (said fewer shoots, posting 6+/fortnight; said 5–10 hrs, silent two weeks), once per phase, one tap to accept.
-5. **One-time unlock = 60-day plan** ($15): phases 1–2, 8 weeks; phase 3 visible with locked rows; "Not in your 60-day plan" strip; day-60 email. Copy says "60-day plan" before the money. One-time buyers get no check-ins/refresh by design.
-6. **Cancel at period end** — `POST /billing/cancel` / `resume`; `cancel_at` on entitlements, `geDb.getEffectiveEntitlement()` applies the downgrade lazily so every reader agrees. "Your plan" card on `#/reports`, one confirm, optional reason (logged only). When you wire real Stripe subscriptions, the same path calls `subscriptions.update({cancel_at_period_end})`.
-7. **Password reset** — `POST /auth/forgot` (same reply whether the email exists, 5/email/hour) → emailed 32-byte token (sha256 stored, 1h, single use) → `POST /auth/reset` sets password and signs in. `#/forgot`, `#/reset?token=`.
+**Wave 2.** 2.1 Roast (opt-in, three heats, blocklist + second-model review, rejections logged, under-18 skip, re-roast at 30 days) · 2.2 Levels · 2.3 Weekly streak with freezes · 2.4 Personal records · 2.5 Milestone cards · 2.6 Monday move email with signed one-tap "Mark done".
 
-**Infrastructure**
-8. **Mailer** — `server/mailer.js`, Resend via REST, no SDK. Emails: report ready, check-in, score changed (+nudge), plan ended, password reset. Without `RESEND_API_KEY` every send is a log line (and the reset link is printed for local testing). Scheduled sends (day 28/58/60) run from the refresh sweeper.
-9. **Email pause** — signed one-click "Pause these emails" link in every scheduled email (no login), toggle on the plan card. Report-ready and reset still send. `email_paused` on users.
-10. **Auth rate limit** — your `authLimiter` existed but was never mounted. Now on login/signup/forgot/reset: 20 per IP per 15 min.
-11. **Admin token** — `ADMIN_TOKEN` env, header `x-admin-token`; `/admin/*` 404s when unset.
-12. **Support address** — `SUPPORT_EMAIL` env → footer Contact, refund line, legal page, email footers. Hidden until set.
-13. **JWT fix** — a token kept working after account deletion; `authMiddleware` now checks the account exists.
-14. **Smoke test** — `node server/scripts/smoke.js` against a running server: 20 checks (signup → free score → unlock → check-in → subscribe → cancel → resume → pause → reset → delete), ~3 min, 20/20 green. Free score is one per handle, so run the server with `FREE_SNAPSHOTS_PER_EMAIL=unlimited` and the script with `SMOKE_FREE_UNLIMITED=1`. **Run it before merging anything that touches routes, billing, the queue or the DB modules.**
-15. **Seed script** — `server/scripts/seed_baselines.js --file seeds.json [--dry]` fetches + scores without the LLM. Instagram ≈ $0.003/handle, TikTok ≈ $0.06. Not run yet (Haron's call on spend).
+**Wave 3.** 3.1 48-hour post review (paid; profile re-read every 60h, review vs own average, rules fallback when the model is out) · 3.2 own trend first · 3.3 goal onboarding + progress bar (goal feeds the plan prompt) · 3.4 weekly niche brief from our own data (deterministic, gated, cached per week) + trending-audio proposal in `docs/`.
 
-16. **Admin** — `ADMIN_EMAILS` gives signed-in accounts an Admin link and `/admin/*`; `#/admin` shows today's usage vs caps, spend, people/subscribers/cancels, account lookup (resend / comp 30 days / delete), recent reports, failed jobs, promo codes.
-17. **Promo codes** — `growth_engine_promo_codes` + redemptions. Kinds: free months, % off, $ off, free 60-day plan; max uses, one per account, expiry, on/off. Entered on pricing or the intake, or via `/?promo=CODE` links. `FOUNDERS_PROMO_CODE` is handed out by the founders band. Admin UI + `scripts/promo.js`. With real Stripe, set `stripe_coupon_id` on a code and pass it as the coupon in `_createStripeSubscription` (the `promo` arg is already plumbed) so tax/invoices stay right.
+**Wave 4.** 4.1 pause 1–3 months · 4.2 maintenance tier ($5, `MAINTENANCE_PRICE_CENTS`) · 4.3 cancel screen (what they'd lose + exit reasons stored) · 4.4 win-back rescores at 30/60 days · 4.5 annual offer after the first rise · 4.6 badges and 4.7 quests behind `ENABLE_BADGES` / `ENABLE_QUESTS` (off).
 
-New DB tables/columns (both backends create them on boot): `growth_engine_plan_context`, `growth_engine_password_resets`, `growth_engine_promo_codes`, `growth_engine_promo_redemptions`, `entitlements.cancel_at`, `users.email_paused`. `server/.env.example` has every variable with a comment.
+**Wave 5.** 5.1 brand copy live ("Stop posting into the void.") · 5.2 methodology page from the scoring code · 5.3 State of Small Creators admin export + template (not published) · 5.4 public `/benchmarks/:niche` + UTM/`src` attribution — see `docs/MARKETING_SITE.md`.
+
+New tables (both backends create them on boot): `growth_engine_events`, `_costs`, `_move_log`, `_move_outcomes`, `_shares`, `_referrals`, `_email_log`, `_roast_rejections`, `_niche_briefs`, `_cancel_reasons`, plus columns on `users` (email prefs, niche, is_business, price_variant, ref_code, goal, goal_target, utm) and `entitlements` (cancel_at, paused_until, pause_started_at, pause_ended_at, lapsed_at). No migrations to run by hand.
 
 ## Your part
 
-1. **Merge `feat/sample-report`** → Render redeploys → add the env vars above → smoke test against Render.
-   - Go-live check on 2026-09-21 (`SMOKE_BASE=https://scalecraft.onrender.com node scripts/smoke.js`): 13/20. Health, pricing, signup, free score, plan context, email pause, password reset, admin gating, delete all pass. Every failure is one cause — Render's `STRIPE_API_KEY` is the `sk_test_..._KEY` placeholder, so unlock and subscribe 500 and everything downstream (cancel, resume, history) never runs. PR #5 carries the guard that treats a placeholder as "no Stripe" (mock billing); merge it or unset the var and re-run.
-   - `node scripts/shape_diff.js` compares the mock API against a running server route by route; keep it at "expected differences only" whenever a response shape changes.
-2. **Stripe for real** — `growth_engine_billing.js` is mock unless `STRIPE_API_KEY` is set. `_createStripeSubscription` throws "not implemented"; `purchaseOneTime` already uses a PaymentIntent. The webhook (`POST /billing/webhook`) is a stub — payment failed → `setCancelAt(accountId, now)` is all it needs to downgrade. Stripe Tax is worth turning on. Annual is shown on the pricing page but `subscribe` only takes monthly — wire it or hide the toggle.
-3. **Resend** — key + a verified sending domain (`MAIL_FROM`), `APP_URL` for links. Until then no email leaves the box, including password reset.
-4. **Meta OAuth "connect your account"** — your Graph API fetcher only reads owner-connected accounts; the scorer doesn't consume that data yet, parked until the connect flow exists.
-5. Render env: `SUPPORT_EMAIL=hello@futreeng.com`, `MAIL_FROM="Scalecraft <hello@futreeng.com>"` (verify futreeng.com in Resend), `ADMIN_EMAILS` (you + Haron), `ADMIN_TOKEN`, `FOUNDERS_PROMO_CODE=FOUNDER50`; create the founders code with `node scripts/promo.js create FOUNDER50 --kind free_months --value 1 --max 50`.
+1. **Merge #5 and #6** → Render redeploys → set the env below → `SMOKE_BASE=https://scalecraft.onrender.com node scripts/smoke.js` (expect 20/20 once the Stripe placeholder is gone).
+2. **Stripe for real** — `growth_engine_billing.js` is mock unless `STRIPE_API_KEY` looks real. Stubs for you, each already receiving the right arguments:
+   - `_createStripeSubscription` (monthly and annual; annual amount is precomputed).
+   - `pauseSubscription` / `unpauseSubscription` already call `subscriptions.update({ pause_collection… })` when live — just needs the subscription id stored on the entitlement.
+   - `switchTier` throws when live: swap the subscription item to the maintenance / growth_plan price ids.
+   - Webhook `POST /billing/webhook` is a stub: payment failed → `setCancelAt(accountId, now)`.
+3. **Resend** — `RESEND_API_KEY`, verified domain in `MAIL_FROM`, `APP_URL` for links, and the postal address in `EMAIL_POSTAL_ADDRESS` (Haron is sending it). Until then every send is a log line, including password reset and the one-tap Monday link emails.
+4. **Thumbnail storage** — `THUMB_STORAGE=local` works on Render but the disk is ephemeral; `THUMB_STORAGE=s3` + `npm i @aws-sdk/client-s3` for anything durable. Your call.
+5. **Meta OAuth "connect your account"** — still parked; nothing on the branch depends on it.
+
+### Render env (beyond what's already there)
+
+`SUPPORT_EMAIL=hello@futreeng.com` · `MAIL_FROM="Scalecraft <hello@futreeng.com>"` · `EMAIL_POSTAL_ADDRESS` · `APP_URL=https://scalecraft.onrender.com` (or the domain) · `ADMIN_EMAILS` (you + Haron) · `ADMIN_TOKEN` · `FOUNDERS_PROMO_CODE=FOUNDER50` (create it: `node scripts/promo.js create FOUNDER50 --kind free_months --value 1 --max 50`) · `SCRAPE_POSTS=30` · `BASELINE_MIN_N=10`. Everything else has a default; `server/.env.example` documents every knob by spec item.
+
+Cost guardrails already on: `PAID_RUNS_PER_DAY`, `COMPETITOR_PULLS_PER_DAY`, `FREE_RUNS_PER_DAY_GLOBAL`, `EVALS_PER_IP_PER_HOUR`, `ROASTS_PER_IP_PER_HOUR`, `POST_REVIEW_*`, `WINBACK_BATCH`. Every scrape and LLM call lands in `growth_engine_costs`; `#/admin` shows spend vs revenue.
 
 ## Cheap wins, anyone
 
-- Seed baselines (script ready; ~$1 for all 16 Instagram niches).
-- Analytics script tag (Plausible/PostHog) — no funnel visibility yet.
-- Error monitoring (Sentry), Postgres backups on Render.
-- Lower free cap for TikTok (20× Instagram's per-pull cost).
-- Password minimum 6 → 8. Lawyer pass on `#/legal/*`. Domain.
+- Seed baselines (`scripts/seed_baselines.js`; ~$1 for all 16 Instagram niches) — until niches reach 10 accounts the niche average, brief, percentile and benchmarks all read "pending".
+- Regenerate the public sample (`scripts/export_sample_report.js`) once the LLM free tier resets — the committed one has a 3-week calendar; the top-up code is in.
+- Error monitoring (Sentry), Postgres backups on Render, analytics tag.
+- Lower free cap for TikTok (20× Instagram's per-pull cost). Password minimum 6 → 8. Lawyer pass on `#/legal/*`. Domain.
 
 ## Rules we've been keeping
 
 - Never push to `main` directly — branch + PR, even hotfixes. Render deploys from `main`.
-- Scores stay deterministic. If the LLM ever sets a number, that's a bug.
+- Scores stay deterministic. If the LLM ever sets a number, that's a bug. (Roast, post reviews and explanations all validate cited numbers against their inputs.)
 - API keys go in `server/.env` (gitignored), never in chat or commits.
 - The sample report is a real person's account, used with permission. Don't swap it for a big-name account.
+- Nothing per account ever leaves the aggregate endpoints (`/briefs`, `/benchmarks`, `/admin/state-of-creators`).
