@@ -64,7 +64,8 @@ async function fetchProfileFromApify(handle) {
 
   const items = await response.json();
   if (!Array.isArray(items) || items.length === 0) {
-    throw new Error(`Instagram account @${handle} not found`);
+    // The actor answered with nothing: a rate limit, a timeout or an upstream blip — not proof the account is missing.
+    throw new Error(`Instagram didn't return a profile for @${handle} (empty result from the scraper)`);
   }
   const profile = items[0];
   if (profile.error) {

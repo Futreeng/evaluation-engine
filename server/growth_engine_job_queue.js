@@ -42,6 +42,19 @@ function detectNudge(reportBody, prevReport, inputParams) {
   return null;
 }
 
+// Failure classes the evaluating screen renders differently. Only PROFILE_NOT_FOUND
+// tells the user to check the spelling; everything else names our side or the platform's.
+function classifyFailure(err, inputParams = {}) {
+  const m = String(err?.message || "");
+  const h = inputParams.handle ? `@${inputParams.handle}` : "the account";
+  if (/as private/i.test(m)) return { code: "PROFILE_PRIVATE", text: `${h} is private, so there are no public posts for us to score.` };
+  if (/account @\S+ not found|does not exist|is not a valid/i.test(m)) return { code: "PROFILE_NOT_FOUND", text: `We couldn't find ${h} on ${inputParams.platform || "that platform"}.` };
+  if (/no public posts/i.test(m)) return { code: "NO_POSTS", text: `${h} has no public posts yet, so there is nothing to score.` };
+  if (/apify|didn't return a profile|returned an error for|timed? ?out|timeout|rate limit|429|50\d|ECONN|fetch failed|socket/i.test(m)) return { code: "UPSTREAM", text: `${(inputParams.platform || "the platform").replace(/^\w/, (c) => c.toUpperCase())} didn't answer when we asked for ${h}. That's on their side, not yours.` };
+  if (/LLM|Plan Writer|Growth Scanner|Gap Auditor|Merge|Gemini|Groq|Claude|OpenAI|no usable plan/i.test(m)) return { code: "WRITER", text: "We read the account but the writing step failed." };
+  return { code: "OUR_SIDE", text: "Something broke on our side." };
+}
+
 class JobQueue {
   constructor(numWorkers = 2) {
     this.numWorkers = numWorkers;
@@ -89,6 +102,8 @@ class JobQueue {
     return costs.run({ accountId: accountId !== "demo-account" ? accountId : null, jobId, feature }, () => this._processJob(jobId, accountId, tier, inputParams));
   }
   async _processJob(jobId, accountId, tier, inputParams) {
+    // Declared here as well as in processJob: everything below runs in this scope.
+    const hasPlan = tier !== "social_snapshot" && tier !== "maintenance";
     (this._started ||= new Map()).set(jobId, Date.now());
     if (this.processingJobs.has(jobId)) {
       console.log(`[JobQueue] Job ${jobId} already processing`);
@@ -341,8 +356,12 @@ class JobQueue {
       console.error(`[JobQueue] ❌ Job ${jobId} failed:`, err.message);
       events.track("evaluate_failed", { accountId: accountId !== "demo-account" ? accountId : null, anon: inputParams.attribution?.anon || null, ref: inputParams.attribution?.ref || null, props: { tier, platform: inputParams.platform, error: String(err.message).slice(0, 200) } });
 
+      // What the user sees is a code plus a sentence that names whose problem it is; the raw
+      // error stays in the log next to the job id (never an identifier or stack in the UI).
+      const { code, text } = classifyFailure(err, inputParams);
+      console.error(`[JobQueue] ${jobId} → ${code}: ${String(err.stack || err.message).split("\n").slice(0, 3).join(" | ")}`);
       await geDb.updateJobStatus(jobId, "failed", {
-        error: err.message,
+        error: `[${code}] ${text}`,
         stage: "failed",
       });
     } finally {

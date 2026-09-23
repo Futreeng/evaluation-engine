@@ -643,7 +643,8 @@ router.get("/job/:jobId", async (req, res) => {
       total_steps: 4,
       created_at: job.created_at,
       updated_at: job.updated_at,
-      error: job.error,
+      error: job.error ? String(job.error).replace(/^\[[A-Z_]+\]\s*/, "") : job.error,
+      error_code: job.error ? (/^\[([A-Z_]+)\]/.exec(String(job.error)) || [])[1] || null : null,
       resultPayload: job.resultPayload,
     };
 

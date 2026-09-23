@@ -419,6 +419,7 @@
     renderHeader('eval');
     const meta = sget('sc_job_' + jobId, sget('sc_form', {}));
     const handle = meta.handle || 'your account';
+    const platform = meta.platform || 'instagram';
     const startedAt = meta.submitted_at || Date.now();
     const render = job => {
       const elapsed = Math.floor((Date.now() - startedAt) / 1000);
@@ -441,17 +442,32 @@
         </div>`;
       } else if (job.status === 'failed') {
         const errText = String(job.error || '');
-        const profile = /private|not found|no public|does not exist|not a valid/i.test(errText);
-        inner = profile
-          ? h`<div class="card evalbox warm"><div class="eyebrow" style="color:var(--weak)">Couldn't read the account</div>
-              <h2 class="fail">We couldn't read @${handle} — ${/private/i.test(errText) ? 'it looks private.' : 'we couldn\'t find it.'}</h2>
-              <p>${/private/i.test(errText) ? 'Make it public for ten minutes and retry. We only ever read what anyone can see.' : 'Check the spelling of the handle and the platform, then try again.'}</p>
-              <div class="actions"><button class="btn" data-action="retry">Retry</button><a class="btn ghost" href="#/" data-scroll="evalForm">Try another handle</a></div></div>`
-          : h`<div class="card evalbox"><div class="eyebrow">Our side</div>
-              <h2 class="fail">We couldn't finish. Nothing was charged.</h2>
+        const code = job.error_code || (/private/i.test(errText) ? 'PROFILE_PRIVATE' : /not found|does not exist|not a valid/i.test(errText) ? 'PROFILE_NOT_FOUND' : /no public/i.test(errText) ? 'NO_POSTS' : 'OUR_SIDE');
+        const ref = (job.ref || jobId.slice(-7)).toUpperCase();
+        const retryBtn = h`<button class="btn" data-action="retry">Retry</button>`;
+        const another = h`<a class="btn ghost" href="#/" data-scroll="evalForm">Try another handle</a>`;
+        if (code === 'PROFILE_PRIVATE') inner = h`<div class="card evalbox warm"><div class="eyebrow" style="color:var(--weak)">Couldn't read the account</div>
+              <h2 class="fail">We couldn't read @${handle} — it looks private.</h2>
+              <p>Make it public for ten minutes and retry. We only ever read what anyone can see.</p>
+              <div class="actions">${raw(retryBtn)}${raw(another)}</div></div>`;
+        else if (code === 'PROFILE_NOT_FOUND') inner = h`<div class="card evalbox warm"><div class="eyebrow" style="color:var(--weak)">Couldn't find the account</div>
+              <h2 class="fail">${platName(platform)} says there's no @${handle}.</h2>
+              <p>Check the spelling of the handle and the platform, then try again.</p>
+              <div class="actions">${raw(retryBtn)}${raw(another)}</div></div>`;
+        else if (code === 'NO_POSTS') inner = h`<div class="card evalbox warm"><div class="eyebrow" style="color:var(--weak)">Nothing to score yet</div>
+              <h2 class="fail">@${handle} has no public posts.</h2>
+              <p>We score what's on the feed. Post a few things and come back — the free Snapshot will still be here.</p>
+              <div class="actions">${raw(another)}</div></div>`;
+        else if (code === 'UPSTREAM') inner = h`<div class="card evalbox"><div class="eyebrow">${platName(platform)}'s side</div>
+              <h2 class="fail">${platName(platform)} didn't answer. Your handle is fine.</h2>
+              <p>The account was reachable; the read timed out or got rate-limited on their end. Retry in a minute — nothing was charged.</p>
+              <div class="actions"><button class="btn dark" data-action="retry">Retry</button></div>
+              <div class="ref">REF ${ref}</div></div>`;
+        else inner = h`<div class="card evalbox"><div class="eyebrow">Our side</div>
+              <h2 class="fail">${code === 'WRITER' ? 'We read the account but couldn\'t finish writing.' : 'We couldn\'t finish.'} Nothing was charged.</h2>
               <p>Retry in a few minutes. If it happens twice, reply to the email and we'll run it by hand.</p>
               <div class="actions"><button class="btn dark" data-action="retry">Retry</button></div>
-              <div class="ref">REF ${(job.ref || jobId.slice(-7)).toUpperCase()}${errText ? ' · ' + errText.slice(0, 70) : ''}</div></div>`;
+              <div class="ref">REF ${ref}</div></div>`;
       } else if (job.status === 'complete') {
         inner = h`<div class="card evalbox green"><div class="eyebrow">Complete</div><h2>Your score is ${job.overall ?? '…'}</h2><p>Opening your report…</p></div>`;
       }
@@ -911,12 +927,12 @@
           </details>`) : ''}
 
           ${paid && Array.isArray(report.next_posts) && report.next_posts.length ? raw(h`<details class="card acc" open>
-            <summary>Your next posts <span class="fine" style="font-weight:500">written from your best ones</span></summary>
+            <summary>Your next posts <span class="fine" style="font-weight:500">suggestions written from your best ones — use them as a starting point</span></summary>
             <div class="body" id="nextPosts">${raw(report.next_posts.map((p, i) => h`<article class="npost bd${(i % 4) + 1}" data-post="${i}">
               <div class="nh"><span class="when">${p.day} ${p.time}</span><span class="fmt">${String(p.format).toUpperCase()}</span>${p.source ? raw(h`<span class="src ${p.source}">${p.source === 'new' ? 'NEW SHOOT' : p.source === 'archive' ? 'FROM ARCHIVE' : 'NO CAMERA'}</span>`) : ''}<button class="btn ghost sm" data-regen="${i}" title="Rewrite this post">Regenerate</button></div>
               <div class="fld"><div class="fl">Hook <button class="copy" data-copy="hook">Copy</button></div><p class="hook">${p.hook}</p></div>
-              <div class="fld"><div class="fl">Caption <button class="copy" data-copy="caption">Copy</button></div><p class="txt">${p.caption}</p></div>
-              ${p.script ? raw(h`<div class="fld"><div class="fl">${/reel|video/.test(p.format) ? 'Script' : /carousel/.test(p.format) ? 'Slides' : 'Shot idea'} <button class="copy" data-copy="script">Copy</button></div><p class="txt script">${p.script}</p></div>`) : ''}
+              <div class="fld"><div class="fl">Suggested caption <button class="copy" data-copy="caption">Copy</button></div><p class="txt">${p.caption}</p></div>
+              ${p.script ? raw(h`<div class="fld"><div class="fl">${/reel|video/.test(p.format) ? 'Suggested script' : /carousel/.test(p.format) ? 'Suggested slides' : 'Suggested shot'} <button class="copy" data-copy="script">Copy</button></div><p class="txt script">${p.script}</p></div>`) : ''}
               ${p.why ? raw(h`<p class="w">Why: ${p.why}</p>`) : ''}
             </article>`).join(''))}</div>
           </details>`) : ''}
@@ -1660,9 +1676,9 @@
       ${s.why ? raw(h`<details class="why"><summary>Why this</summary><p>${s.why}</p></details>`) : ''}
       ${s.verified && s.status !== 'done' && s.verified.ok ? raw(h`<div class="vnote ok">✓ ${s.verified.note} Looks done already — mark it and move on.</div>`) : s.verified && s.status === 'done' && !s.verified.ok ? raw(h`<div class="vnote">${s.verified.note}</div>`) : ''}
       ${post ? raw(h`<div class="ppost">
-        <div class="fld"><div class="fl">Caption <button class="copy" data-copy="caption">Copy</button></div><p class="txt">${post.caption}</p></div>
-        ${post.script ? raw(h`<div class="fld"><div class="fl">${/reel|video/.test(post.format) ? 'Script' : /carousel/.test(post.format) ? 'Slides' : 'Shot idea'} <button class="copy" data-copy="script">Copy</button></div><p class="txt script">${post.script}</p></div>`) : ''}
-        ${post.why ? raw(h`<p class="w">Why this post: ${post.why}</p>`) : ''}</div>`)
+        <div class="fld"><div class="fl">Suggested caption <button class="copy" data-copy="caption">Copy</button></div><p class="txt">${post.caption}</p></div>
+        ${post.script ? raw(h`<div class="fld"><div class="fl">${/reel|video/.test(post.format) ? 'Suggested script' : /carousel/.test(post.format) ? 'Suggested slides' : 'Suggested shot'} <button class="copy" data-copy="script">Copy</button></div><p class="txt script">${post.script}</p></div>`) : ''}
+        ${post.why ? raw(h`<p class="w">Why this post: ${post.why}</p>`) : ''}<p class="fine">A suggestion in your voice, not a script to follow word for word. Change anything that doesn't sound like you.</p></div>`)
       : raw(moveDetailHTML({ how: s.how, example: s.example, done_when: s.done_when, time: s.time }))}
       ${s.kind === 'slot' && !post ? raw(h`<div class="dw"><span><b>Done when:</b> ${s.done_when}</span><span class="tm">${s.time}</span></div>`) : ''}
       <div class="pacts">
