@@ -53,7 +53,6 @@ r.narrative = fixTimes(r.narrative);
 // Timing now needs three posts per window/day; the shipped block predates that.
 if (r.best_times) {
   r.best_times.windows = (r.best_times.windows || []).filter((w) => Number(w.n) >= 3);
-  r.best_times.best_days = (r.best_times.best_days || []).filter((d) => Number(d.n) >= 3);
   r.best_times.note = String(r.best_times.note || "").replace(/at least \d+ posts/, "at least 3 posts");
 }
 // The consistency scorer changed (cadence carries it): re-score that dimension from the

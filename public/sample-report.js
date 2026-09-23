@@ -503,6 +503,11 @@ window.SCALECRAFT_SAMPLE = {
     "day": "Thu",
     "n": 5,
     "vs_avg": 1.99
+   },
+   {
+    "day": "Sun",
+    "n": 2,
+    "vs_avg": 1.3
    }
   ],
   "note": "From your last 27 posts, in America/New York. Windows need at least 3 posts and 1.15× your median to count."
@@ -729,21 +734,21 @@ window.SCALECRAFT_SAMPLE = {
       "phase": 1,
       "slots": [
        {
-        "day": "Mon",
+        "day": "Thu",
         "format": "reel",
         "angle": "Media kit preview",
         "prompt": "Voiceover: 'tap the link in my bio to view my media kit. Link in bio. DM for collabs.'",
         "source": "no_camera"
        },
        {
-        "day": "Thu",
+        "day": "Fri",
         "format": "reel",
         "angle": "Cape Flattery steps",
         "prompt": "Re-cut the \"Cape Flattery\" reel (Sep 17), add CTA: 'DM for brand deals' in caption.",
         "source": "archive"
        },
        {
-        "day": "Fri",
+        "day": "Sun",
         "format": "reel",
         "angle": "Bio tagline showcase",
         "prompt": "Voiceover: 'New bio tagline. Check bio for linktree & contact.'",
@@ -756,21 +761,21 @@ window.SCALECRAFT_SAMPLE = {
       "phase": 1,
       "slots": [
        {
-        "day": "Mon",
+        "day": "Thu",
         "format": "reel",
         "angle": "Throwback carousel recap",
         "prompt": "Convert the \"Normalizing black faces in beautiful places\" carousel (May 25) into reel. Add voiceover, include DM CTA.",
         "source": "archive"
        },
        {
-        "day": "Thu",
+        "day": "Fri",
         "format": "reel",
         "angle": "Gear spotlight overlay",
         "prompt": "Voiceover: 'My essential gear for travel. tap the link in my bio for details.'",
         "source": "no_camera"
        },
        {
-        "day": "Fri",
+        "day": "Sun",
         "format": "reel",
         "angle": "Behind‑the‑scenes clip",
         "prompt": "Use the \"I used to think you had…\" reel (Sep 12), add text overlay: 'Behind the scenes.' DM for collabs.",
@@ -783,14 +788,14 @@ window.SCALECRAFT_SAMPLE = {
       "phase": 1,
       "slots": [
        {
-        "day": "Mon",
+        "day": "Thu",
         "format": "reel",
         "angle": "Local cityscape",
         "prompt": "Show 5‑min city clips. Voiceover: 'Exploring local vibes. DM for collabs.'",
         "source": "no_camera"
        },
        {
-        "day": "Thu",
+        "day": "Fri",
         "format": "reel",
         "angle": "What I'd do differently",
         "prompt": "Use the \"Cape Flattery\" reel (Sep 17), add text: 'What I'd do differently?'. CTA: DM.",
@@ -803,7 +808,7 @@ window.SCALECRAFT_SAMPLE = {
    {
     "range": "31-60",
     "label": "Boost Posting Consistency",
-    "visible_action": "Post Reel Mon, Thu and Fri",
+    "visible_action": "Post Reel Thu, Fri and Sun",
     "detail": "Pick three fixed posting days and post a Reel each",
     "locked": {
      "count": 0,
@@ -816,14 +821,15 @@ window.SCALECRAFT_SAMPLE = {
       "action": "Repost a 5‑second teaser from a top reel with a brand outreach overlay.",
       "why": "Repurposing high‑engagement content attracts sponsors; the \"Cape Flattery\" reel (Sep 17) had 8,324 likes.",
       "how": [
-       "Trim 5 seconds from the \"Cape Flattery\" reel (Sep 17)",
-       "Add text: DM for brand collabs",
-       "Post to Story with #BrandCollab"
+       "Find the original clip in your camera roll (or open the reel → three dots → Save to keep a copy).",
+       "Create → Reel → pick the clip, trim to the moment that worked, add the new voiceover or text on screen.",
+       "Write the caption fresh — say what's different this time — and post at your scheduled slot.",
+       "Add text: DM for brand collabs"
       ],
       "example": "DM for brand collabs",
       "done_when": "Your story shows a teaser with the CTA",
       "time": "10 min, ongoing",
-      "topic": "format"
+      "topic": "repurpose"
      }
     ],
     "opener": {
@@ -832,8 +838,8 @@ window.SCALECRAFT_SAMPLE = {
       "When you open a draft to post, tap Advanced settings → Schedule this post and set the day and time.",
       "Check the Scheduled content list under your profile menu."
      ],
-     "example": "The last few steps in America. Cape Flattery, Washington.",
-     "done_when": "Your feed shows a reel every Mon, Thu and Fri",
+     "example": null,
+     "done_when": "Your feed shows a reel every Thu, Fri and Sun",
      "time": "10 min, ongoing",
      "topic": "schedule"
     },
@@ -870,26 +876,27 @@ window.SCALECRAFT_SAMPLE = {
       "action": "Trim your top‑performing reel into a 15‑second behind‑the‑scenes voiceover clip.",
       "why": "the \"Cape Flattery\" reel (Sep 17) got 8,324 likes and 44.1k views; repurposing leverages proven audience interest for brand appeal.",
       "how": [
-       "Download the \"Cape Flattery\" reel (Sep 17) (Cape Flattery).",
-       "In the edit screen, cut to the first 15 seconds and record a voiceover: \"Planning a coastal hike in 3 steps…\".",
-       "Add text overlay with bullet points, then post Wednesday."
+       "Find the original clip in your camera roll (or open the reel → three dots → Save to keep a copy).",
+       "Create → Reel → pick the clip, trim to the moment that worked, add the new voiceover or text on screen.",
+       "Write the caption fresh — say what's different this time — and post at your scheduled slot.",
+       "In the edit screen, cut to the first 15 seconds and record a voiceover: \"Planning a coastal hike in 3 steps…\"."
       ],
       "example": "Planning a coastal hike in 3 steps: 1️⃣ Scout the trail 2️⃣ Pack light 3️⃣ Capture sunrise 🌅 #BTS",
       "done_when": "New behind‑the‑scenes reel is live on Wednesday.",
       "time": "20 min per post, ongoing",
-      "topic": "format"
+      "topic": "repurpose"
      }
     ],
     "opener": {
      "how": [
-      "Open the archive and locate a high‑engagement reel (e.g., the \"Cape Flattery\" reel (Sep 17)).",
-      "Tap “Share → Add to Reel”, select “Throwback” sticker, write a brief nostalgic caption.",
-      "Publish on Thursday at 6pm."
+      "Find the original clip in your camera roll (or open the reel → three dots → Save to keep a copy).",
+      "Create → Reel → pick the clip, trim to the moment that worked, add the new voiceover or text on screen.",
+      "Write the caption fresh — say what's different this time — and post at your scheduled slot."
      ],
      "example": "Throwback to Cape Flattery 🌊—the coast that still takes my breath away. #ThrowbackThursday",
      "done_when": "Throwback Reel appears on Thursday feed.",
      "time": "20 min, once",
-     "topic": "format"
+     "topic": "repurpose"
     },
     "calendar_weeks": []
    }
@@ -1016,9 +1023,9 @@ window.SCALECRAFT_SAMPLE = {
  },
  "calendar": {
   "posting_days": [
-   "Mon",
    "Thu",
-   "Fri"
+   "Fri",
+   "Sun"
   ],
   "posting_time": "6pm",
   "weeks": [
@@ -1027,21 +1034,21 @@ window.SCALECRAFT_SAMPLE = {
     "phase": 1,
     "slots": [
      {
-      "day": "Mon",
+      "day": "Thu",
       "format": "reel",
       "angle": "Media kit preview",
       "prompt": "Voiceover: 'tap the link in my bio to view my media kit. Link in bio. DM for collabs.'",
       "source": "no_camera"
      },
      {
-      "day": "Thu",
+      "day": "Fri",
       "format": "reel",
       "angle": "Cape Flattery steps",
       "prompt": "Re-cut the \"Cape Flattery\" reel (Sep 17), add CTA: 'DM for brand deals' in caption.",
       "source": "archive"
      },
      {
-      "day": "Fri",
+      "day": "Sun",
       "format": "reel",
       "angle": "Bio tagline showcase",
       "prompt": "Voiceover: 'New bio tagline. Check bio for linktree & contact.'",
@@ -1054,21 +1061,21 @@ window.SCALECRAFT_SAMPLE = {
     "phase": 1,
     "slots": [
      {
-      "day": "Mon",
+      "day": "Thu",
       "format": "reel",
       "angle": "Throwback carousel recap",
       "prompt": "Convert the \"Normalizing black faces in beautiful places\" carousel (May 25) into reel. Add voiceover, include DM CTA.",
       "source": "archive"
      },
      {
-      "day": "Thu",
+      "day": "Fri",
       "format": "reel",
       "angle": "Gear spotlight overlay",
       "prompt": "Voiceover: 'My essential gear for travel. tap the link in my bio for details.'",
       "source": "no_camera"
      },
      {
-      "day": "Fri",
+      "day": "Sun",
       "format": "reel",
       "angle": "Behind‑the‑scenes clip",
       "prompt": "Use the \"I used to think you had…\" reel (Sep 12), add text overlay: 'Behind the scenes.' DM for collabs.",
@@ -1081,14 +1088,14 @@ window.SCALECRAFT_SAMPLE = {
     "phase": 1,
     "slots": [
      {
-      "day": "Mon",
+      "day": "Thu",
       "format": "reel",
       "angle": "Local cityscape",
       "prompt": "Show 5‑min city clips. Voiceover: 'Exploring local vibes. DM for collabs.'",
       "source": "no_camera"
      },
      {
-      "day": "Thu",
+      "day": "Fri",
       "format": "reel",
       "angle": "What I'd do differently",
       "prompt": "Use the \"Cape Flattery\" reel (Sep 17), add text: 'What I'd do differently?'. CTA: DM.",
@@ -1099,17 +1106,17 @@ window.SCALECRAFT_SAMPLE = {
   ],
   "schedule": {
    "days": [
-    "Mon",
     "Thu",
-    "Fri"
+    "Fri",
+    "Sun"
    ],
    "times": {
-    "Mon": "6pm",
     "Thu": "6pm",
-    "Fri": "6pm"
+    "Fri": "6pm",
+    "Sun": "6pm"
    },
    "per_week": 3,
-   "label": "Mon 6pm, Thu 6pm, Fri 6pm",
+   "label": "Thu 6pm, Fri 6pm, Sun 6pm",
    "source": "your best days"
   }
  },
@@ -1117,7 +1124,7 @@ window.SCALECRAFT_SAMPLE = {
  "next_posts": [
   {
    "n": 1,
-   "day": "Mon",
+   "day": "Thu",
    "time": "6pm",
    "format": "reel",
    "hook": "Partner with a wanderer?",
@@ -1129,7 +1136,7 @@ window.SCALECRAFT_SAMPLE = {
   },
   {
    "n": 2,
-   "day": "Thu",
+   "day": "Fri",
    "time": "6pm",
    "format": "reel",
    "hook": "Wandering with purpose.",
@@ -1141,7 +1148,7 @@ window.SCALECRAFT_SAMPLE = {
   },
   {
    "n": 3,
-   "day": "Fri",
+   "day": "Sun",
    "time": "6pm",
    "format": "carousel",
    "hook": "Throwback to my journey.",
@@ -1153,7 +1160,7 @@ window.SCALECRAFT_SAMPLE = {
   },
   {
    "n": 4,
-   "day": "Mon",
+   "day": "Thu",
    "time": "6pm",
    "format": "reel",
    "hook": "Gear that takes me places.",
@@ -1165,7 +1172,7 @@ window.SCALECRAFT_SAMPLE = {
   },
   {
    "n": 5,
-   "day": "Thu",
+   "day": "Fri",
    "time": "6pm",
    "format": "reel",
    "hook": "Behind every reel...",
@@ -1177,7 +1184,7 @@ window.SCALECRAFT_SAMPLE = {
   },
   {
    "n": 6,
-   "day": "Fri",
+   "day": "Sun",
    "time": "6pm",
    "format": "reel",
    "hook": "Your next brand partnership starts here",
@@ -1244,5 +1251,5 @@ window.SCALECRAFT_SAMPLE = {
  "created_at": 1790033506878,
  "sample": true,
  "plan_dropped": [],
- "sample_cleaned_at": 1790190613406
+ "sample_cleaned_at": 1790191181940
 };

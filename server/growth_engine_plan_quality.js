@@ -20,10 +20,10 @@ const TOPICS = [
   { key: "pin", dim: "profile", once: true, re: /\bpin(ned|ning)?\b/i },
   { key: "media_kit", dim: "profile", once: true, re: /\bmedia kit\b/i },
   { key: "schedule", dim: "consistency", once: false, re: /\b(schedule|fixed (posting )?days|posting days|cadence|calendar|batch|draft(s)? for|same days? each week|every (mon|tue|wed|thu|fri|sat|sun)|per week|(mon|tue|wed|thu|fri|sat|sun)[a-z]*\b[ ,/&and]{1,6}\b(mon|tue|wed|thu|fri|sat|sun))\b/i },
+  { key: "repurpose", dim: "content_mix", once: false, re: /\b(re-?cut|re-?post|throwback|repurpos|archive|convert|trim)\b/i },
   { key: "format", dim: "content_mix", once: false, re: /\b(carousel|static|photo|reel|video|format|mix)\b/i },
 
   { key: "engage", dim: "engagement", once: false, re: /\b(comment|repl(y|ies)|question|hook|caption opener|first line|dm your|conversation|poll|sticker)\b/i },
-  { key: "repurpose", dim: "content_mix", once: false, re: /\b(re-?cut|re-?post|throwback|repurpos|archive|convert|trim)\b/i },
 ];
 const DIM_OF_LABEL = [
   ["profile", /profile|bio|clarity/i], ["consistency", /consisten|cadence|posting|schedule|frequen/i],
@@ -122,6 +122,7 @@ const HOWTO = {
     pin: ["Open the post from your profile grid.", "Tap the three dots (top right) → Pin to your profile.", "Up to three posts can be pinned; unpin the weakest if it's full."],
     schedule: ["Film or edit the posts for the week in one sitting and save them as drafts.", "When you open a draft to post, tap Advanced settings → Schedule this post and set the day and time.", "Check the Scheduled content list under your profile menu."],
     media_kit: ["Make a one-page media kit (Canva has a free template): audience size, your best three posts with their numbers, what you offer.", "Host it at a link you control and add that link to your bio.", "Reply to every brand DM with the link, not screenshots."],
+    repurpose: ["Find the original clip in your camera roll (or open the reel → three dots → Save to keep a copy).", "Create → Reel → pick the clip, trim to the moment that worked, add the new voiceover or text on screen.", "Write the caption fresh — say what's different this time — and post at your scheduled slot."],
   },
   tiktok: {
     bio_link: ["Open your profile → Edit profile → Website (needs a Business account, or 1k followers).", "Paste the URL and tap Save.", "Check it from a logged-out browser."],
@@ -131,6 +132,7 @@ const HOWTO = {
     pin: ["Open the video from your profile.", "Tap the three dots → Pin to profile.", "Up to three videos can be pinned."],
     schedule: ["Edit the week's videos in one sitting and save them as drafts.", "On the post screen, turn on Schedule video and set the day and time (desktop or Business account).", "Check them under your profile → Drafts / Scheduled."],
     media_kit: ["Make a one-page media kit: audience size, your best three videos with their numbers, what you offer.", "Host it at a link you control and add that link to your bio.", "Reply to every brand DM with the link, not screenshots."],
+    repurpose: ["Find the original clip in your camera roll (or open the video → three dots → Save video).", "Tap + → upload the clip, trim to the moment that worked, add the new voiceover or text.", "Write the caption fresh and post at your scheduled slot."],
   },
 };
 function howFor(platform, topic) { const p = HOWTO[String(platform || "instagram").toLowerCase()] || HOWTO.instagram; return p[topic] || null; }
@@ -250,6 +252,8 @@ function finishPlan(reportBody, { platform = reportBody.business?.platform || "i
     const o = { ...m };
     for (const k of ["title", "action", "why", "example", "done_when"]) if (o[k]) o[k] = fix(o[k]);
     o.how = lib ? [...lib] : (o.how || []).map(fix);
+    // A scheduling move's "starting point" is a day/time, never a caption pasted in by mistake.
+    if (topic === "schedule" && o.example && !/\b(mon|tue|wed|thu|fri|sat|sun|am|pm|\d{1,2}:\d\d)\b/i.test(o.example)) o.example = null;
     if (lib && m.how && m.how.length) { const own = m.how.map(fix).find((x) => /\b(caption|write|name it|title|text|say|record|voiceover)\b/i.test(x) && !/edit profile|three dots|tap/i.test(x)); if (own && !o.how.includes(own)) o.how.push(own); }
     o.topic = topic;
     return o;
