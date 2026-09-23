@@ -78,6 +78,32 @@ ledger never expire). Competitor data is stored for accounts that never used us.
 4. Remove the "[Counsel to confirm disclosures.]" placeholder from the live privacy page once
    a lawyer has read it.
 
+## Official Instagram and TikTok access (yours, per Haron 23 Sept)
+
+Goal: creators connect their own account so the report can see saves, reach, story views and
+audience demographics, competitors come through Business Discovery instead of a scrape, and
+the product no longer depends on scraping for paid users. The scrape stays for the free
+Snapshot. "App" here means a registered integration with a client id, not a phone app.
+
+1. **Meta app**: developers.facebook.com → Business app → add the Instagram product, using
+   "Instagram API with Instagram Login" (no Facebook Page needed). Request only
+   `instagram_business_basic` and `instagram_business_manage_insights`.
+2. **Data deletion callback**: a URL that receives Meta's signed request and returns a
+   confirmation code; wire it to `DELETE /account`. Required before review.
+3. **Privacy page** must match: replace "public data only, through a third-party data
+   provider" with the connected-account wording, plus the retention table above.
+4. **Business Verification** (legal entity docs, domain, business email on the domain) for
+   Advanced Access so people outside the test users can connect.
+5. **App Review**: screencast of signup → connect → approve → report showing reach/saves from
+   the API. Expect one round of "clearer screencast please". Two to four weeks.
+6. **TikTok**: Login Kit + Display API (`user.info.basic`, `user.info.stats`, `video.list`).
+   Faster review. No competitor lookups; keep the scrape for those.
+7. Add test users (yours, Haron's, the sample account's owner with permission) so the
+   connect flow can be built before review finishes.
+
+Product side (Haron/Claude): connect screen, token storage and 60-day refresh, Business
+Discovery for competitors, new signals folded into the existing dimensions.
+
 ## Your part
 
 1. **Merge #5 and #6** → Render redeploys → set the env below → `SMOKE_BASE=https://scalecraft.onrender.com node scripts/smoke.js` (expect 20/20 once the Stripe placeholder is gone).
