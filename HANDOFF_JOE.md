@@ -57,6 +57,27 @@ stored scores; the next rescore will move accounts that post well under target d
 and the score-change email will say so. Baselines (`scripts/baselines_sync.js`) should be
 re-run once so niche averages match.
 
+## Data retention and DPAs (yours, per Haron 23 Sept)
+
+The privacy page promises "reports kept while your account exists; anonymous free snapshots
+kept 90 days". The code only half does that (thumbnails for free reports go at 90 days via
+`THUMB_FREE_TTL_DAYS`; the report rows, cached profiles, email log, events, outcomes and cost
+ledger never expire). Competitor data is stored for accounts that never used us.
+
+1. **Retention sweep** in `growth_engine_refresh.js` (it already runs on the refresh
+   interval): anonymous reports and cached profiles after 90 days; email log, events and
+   cost rows after 12 months; competitor snapshots deleted with the report that asked for
+   them. Make the numbers env knobs and list them in `.env.example`.
+2. **Privacy page**: replace the retention sentence with a table of data types and windows
+   (the `viewLegal` copy in `public/app.js`), and add a named subprocessor list: Apify,
+   Google (Gemini), Groq, Stripe, Resend, Render. Check each provider's terms before keeping
+   the line "your data is not used to train their models".
+3. **Accept each provider's DPA** (Apify, Google Cloud/AI Studio, Groq, Stripe, Resend,
+   Render) and keep the confirmations in the shared drive so we can answer a customer's DPA
+   with our own list.
+4. Remove the "[Counsel to confirm disclosures.]" placeholder from the live privacy page once
+   a lawyer has read it.
+
 ## Your part
 
 1. **Merge #5 and #6** → Render redeploys → set the env below → `SMOKE_BASE=https://scalecraft.onrender.com node scripts/smoke.js` (expect 20/20 once the Stripe placeholder is gone).
