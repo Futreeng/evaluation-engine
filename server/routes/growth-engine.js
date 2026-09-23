@@ -959,6 +959,20 @@ router.post("/reports/:reportId/path/:key", authMiddleware, async (req, res) => 
   } catch (err) { sendError(res, 500, "PATH_ERROR", err.message); }
 });
 
+// The Path asks for the link (or email) when a move needs one and none was given.
+router.post("/reports/:reportId/context", authMiddleware, async (req, res) => {
+  try {
+    const report = await geDb.getReport(req.params.reportId);
+    if (!report) return sendError(res, 404, "REPORT_NOT_FOUND", "Report not found");
+    if (report.accountId !== req.user.id) return sendError(res, 403, "NOT_YOUR_REPORT", "This report belongs to another account");
+    const ctx = { ...(report.reportBody?.plan_context || {}) };
+    if (req.body.link !== undefined) { const l = String(req.body.link || "").trim(); if (l && !/^https?:\/\/[^\s]+$/i.test(l)) return sendError(res, 400, "INVALID_LINK", "That doesn't look like a link. It should start with https://"); ctx.link = l || null; }
+    if (req.body.contact !== undefined) { const c = String(req.body.contact || "").trim(); if (c && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c)) return sendError(res, 400, "INVALID_EMAIL", "That doesn't look like an email address."); ctx.contact = c || null; }
+    await geDb.patchReportBody(report.reportId, { plan_context: ctx });
+    res.json({ plan_context: ctx });
+  } catch (err) { sendError(res, 500, "CONTEXT_ERROR", err.message); }
+});
+
 // Does doing the moves move the score? Aggregate only — no handles.
 router.get("/outcomes", async (req, res) => {
   try { res.json(await geDb.getOutcomeSummary()); } catch (err) { res.status(500).json({ error: err.message }); }

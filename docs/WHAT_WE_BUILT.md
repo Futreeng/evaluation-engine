@@ -220,6 +220,21 @@ answers on when to post, Instagram steps that don't exist. Two parts:
 - Best times need three posts per window (was two) and only look at the last year.
 - The evaluating screen's failures are classified; see the handoff note.
 
+### Unsatisfied-customer pass (23 Sept)
+- Posting Consistency: cadence carries the dimension (full at target, nothing at a third
+  of it), so 60% of target reads Fair, not Strong. The sample re-scored 76 → 61, overall 75 → 71.
+- The weakest dimension shows a checklist of what's there and what's missing, parsed from
+  the scorer's evidence line, instead of one paragraph.
+- No invented links or emails: anything the creator didn't give us becomes words ("your
+  link — the page brands should land on"). The Path asks for the link on that step and
+  writes it in (`POST /reports/:id/context`).
+- Best and worst posts open by default with the best multiple in the heading; pinned posts
+  out; against the median.
+- Calendar heading says how many weeks are written when the set is short; the sample's
+  competitor section is labelled as one example account; "16 accounts scored so far";
+  "10 points to Elite".
+- Score box carries the four dimensions, the niche marker and three facts.
+
 ## Also fixed along the way
 
 - Stored report bodies carried a provisional `report_id` (share sheet broke).

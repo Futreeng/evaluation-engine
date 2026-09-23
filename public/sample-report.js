@@ -503,14 +503,9 @@ window.SCALECRAFT_SAMPLE = {
     "day": "Thu",
     "n": 5,
     "vs_avg": 1.99
-   },
-   {
-    "day": "Sun",
-    "n": 2,
-    "vs_avg": 1.3
    }
   ],
-  "note": "From your last 27 posts, in America/New York. Windows need at least 2 posts and 1.15× your median to count."
+  "note": "From your last 27 posts, in America/New York. Windows need at least 3 posts and 1.15× your median to count."
  },
  "data_window": "Based on your last 30 posts. We can't see saves, reach or story views.",
  "plan_context": {
@@ -523,18 +518,18 @@ window.SCALECRAFT_SAMPLE = {
  "data_confidence": "full",
  "narrative": "**SCALECRAFT SOCIAL SNAPSHOT — @talon__wilson**\n\n**WHERE YOU STAND**  \nYour overall rating is 75. The biggest gaps are Posting Consistency (score 76) and Profile Clarity (score 25), which together hold back your score. On the plus side, your Reels pull an average of 656 interactions—about 31 % above your overall average—and deliver a 29.9 % engagement rate.\n\n**THE SINGLE BIGGEST OPPORTUNITY**  \nAdd a clear, trackable call‑to‑action and an external link (e.g., a Linktree to a newsletter or booking page) in your bio to turn the 656‑interaction‑per‑Reel audience into booked travel experiences or newsletter sign‑ups. Your audience is already highly responsive (29.9 % engagement), so a simple CTA can convert that attention into measurable business results.\n\n**YOUR 30‑60‑90 DAY PATH**  \n1. **Days 1‑30 – Improve Profile Clarity:** Add a Linktree URL to your bio and rewrite the first line to read “Adventure travel guide – book a private tour or join the newsletter.” This gives your 29.9 %‑engaged audience a direct next step.  \n   🔒 4 more moves for this phase + your weeks 1‑4 posting calendar  \n\n2. **Days 31‑60 – Boost Posting Consistency:** Post a Reel on **Thu, Fri, Sun** each week, using existing footage (e.g., clips from your Sep 17 2026 Reel). Three posts per week fit your 2‑5 hour weekly window and raise your consistency score.  \n   🔒 4 more moves for this phase  \n\n3. **Days 61‑90 – Optimize Content Strategy:** **Post a throwback Reel on Thursday of week 7** using the Sep 17 2026 footage, add a fresh voice‑over that highlights “hidden‑gem travel tips,” and schedule it for that day. Repurposing top‑performing content keeps engagement high without new shoots.  \n   🔒 4 more moves for this phase  \n\n**WHAT YOUR BEST POSTS HAVE IN COMMON**  \nYour top post (Sep 17 2026) was a Reel that opened with “The last few steps in America…” and was published on a Thursday. The three best posts all share the Reel format, a travel‑focused hook in the first line, and a Thursday publishing day, which aligns with your peak average engagement of 1,662. The three lowest‑performing posts are also Reels but were posted on Tuesdays or Wednesdays, received only 4‑17 % of average engagement, and have shorter, less specific captions.\n\n**WHAT THE FULL PLAN ADDS**  \nThe locked moves complete the three phases, flesh out a week‑by‑week posting calendar, and provide content prompts drawn from your own archive.",
  "scores": {
-  "overall": 75,
+  "overall": 71,
   "category_avg": 55,
   "summary": "The biggest point losses come from Posting Consistency and Profile Clarity",
   "dimensions": [
    {
     "label": "Posting Consistency",
-    "score": 76,
+    "score": 61,
     "explanation": "You posted 16 times in the last 53 days, which works out to about 2.1 posts per week, below the target of 4‑5 posts per week; the longest 6‑day gap and the fact that your most recent post was 5 days ago kept the score from being higher. Posting more often (aim for at least 4‑5 times weekly) and shortening gaps would lift this score.",
     "explanation_source": "model",
     "evidence": "16 posts over 53 days (2.1/week vs 3.5/week target); longest gap 6 days; last post 5 days ago",
     "parts": {
-     "cadence": 60,
+     "cadence": 40,
      "gaps": 100,
      "recency": 100
     },
@@ -723,7 +718,7 @@ window.SCALECRAFT_SAMPLE = {
       "Paste the URL, give it a short title, tap Done.",
       "Check it from a logged-out browser."
      ],
-     "example": "Add link: https://linktr.ee/talonwilson",
+     "example": "Add link: your link (the page brands should land on — a media kit, or a Linktree that points to it)",
      "done_when": "External link shows in bio.",
      "time": "5 min",
      "topic": "bio_link"
@@ -734,21 +729,21 @@ window.SCALECRAFT_SAMPLE = {
       "phase": 1,
       "slots": [
        {
-        "day": "Thu",
+        "day": "Mon",
         "format": "reel",
         "angle": "Media kit preview",
         "prompt": "Voiceover: 'tap the link in my bio to view my media kit. Link in bio. DM for collabs.'",
         "source": "no_camera"
        },
        {
-        "day": "Fri",
+        "day": "Thu",
         "format": "reel",
         "angle": "Cape Flattery steps",
         "prompt": "Re-cut the \"Cape Flattery\" reel (Sep 17), add CTA: 'DM for brand deals' in caption.",
         "source": "archive"
        },
        {
-        "day": "Sun",
+        "day": "Fri",
         "format": "reel",
         "angle": "Bio tagline showcase",
         "prompt": "Voiceover: 'New bio tagline. Check bio for linktree & contact.'",
@@ -761,21 +756,21 @@ window.SCALECRAFT_SAMPLE = {
       "phase": 1,
       "slots": [
        {
-        "day": "Thu",
+        "day": "Mon",
         "format": "reel",
         "angle": "Throwback carousel recap",
         "prompt": "Convert the \"Normalizing black faces in beautiful places\" carousel (May 25) into reel. Add voiceover, include DM CTA.",
         "source": "archive"
        },
        {
-        "day": "Fri",
+        "day": "Thu",
         "format": "reel",
         "angle": "Gear spotlight overlay",
         "prompt": "Voiceover: 'My essential gear for travel. tap the link in my bio for details.'",
         "source": "no_camera"
        },
        {
-        "day": "Sun",
+        "day": "Fri",
         "format": "reel",
         "angle": "Behind‑the‑scenes clip",
         "prompt": "Use the \"I used to think you had…\" reel (Sep 12), add text overlay: 'Behind the scenes.' DM for collabs.",
@@ -788,14 +783,14 @@ window.SCALECRAFT_SAMPLE = {
       "phase": 1,
       "slots": [
        {
-        "day": "Thu",
+        "day": "Mon",
         "format": "reel",
         "angle": "Local cityscape",
         "prompt": "Show 5‑min city clips. Voiceover: 'Exploring local vibes. DM for collabs.'",
         "source": "no_camera"
        },
        {
-        "day": "Fri",
+        "day": "Thu",
         "format": "reel",
         "angle": "What I'd do differently",
         "prompt": "Use the \"Cape Flattery\" reel (Sep 17), add text: 'What I'd do differently?'. CTA: DM.",
@@ -808,7 +803,7 @@ window.SCALECRAFT_SAMPLE = {
    {
     "range": "31-60",
     "label": "Boost Posting Consistency",
-    "visible_action": "Post Reel Thu, Fri and Sun",
+    "visible_action": "Post Reel Mon, Thu and Fri",
     "detail": "Pick three fixed posting days and post a Reel each",
     "locked": {
      "count": 0,
@@ -838,7 +833,7 @@ window.SCALECRAFT_SAMPLE = {
       "Check the Scheduled content list under your profile menu."
      ],
      "example": "The last few steps in America. Cape Flattery, Washington.",
-     "done_when": "Your feed shows a reel every Thu, Fri and Sun",
+     "done_when": "Your feed shows a reel every Mon, Thu and Fri",
      "time": "10 min, ongoing",
      "topic": "schedule"
     },
@@ -901,88 +896,89 @@ window.SCALECRAFT_SAMPLE = {
   ]
  },
  "post_insights": {
-  "sample": 30,
-  "avg_engagement": 502,
+  "metric": "median",
+  "sample": 27,
+  "avg_engagement": 189,
   "top": [
    {
-    "date": "2026-09-17",
+    "date": "2026-09-17T00:11:54.000Z",
     "format": "reel",
     "weekday": "Thu",
     "likes": 8324,
     "comments": 311,
     "views": 44108,
     "engagement": 8635,
-    "caption": "The last few steps in America. Cape Flattery, Washington. Sometimes you have to go all the way out",
-    "url": null,
+    "caption": "The last few steps in America. Cape Flattery, Washington. Sometimes you have to go all the way out there to realize how big this world reall",
+    "url": "https://www.instagram.com/p/DdXhtyWOyLQ/",
     "pinned": false,
-    "vs_avg": 17.19
+    "vs_avg": 45.69
    },
    {
-    "date": "2021-05-25",
-    "format": "carousel",
-    "weekday": "Tue",
-    "likes": 372,
-    "comments": 72,
-    "views": 0,
-    "engagement": 444,
-    "caption": "Normalizing black faces in beautiful places! • • • #Yosemite #GlacierPoint #SentinelDome #VernalFa",
-    "url": null,
-    "pinned": false,
-    "vs_avg": 0.88
-   },
-   {
-    "date": "2026-09-12",
+    "date": "2026-09-12T00:01:53.000Z",
     "format": "reel",
     "weekday": "Sat",
     "likes": 361,
     "comments": 60,
     "views": 1812,
     "engagement": 421,
-    "caption": "I used to think you had to do something extraordinary to inspire somebody. Sometimes it’s just seei",
-    "url": null,
+    "caption": "I used to think you had to do something extraordinary to inspire somebody. Sometimes it’s just seeing someone choose to get outside, chase a",
+    "url": "https://www.instagram.com/p/DdKpXmCuoa9/",
     "pinned": false,
-    "vs_avg": 0.84
+    "vs_avg": 2.23
+   },
+   {
+    "date": "2026-08-13T22:15:27.000Z",
+    "format": "reel",
+    "weekday": "Fri",
+    "likes": 291,
+    "comments": 97,
+    "views": 1716,
+    "engagement": 388,
+    "caption": "On top of the world. 🏔️ . #MountRainier #skylineloop #WashingtonState #NationalParks #hikingadventures",
+    "url": "https://www.instagram.com/p/Db_yENGukK1/",
+    "pinned": false,
+    "vs_avg": 2.05
    }
   ],
   "bottom": [
    {
-    "date": "2026-08-04",
+    "date": "2026-08-04T18:19:54.000Z",
     "format": "reel",
     "weekday": "Tue",
     "likes": 0,
     "comments": 20,
     "views": 561,
     "engagement": 20,
-    "caption": "Everything is a win, when the goal is experience! . Sol Duc Falls hands down is my favorite waterfa",
-    "url": null,
+    "caption": "Everything is a win, when the goal is experience! . Sol Duc Falls hands down is my favorite waterfall in the park, and one of its most famou",
+    "url": "https://www.instagram.com/p/DboLX3Fxg5K/",
     "pinned": false,
-    "vs_avg": 0.04
+    "vs_avg": 0.11
    },
    {
-    "date": "2025-04-16",
+    "date": "2025-04-16T16:45:03.000Z",
     "format": "reel",
     "weekday": "Wed",
     "likes": 56,
     "comments": 12,
     "views": 382,
     "engagement": 68,
-    "caption": "I love the grind of chasing an extraordinary life—the challenge, the growth, the purpose. Every step",
-    "url": null,
+    "caption": "I love the grind of chasing an extraordinary life—the challenge, the growth, the purpose. Every step forward is a reminder that I’m not buil",
+    "url": "https://www.instagram.com/p/DIg70zZOi6a/",
     "pinned": false,
-    "vs_avg": 0.14
+    "vs_avg": 0.36
    },
    {
-    "date": "2025-06-18",
+    "date": "2025-06-18T09:20:00.000Z",
     "format": "reel",
     "weekday": "Wed",
     "likes": 83,
     "comments": 4,
     "views": 156,
     "engagement": 87,
-    "caption": "NY summer’s been more rain than sun but being 15 minutes from the ocean is still peace. I guess ever",
-    "url": null,
+    "caption": "NY summer’s been more rain than sun but being 15 minutes from the ocean is still peace. I guess every season in life can’t be perfect. #newy",
+    "url": "https://www.instagram.com/p/DLCXI8bsN1e/",
     "pinned": false,
-    "vs_avg": 0.17
+    "vs_avg": 0.46
    }
   ],
   "patterns": {
@@ -990,11 +986,11 @@ window.SCALECRAFT_SAMPLE = {
     "format": "reel",
     "posts": 19,
     "avg_engagement": 656,
-    "vs_avg": 1.31
+    "vs_avg": 3.47
    },
    "best_day": {
     "day": "Thu",
-    "avg_engagement": 1662
+    "avg_engagement": 3019
    },
    "format_avg": {
     "reel": {
@@ -1002,31 +998,27 @@ window.SCALECRAFT_SAMPLE = {
      "avg_engagement": 656
     },
     "carousel": {
-     "posts": 10,
-     "avg_engagement": 227
-    },
-    "static": {
-     "posts": 1,
-     "avg_engagement": 332
+     "posts": 8,
+     "avg_engagement": 205
     }
    },
    "day_avg": {
-    "Thu": 1662,
-    "Sat": 242,
-    "Fri": 258,
-    "Tue": 215,
-    "Sun": 228,
-    "Mon": 145,
-    "Wed": 162
+    "Thu": 3019,
+    "Sat": 254,
+    "Wed": 166,
+    "Fri": 316,
+    "Mon": 141,
+    "Tue": 115,
+    "Sun": 256
    }
   },
   "note": "Your top posts share the Reel format, a travel‑focused opening line, and Thursday publishing. Your bottom posts also use Reels but are posted on weekdays with lower‑engagement captions."
  },
  "calendar": {
   "posting_days": [
+   "Mon",
    "Thu",
-   "Fri",
-   "Sun"
+   "Fri"
   ],
   "posting_time": "6pm",
   "weeks": [
@@ -1035,21 +1027,21 @@ window.SCALECRAFT_SAMPLE = {
     "phase": 1,
     "slots": [
      {
-      "day": "Thu",
+      "day": "Mon",
       "format": "reel",
       "angle": "Media kit preview",
       "prompt": "Voiceover: 'tap the link in my bio to view my media kit. Link in bio. DM for collabs.'",
       "source": "no_camera"
      },
      {
-      "day": "Fri",
+      "day": "Thu",
       "format": "reel",
       "angle": "Cape Flattery steps",
       "prompt": "Re-cut the \"Cape Flattery\" reel (Sep 17), add CTA: 'DM for brand deals' in caption.",
       "source": "archive"
      },
      {
-      "day": "Sun",
+      "day": "Fri",
       "format": "reel",
       "angle": "Bio tagline showcase",
       "prompt": "Voiceover: 'New bio tagline. Check bio for linktree & contact.'",
@@ -1062,21 +1054,21 @@ window.SCALECRAFT_SAMPLE = {
     "phase": 1,
     "slots": [
      {
-      "day": "Thu",
+      "day": "Mon",
       "format": "reel",
       "angle": "Throwback carousel recap",
       "prompt": "Convert the \"Normalizing black faces in beautiful places\" carousel (May 25) into reel. Add voiceover, include DM CTA.",
       "source": "archive"
      },
      {
-      "day": "Fri",
+      "day": "Thu",
       "format": "reel",
       "angle": "Gear spotlight overlay",
       "prompt": "Voiceover: 'My essential gear for travel. tap the link in my bio for details.'",
       "source": "no_camera"
      },
      {
-      "day": "Sun",
+      "day": "Fri",
       "format": "reel",
       "angle": "Behind‑the‑scenes clip",
       "prompt": "Use the \"I used to think you had…\" reel (Sep 12), add text overlay: 'Behind the scenes.' DM for collabs.",
@@ -1089,14 +1081,14 @@ window.SCALECRAFT_SAMPLE = {
     "phase": 1,
     "slots": [
      {
-      "day": "Thu",
+      "day": "Mon",
       "format": "reel",
       "angle": "Local cityscape",
       "prompt": "Show 5‑min city clips. Voiceover: 'Exploring local vibes. DM for collabs.'",
       "source": "no_camera"
      },
      {
-      "day": "Fri",
+      "day": "Thu",
       "format": "reel",
       "angle": "What I'd do differently",
       "prompt": "Use the \"Cape Flattery\" reel (Sep 17), add text: 'What I'd do differently?'. CTA: DM.",
@@ -1107,17 +1099,17 @@ window.SCALECRAFT_SAMPLE = {
   ],
   "schedule": {
    "days": [
+    "Mon",
     "Thu",
-    "Fri",
-    "Sun"
+    "Fri"
    ],
    "times": {
+    "Mon": "6pm",
     "Thu": "6pm",
-    "Fri": "6pm",
-    "Sun": "6pm"
+    "Fri": "6pm"
    },
    "per_week": 3,
-   "label": "Thu 6pm, Fri 6pm, Sun 6pm",
+   "label": "Mon 6pm, Thu 6pm, Fri 6pm",
    "source": "your best days"
   }
  },
@@ -1125,7 +1117,7 @@ window.SCALECRAFT_SAMPLE = {
  "next_posts": [
   {
    "n": 1,
-   "day": "Thu",
+   "day": "Mon",
    "time": "6pm",
    "format": "reel",
    "hook": "Partner with a wanderer?",
@@ -1137,7 +1129,7 @@ window.SCALECRAFT_SAMPLE = {
   },
   {
    "n": 2,
-   "day": "Fri",
+   "day": "Thu",
    "time": "6pm",
    "format": "reel",
    "hook": "Wandering with purpose.",
@@ -1149,7 +1141,7 @@ window.SCALECRAFT_SAMPLE = {
   },
   {
    "n": 3,
-   "day": "Sun",
+   "day": "Fri",
    "time": "6pm",
    "format": "carousel",
    "hook": "Throwback to my journey.",
@@ -1161,7 +1153,7 @@ window.SCALECRAFT_SAMPLE = {
   },
   {
    "n": 4,
-   "day": "Thu",
+   "day": "Mon",
    "time": "6pm",
    "format": "reel",
    "hook": "Gear that takes me places.",
@@ -1173,7 +1165,7 @@ window.SCALECRAFT_SAMPLE = {
   },
   {
    "n": 5,
-   "day": "Fri",
+   "day": "Thu",
    "time": "6pm",
    "format": "reel",
    "hook": "Behind every reel...",
@@ -1185,7 +1177,7 @@ window.SCALECRAFT_SAMPLE = {
   },
   {
    "n": 6,
-   "day": "Sun",
+   "day": "Fri",
    "time": "6pm",
    "format": "reel",
    "hook": "Your next brand partnership starts here",
@@ -1200,7 +1192,7 @@ window.SCALECRAFT_SAMPLE = {
   "generated_at": 1790033665058,
   "you": {
    "handle": "talon__wilson",
-   "overall": 75
+   "overall": 71
   },
   "competitors": [
    {
@@ -1252,5 +1244,5 @@ window.SCALECRAFT_SAMPLE = {
  "created_at": 1790033506878,
  "sample": true,
  "plan_dropped": [],
- "sample_cleaned_at": 1790189720493
+ "sample_cleaned_at": 1790190613406
 };

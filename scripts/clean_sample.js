@@ -50,6 +50,31 @@ for (const p of r.growth_path.phases) {
 }
 r.narrative = fixTimes(r.narrative);
 
+// Timing now needs three posts per window/day; the shipped block predates that.
+if (r.best_times) {
+  r.best_times.windows = (r.best_times.windows || []).filter((w) => Number(w.n) >= 3);
+  r.best_times.best_days = (r.best_times.best_days || []).filter((d) => Number(d.n) >= 3);
+  r.best_times.note = String(r.best_times.note || "").replace(/at least \d+ posts/, "at least 3 posts");
+}
+// The consistency scorer changed (cadence carries it): re-score that dimension from the
+// same numbers the evidence line quotes, and the overall as the plain average.
+{
+  const cons = r.scores.dimensions.find((d) => /consisten/i.test(d.label));
+  const m = cons && /(\d+) posts over (\d+) days \(([\d.]+)\/week.*longest gap (\d+) days; last post (\d+) day/.exec(cons.evidence || "");
+  if (m) {
+    const pf = { posts_analyzed: +m[1], date_range_days: +m[2], posts_per_week: +m[3], longest_gap_days: +m[4], days_since_last_post: +m[5] };
+    const scored = scoring.scoreProfile({ analysis: { posting_frequency: pf, content: { video_posts: 19, carousel_posts: 10, static_posts: 1, avg_caption_length: 296 }, engagement: { engagement_rate_percent: 29.89, total_likes: 1, total_comments: 1, total_video_views: 1 }, profile_clarity: { bio_text: r.bio || "", bio_mentions_location: true } }, follower_count: r.business.followers, recent_posts: r.posts }, r.business.category);
+    const nc = scored && scored.dimensions.find((d) => /consisten/i.test(d.label));
+    if (nc) { cons.score = nc.score; cons.parts = nc.parts; r.scores.overall = Math.round(r.scores.dimensions.reduce((a, d) => a + d.score, 0) / r.scores.dimensions.length); console.log(`consistency re-scored: ${nc.score} (parts ${JSON.stringify(nc.parts)}), overall ${r.scores.overall}`); }
+  }
+}
+// Best/worst posts: re-rank with the current rules (unpinned, against the median).
+{
+  const ranked = scoring.rankPosts((r.posts || []).map((p) => ({ ...p, timestamp: p.posted_at, media_type: String(p.type || "").toUpperCase(), is_reel: /reel/i.test(p.type || ""), like_count: p.likes, comments_count: p.comments, video_view_count: p.views })));
+  if (ranked) r.post_insights = { ...ranked, note: r.post_insights?.note || null };
+}
+if (r.competitors?.you) r.competitors.you.overall = r.scores.overall;
+r.narrative = String(r.narrative || "").replace(/overall rating is \d+/, `overall rating is ${r.scores.overall}`).replace(/Posting Consistency \(score \d+\)/, `Posting Consistency (score ${r.scores.dimensions.find((d) => /consisten/i.test(d.label)).score})`);
 q.finishPlan(r);
 r.growth_path.unlocked_steps = r.growth_path.phases.reduce((n, p) => n + 1 + p.moves.length, 0);
 r.growth_path.total_steps = r.growth_path.unlocked_steps;

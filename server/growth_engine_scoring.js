@@ -74,10 +74,13 @@ function scorePostingConsistency(pf, t) {
   const ppw = num(pf.posts_per_week);
   const gap = num(pf.longest_gap_days, 0);
   const since = num(pf.days_since_last_post, 0);
-  const cadence = ramp(ppw, t.posts_per_week, 0);              // 60
-  const gaps = ramp(gap, t.max_gap_days, t.max_gap_days * 4);   // 25: full at target, zero at 4×
-  const recency = ramp(since, 7, 30);                           // 15
-  const score = pct(cadence * 0.6 + gaps * 0.25 + recency * 0.15);
+  // Cadence carries the dimension: full marks at the target, nothing at a third of it, so
+  // an account posting 60% of its target lands in the 50s–60s, not the 70s. Gaps and
+  // recency can't lift a thin cadence into "Strong" on their own.
+  const cadence = ramp(ppw, t.posts_per_week, t.posts_per_week / 3);   // 65
+  const gaps = ramp(gap, t.max_gap_days, t.max_gap_days * 4);         // 20: full at target, zero at 4×
+  const recency = ramp(since, 7, 30);                                 // 15
+  const score = pct(cadence * 0.65 + gaps * 0.2 + recency * 0.15);
   return {
     label: "Posting Consistency", score,
     evidence: `${num(pf.posts_analyzed)} posts over ${num(pf.date_range_days)} days (${ppw}/week vs ${t.posts_per_week}/week target); longest gap ${gap} days; last post ${since} day${since === 1 ? "" : "s"} ago`,

@@ -216,12 +216,33 @@ function applySchedule(text, schedule) {
   return out;
 }
 
+// Models invent plausible links ("https://linktr.ee/<handle>") and emails when none was
+// given. Only the account's real link and what the creator typed in may appear; anything
+// else becomes plain words, so nobody pastes a URL that goes nowhere.
+const URL_RE = /\b(?:https?:\/\/|www\.)[^\s)<>"'”’]+|\b(?:linktr\.ee|beacons\.ai|bio\.site|stan\.store|linkin\.bio)\/[^\s)<>"'”’]+/gi;
+const EMAIL_RE = /\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b/gi;
+function allowedLinks(reportBody) {
+  const out = new Set();
+  const add = (u) => { if (u) out.add(String(u).trim().replace(/\/$/, "").toLowerCase()); };
+  add(reportBody.plan_context?.link); add(reportBody.profile?.external_url);
+  for (const m of String(reportBody.bio || reportBody.profile?.bio || "").matchAll(URL_RE)) add(m[0]);
+  return out;
+}
+function stripInvented(text, { links, contact, goal }) {
+  if (!text) return text;
+  const linkWords = goal === "deals" ? "your link (the page brands should land on — a media kit, or a Linktree that points to it)" : goal === "sell" ? "your link (the page where they buy)" : goal === "bookings" ? "your link (your booking page)" : "your link";
+  let out = String(text).replace(URL_RE, (u) => { const k = u.trim().replace(/\/$/, "").toLowerCase(); return [...links].some((l) => k === l || k.endsWith(l) || l.endsWith(k)) ? u : linkWords; });
+  out = out.replace(EMAIL_RE, (e) => (contact && e.toLowerCase() === String(contact).toLowerCase() ? e : "your email"));
+  return out.replace(/\b(your link)\s*\(([^)]*)\)([^.]*)\1\s*\([^)]*\)/g, "$1 ($2)$3$1"); // don't explain twice in one sentence
+}
+
 // ------------------------------------------------------------------ finish
 // Names, hygiene and verified steps across the whole report. Idempotent.
 function finishPlan(reportBody, { platform = reportBody.business?.platform || "instagram" } = {}) {
   const idx = postIndex(reportBody);
   const name = reportBody.business?.handle || null;
-  const fix = (s) => sanitize(namePosts(s, idx), { name });
+  const linkCtx = { links: allowedLinks(reportBody), contact: reportBody.plan_context?.contact || null, goal: reportBody.plan_context?.goal || null };
+  const fix = (s) => stripInvented(sanitize(namePosts(s, idx), { name }), linkCtx);
   const fixMove = (m, asOpener = null) => {
     if (!m) return m;
     const topic = topicOf(asOpener || m);
@@ -269,4 +290,4 @@ function benchmarkText(t) {
   };
 }
 
-module.exports = { applySchedule, TOPICS, topicOf, topicDef, dimOfLabel, datesIn, postName, postIndex, namePosts, sanitize, HOWTO, howFor, deriveSchedule, cadenceFor, validatePhases, dedupePhases, finishPlan, benchmarkText };
+module.exports = { stripInvented, allowedLinks, applySchedule, TOPICS, topicOf, topicDef, dimOfLabel, datesIn, postName, postIndex, namePosts, sanitize, HOWTO, howFor, deriveSchedule, cadenceFor, validatePhases, dedupePhases, finishPlan, benchmarkText };

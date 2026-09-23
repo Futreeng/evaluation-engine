@@ -51,6 +51,12 @@ LLM quota allows (`docs/PATH_SPEC.md`, "Not in this build").
   from cache), and the smoke job on a schedule (needs a server started with
   `FREE_SNAPSHOTS_PER_EMAIL=unlimited`).
 
+Scorer change to know about: Posting Consistency weights are now cadence 65 / gaps 20 /
+recency 15 with the cadence ramp bottoming at a third of target. Existing reports keep their
+stored scores; the next rescore will move accounts that post well under target down a band,
+and the score-change email will say so. Baselines (`scripts/baselines_sync.js`) should be
+re-run once so niche averages match.
+
 ## Your part
 
 1. **Merge #5 and #6** → Render redeploys → set the env below → `SMOKE_BASE=https://scalecraft.onrender.com node scripts/smoke.js` (expect 20/20 once the Stripe placeholder is gone).

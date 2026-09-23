@@ -1044,3 +1044,15 @@ button.prow:hover { background: var(--ground); transform: translateX(2px); }
 .scorebox .glance .fact span { font-size: 12px; line-height: 1.3; color: var(--muted2); }
 .scorebox .glance .fine { margin-top: 10px; }
 @media (max-width: 480px) { .scorebox .glance .facts { grid-template-columns: 1fr 1fr; } }
+
+/* What's there and what's missing, on the dimension that needs it most. */
+.checklist { list-style: none; margin: 10px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 6px 14px; font-size: 14px; }
+.checklist li { display: flex; gap: 8px; align-items: baseline; color: var(--body); }
+.checklist li span { font-weight: 700; flex: none; }
+.checklist li.ok span { color: var(--strong); }
+.checklist li.no span { color: var(--weak); }
+.checklist li.no { color: var(--ink); }
+.pstep .asklink { margin-top: 12px; padding: 12px 14px; border-radius: 12px; background: var(--ground); display: flex; flex-direction: column; gap: 8px; }
+.pstep .asklink label { font-size: 13px; font-weight: 600; color: var(--ink); }
+.pstep .asklink .row { display: flex; gap: 8px; flex-wrap: wrap; }
+.pstep .asklink input { flex: 1 1 220px; min-height: 40px; padding: 8px 12px; border: 1px solid var(--line2); border-radius: 10px; font: inherit; background: var(--card); color: var(--ink); }

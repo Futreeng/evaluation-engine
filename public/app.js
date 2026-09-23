@@ -834,7 +834,7 @@
             <div class="card scorebox">
               ${hist && hist.delta_overall != null ? raw(h`<div class="trend ${hist.delta_overall > 0 ? 'up' : hist.delta_overall < 0 ? 'down' : 'flat'}"><b>${hist.delta_overall > 0 ? `Up ${hist.delta_overall} point${hist.delta_overall === 1 ? '' : 's'}` : hist.delta_overall < 0 ? `Down ${-hist.delta_overall} point${hist.delta_overall === -1 ? '' : 's'}` : 'Unchanged'}</b> since ${fmtShort(hist.previous.generated_at)}${hist.runs ? raw(h` · run ${hist.runs}`) : ''}${hist.delta_followers != null && hist.delta_followers !== 0 ? raw(h` · ${hist.delta_followers > 0 ? '+' : ''}${fmtN(hist.delta_followers)} followers`) : ''}</div>`) : paid && !isSample ? raw(h`<div class="trend first">Your first score — the plan rescores you weekly, so this line becomes your own trend.</div>`) : ''}
               <div class="bigrow"><span class="bignum">${overall}</span>
-                <div class="meta"><span class="tag ${gc}">${gl.toUpperCase()}</span>${lvl ? raw(h`<span class="lvl" title="Rank ${lvl.rank} of ${lvl.of}">${lvl.name.toUpperCase()}${lvl.next ? raw(h`<em>· ${lvl.next.points_away} to ${lvl.next.name}</em>`) : raw('<em>· top band</em>')}</span>`) : ''}${report.streak && report.streak.visible ? raw(h`<span class="streak ${report.streak.weeks ? 'on' : ''}" title="An on-plan week means you posted on at least ${report.streak.planned_days} days. A freeze covers a missed week.">${report.streak.weeks ? `🔥 ${report.streak.weeks}-week streak` : 'New streak starts this week'}${report.streak.freezes ? raw(h`<em>· ${report.streak.freezes} freeze${report.streak.freezes === 1 ? '' : 's'}</em>`) : ''}</span>`) : ''}
+                <div class="meta"><span class="tag ${gc}">${gl.toUpperCase()}</span>${lvl ? raw(h`<span class="lvl" title="Rank ${lvl.rank} of ${lvl.of}">${lvl.name.toUpperCase()}${lvl.next ? raw(h`<em>· ${lvl.next.points_away} points to ${lvl.next.name}</em>`) : raw('<em>· top band</em>')}</span>`) : ''}${report.streak && report.streak.visible ? raw(h`<span class="streak ${report.streak.weeks ? 'on' : ''}" title="An on-plan week means you posted on at least ${report.streak.planned_days} days. A freeze covers a missed week.">${report.streak.weeks ? `🔥 ${report.streak.weeks}-week streak` : 'New streak starts this week'}${report.streak.freezes ? raw(h`<em>· ${report.streak.freezes} freeze${report.streak.freezes === 1 ? '' : 's'}</em>`) : ''}</span>`) : ''}
                   ${followers ? raw(h`<span class="f">${fmtN(followers)} followers</span>`) : ''}
                 </div></div>
               <p class="why">${s.summary || ''}</p>
@@ -881,13 +881,13 @@
               ${raw((s.dimensions || []).map(d => { const sc = clamp(d.score, 0, 100); const [g, gcc] = gradeIn({ score: sc, label: d.label }, s.summary); const hue = hueOf(d.label); const dd = hist?.delta_dimensions?.find(x => x.label === d.label);
                 return h`<div class="dimcard bd${hue}"><div class="top"><span class="n">${d.label}</span><span class="s hue${hue}">${sc} · ${g}${dd && dd.delta ? raw(h`<span class="dd g-${dd.delta > 0 ? 'strong' : 'weak'}">${dd.delta > 0 ? '+' : ''}${dd.delta}</span>`) : ''}</span></div>
                   <div class="bar in"><div class="fill bg${hue}" style="width:${sc}%"></div>${d.category_avg != null ? raw(h`<div class="mark" style="left:${clamp(d.category_avg, 0, 100)}%"></div>`) : ''}</div>
-                  <p>${d.explanation || ''}</p>${raw(evidenceHTML(d.evidence_posts))}</div>`; }).join(''))}
-              <div class="fine">${s.category_avg != null ? `The marker is your ${niche} average (${fmtN(s.category_sample_size)} accounts).` : pending ? `The marker is your niche average. Your ${niche} average appears once ${pending.min_n} accounts are scored — ${pending.n} so far.` : nicheKnown ? 'The marker is your niche average.' : `Scored against all creators — we don't have enough ${niche} accounts yet.`}</div>
+                  <p>${d.explanation || ''}</p>${raw(checklistHTML(d.evidence))}${raw(evidenceHTML(d.evidence_posts))}</div>`; }).join(''))}
+              <div class="fine">${s.category_avg != null ? `The marker is your ${niche} average (${fmtN(s.category_sample_size)} accounts scored so far).` : pending ? `The marker is your niche average. Your ${niche} average appears once ${pending.min_n} accounts are scored — ${pending.n} so far.` : nicheKnown ? 'The marker is your niche average.' : `Scored against all creators — we don't have enough ${niche} accounts yet.`}</div>
             </div>
           </details>
 
-          ${pi && pi.top && pi.top.length ? raw(h`<details class="card acc">
-            <summary>Your best and worst posts</summary>
+          ${pi && pi.top && pi.top.length ? raw(h`<details class="card acc" open>
+            <summary>Your best and worst posts <span class="fine" style="font-weight:500">best: ${pi.top[0].vs_avg}× your ${pi.metric === 'median' ? 'typical post' : 'average'}</span></summary>
             <div class="body">
               <div class="postmeta"><span class="pill tone">${pi.metric === 'median' ? 'MEDIAN' : 'AVG'} ${fmtN(pi.avg_engagement)} per post</span>${pi.patterns?.best_format ? raw(h`<span class="pill tone">${String(pi.patterns.best_format.format).toUpperCase()}S ${pi.patterns.best_format.vs_avg}×</span>`) : ''}${pi.patterns?.best_day ? raw(h`<span class="pill green">${String(pi.patterns.best_day.day).toUpperCase()} IS YOUR STRONGEST DAY</span>`) : ''}</div>
               <div class="posts">${raw([...pi.top.map(p => [p, 'top']), ...pi.bottom.map(p => [p, 'low'])].map(([p, k]) => h`<div class="post ${k}">
@@ -924,7 +924,7 @@
           </details>`) : ''}
 
           ${paid && calWeeks.length ? raw(h`<details class="card acc" open>
-            <summary>Your ${calWeeks.length}-week calendar</summary>
+            <summary>Your posting calendar${calWeeks.length < Math.round(planDays / 30) * 4 ? raw(h` <span class="fine" style="font-weight:500">${calWeeks.length} of ${Math.round(planDays / 30) * 4} weeks written — the rest arrive with your next refresh</span>`) : raw(h` <span class="fine" style="font-weight:500">${calWeeks.length} weeks</span>`)}</summary>
             <div class="body" style="gap:8px">${raw(calWeeks.map((w, i) => h`<details class="week" ${i === 0 ? 'open' : ''}>
               <summary><span class="wk">WEEK ${w.week} · DAYS ${(w.week - 1) * 7 + 1}–${w.week * 7}</span><span class="sl">${(w.slots || []).map(sl => `${String(sl.day).slice(0, 3)} ${sl.format}`).join(' · ')}</span></summary>
               <div class="slots">${raw((w.slots || []).map((sl, k) => h`<div class="slot bd${(k % 4) + 1}"><div class="d">${String(sl.day).slice(0, 3).toUpperCase()} · ${String(sl.format).toUpperCase()}${sl.source ? raw(h`<span class="src ${sl.source}">${sl.source === 'new' ? 'NEW SHOOT' : sl.source === 'archive' ? 'FROM ARCHIVE' : 'NO CAMERA'}</span>`) : ''}</div><div class="a">${sl.angle}</div>${sl.prompt ? raw(h`<div class="p">${sl.prompt}</div>`) : ''}</div>`).join(''))}</div>
@@ -943,7 +943,7 @@
           </details>`) : ''}
 
           <details class="card acc" ${paid && comp ? 'open' : ''}>
-            <summary>Against your competitors</summary>
+            <summary>${isSample ? 'Against a competitor' : 'Against your competitors'}${isSample ? raw(h` <span class="fine" style="font-weight:500">one example account — yours compares up to five you pick</span>`) : ''}</summary>
             <div class="body">
               ${isSample ? raw(comp ? competitorRows(comp) : h`<p class="fine">Growth Plan reports compare you to up to five accounts you pick.</p>`) : paid ? raw(h`<form class="compform" id="compForm"><input type="text" name="handles" placeholder="@handle — add up to 5" value="${comp ? comp.competitors.map(c => c.handle).join(', ') : (report.competitor_handles || []).join(', ')}" aria-label="Competitor handles"><button class="btn dark" type="submit">${comp ? 'Re-run' : 'Compare'}</button></form><div id="compResult">${comp ? raw(competitorRows(comp)) : ''}</div>`)
               : raw(h`<div class="comprows"><div class="crow you"><span>@${biz.handle} (you)</span><span>${overall}</span></div>
@@ -1129,6 +1129,17 @@
       ${d.example ? raw(h`<div class="ex"><div class="exl">Starting point — make it yours</div><div class="ext">${d.example}</div></div>`) : ''}
       <div class="dw">${d.done_when ? raw(h`<span><b>Done when:</b> ${d.done_when}</span>`) : ''}${d.time ? raw(h`<span class="tm">${d.time}</span>`) : ''}</div>
     </div>`;
+  }
+  // "has: a, b; missing: c, d" (profile clarity's evidence line) → a checklist, so the
+  // weakest dimension shows exactly what's missing instead of one paragraph.
+  function checklistHTML(evidence) {
+    const m = /has:\s*([^;]*);\s*missing:\s*(.*)$/i.exec(String(evidence || ''));
+    if (!m) return '';
+    const split = t => t.split(/,\s*/).map(x => x.trim()).filter(x => x && !/^none$/i.test(x));
+    const has = split(m[1]); let missing = split(m[2]);
+    if (missing.some(x => /^a link$/i.test(x))) missing = missing.filter(x => !/goes somewhere/i.test(x)); // no link at all: one miss, not two
+    if (!has.length && !missing.length) return '';
+    return h`<ul class="checklist">${raw(has.map(x => h`<li class="ok"><span aria-hidden="true">✓</span>${x}</li>`).join(''))}${raw(missing.map(x => h`<li class="no"><span aria-hidden="true">✗</span>${x}</li>`).join(''))}</ul>`;
   }
   function competitorRows(c) {
     const rows = [...c.competitors.filter(x => x.ok !== false).map(x => ({ ...x, you: false })), { handle: c.you.handle, overall: c.you.overall, you: true }].sort((a, b) => b.overall - a.overall);
@@ -1685,6 +1696,7 @@
         ${post.script ? raw(h`<div class="fld"><div class="fl">${/reel|video/.test(post.format) ? 'Suggested script' : /carousel/.test(post.format) ? 'Suggested slides' : 'Suggested shot'} <button class="copy" data-copy="script">Copy</button></div><p class="txt script">${post.script}</p></div>`) : ''}
         ${post.why ? raw(h`<p class="w">Why this post: ${post.why}</p>`) : ''}<p class="fine">A suggestion in your voice, not a script to follow word for word. Change anything that doesn't sound like you.</p></div>`)
       : raw(moveDetailHTML({ how: s.how, example: s.example, done_when: s.done_when, time: s.time }))}
+      ${s.kind === 'move' && s.topic === 'bio_link' && !(report.plan_context && report.plan_context.link) ? raw(h`<div class="asklink"><label for="askLink">Which link? Paste the page you want people to land on and we'll write it into this step.</label><div class="row"><input id="askLink" type="url" placeholder="https://…" autocomplete="url"><button class="btn dark sm" data-save-link>Use this link</button></div><div class="fine">No link yet? A free Linktree or a one-page media kit works. This is the one thing we can't write for you.</div></div>`) : ''}
       ${s.kind === 'slot' && !post ? raw(h`<div class="dw"><span><b>Done when:</b> ${s.done_when}</span><span class="tm">${s.time}</span></div>`) : ''}
       <div class="pacts">
         <button class="btn green" data-path="done" data-key="${s.key}">Done</button>
@@ -1778,8 +1790,21 @@
       $view.querySelectorAll('[data-skip-reason]').forEach(b => b.addEventListener('click', () => update(b.dataset.key, 'skip', b.dataset.skipReason)));
       $view.querySelectorAll('[data-skip-cancel]').forEach(b => b.addEventListener('click', () => { b.closest('.skipwhy').hidden = true; }));
       const showStep = (key) => { const s = steps.find(x => x.key === key); if (!s) return; const card = $view.querySelector('.pstep'); const el = document.createElement('div'); el.innerHTML = pathStepCard(s, path, { isSample, report }); const nc = el.firstElementChild; if (card) card.replaceWith(nc); else $view.querySelector('.pprog').insertAdjacentElement('afterend', nc); bind(nc); nc.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
-      const bind = (root) => { root.querySelectorAll('[data-path]').forEach(b => b.addEventListener('click', () => { const key = b.dataset.key, st = b.dataset.path; if (st === 'skip') { const box = b.closest('.pstep').querySelector('.skipwhy'); box.hidden = !box.hidden; return; } update(key, st); })); root.querySelectorAll('[data-skip-reason]').forEach(b => b.addEventListener('click', () => update(b.dataset.key, 'skip', b.dataset.skipReason))); root.querySelectorAll('[data-skip-cancel]').forEach(b => b.addEventListener('click', () => { b.closest('.skipwhy').hidden = true; })); root.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', () => { const t = b.closest('.fld').querySelector('.txt, .hook')?.textContent || ''; navigator.clipboard?.writeText(t).then(() => toast('Copied.')).catch(() => toast('Select the text and copy it.')); })); };
+      const saveLink = async (root) => {
+        const inp = root.querySelector('#askLink'); const v = (inp?.value || '').trim();
+        if (!/^https?:\/\/\S+$/i.test(v)) { toast('Paste a full link, starting with https://'); inp?.focus(); return; }
+        try {
+          if (isSample) { report = { ...report, plan_context: { ...(report.plan_context || {}), link: v } }; }
+          else { const r = await api('/reports/' + encodeURIComponent(report.report_id) + '/context', { method: 'POST', body: JSON.stringify({ link: v }) }); report.plan_context = r.plan_context; sset('sc_report_' + report.report_id, report); }
+          // Write the link into the step text wherever the plan said "your link (…)".
+          for (const st of path.steps) for (const k of ['action', 'example', 'done_when']) if (st[k]) st[k] = st[k].replace(/your link(?: \([^)]*\))?/gi, v); 
+          for (const st of path.steps) st.how = (st.how || []).map(x => x.replace(/your link(?: \([^)]*\))?/gi, v));
+          toast('Saved. It’s in the step now.'); render(null);
+        } catch (e) { toast(e.message || 'Could not save the link.'); }
+      };
+      const bind = (root) => { root.querySelector('[data-save-link]')?.addEventListener('click', () => saveLink(root)); root.querySelectorAll('[data-path]').forEach(b => b.addEventListener('click', () => { const key = b.dataset.key, st = b.dataset.path; if (st === 'skip') { const box = b.closest('.pstep').querySelector('.skipwhy'); box.hidden = !box.hidden; return; } update(key, st); })); root.querySelectorAll('[data-skip-reason]').forEach(b => b.addEventListener('click', () => update(b.dataset.key, 'skip', b.dataset.skipReason))); root.querySelectorAll('[data-skip-cancel]').forEach(b => b.addEventListener('click', () => { b.closest('.skipwhy').hidden = true; })); root.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', () => { const t = b.closest('.fld').querySelector('.txt, .hook')?.textContent || ''; navigator.clipboard?.writeText(t).then(() => toast('Copied.')).catch(() => toast('Select the text and copy it.')); })); };
       $view.querySelectorAll('[data-open], [data-ahead]').forEach(b => b.addEventListener('click', () => showStep(b.dataset.open || b.dataset.ahead)));
+      $view.querySelector('[data-save-link]')?.addEventListener('click', () => saveLink($view));
       $view.querySelectorAll('.pstep [data-copy]').forEach(b => b.addEventListener('click', () => { const t = b.closest('.fld').querySelector('.txt, .hook')?.textContent || ''; navigator.clipboard?.writeText(t).then(() => toast('Copied.')).catch(() => toast('Select the text and copy it.')); }));
       $view.querySelector('[data-action=unlock-path]')?.addEventListener('click', () => { sset('sc_intent_tier', 'growth_plan'); sset('sc_unlock_report', report.report_id); go('#/pricing'); });
     };

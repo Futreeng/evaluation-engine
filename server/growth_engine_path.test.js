@@ -170,6 +170,26 @@ t("phase openers follow the plan's schedule", () => {
   assert.equal(b.growth_path.phases[0].opener.done_when, "A reel every Thu, Fri and Sun");
 });
 
+t("invented links and emails become words; real ones stay", () => {
+  const ctx = { links: new Set(["https://talon.co"]), contact: "me@talon.co", goal: "deals" };
+  assert.equal(q.stripInvented("Add link: https://linktr.ee/talonwilson", ctx), "Add link: your link (the page brands should land on — a media kit, or a Linktree that points to it)");
+  assert.equal(q.stripInvented("Paste https://talon.co/ and mail me@talon.co or fake@x.com", ctx), "Paste https://talon.co/ and mail me@talon.co or your email");
+  const b = { business: { handle: "t" }, plan_context: { goal: "deals" }, growth_path: { phases: [{ label: "Profile", visible_action: "Add a link", opener: { how: ["Paste https://linktr.ee/t"], example: "https://linktr.ee/t", done_when: "" }, moves: [] }] }, calendar: { weeks: [] } };
+  q.finishPlan(b);
+  assert(!/linktr/.test(JSON.stringify(b.growth_path)));
+  assert.equal(b.growth_path.phases[0].opener.example, "your link (the page brands should land on — a media kit, or a Linktree that points to it)");
+});
+t("consistency: 60% of target cadence is not Strong", () => {
+  const scoring = require("./growth_engine_scoring");
+  const t = scoring.targetFor("travel").target;
+  const posts = []; const now = Date.now();
+  for (let i = 0; i < 16; i++) posts.push({ id: String(i), timestamp: new Date(now - (i * 3.3 + 5) * DAY).toISOString(), like_count: 100, comments_count: 5, media_type: "VIDEO", is_reel: true, caption: "x", hashtags: [], video_view_count: 500 });
+  const pf = { posts_per_week: 2.1, longest_gap_days: 6, days_since_last_post: 5, posts_analyzed: 16, date_range_days: 53 };
+  const r = scoring.scoreProfile({ analysis: { posting_frequency: pf, content: { video_posts: 10, carousel_posts: 4, static_posts: 2, avg_caption_length: 200 }, engagement: { engagement_rate_percent: 5, total_likes: 1600, total_comments: 80, total_video_views: 8000 }, profile_clarity: { bio_text: "hi", bio_mentions_location: true } }, follower_count: 1680, recent_posts: posts }, "travel");
+  const cons = r && r.dimensions.find((d) => /consisten/i.test(d.label));
+  assert(cons, "scored"); assert(cons.score < 70, `score ${cons.score} should be below Strong`); assert(cons.score >= 45, `score ${cons.score} should not be Weak`);
+});
+
 // ---- data layer (crash report follow-ups): median, unpinned, recent
 const scoring = require("./growth_engine_scoring");
 const { calculateMetrics } = require("./instagram_fetcher");
