@@ -114,9 +114,12 @@ async function analyzeInstagramAccountViaApify(rawHandle) {
   }
   try {
     const c = await geDb.getCachedProfile("instagram", handle, CACHE_TTL_MS);
-    // A cache entry from before the deeper scrape holds ~12 posts; refetch.
-    if (c && (c.data?.recent_posts?.length || 0) >= Math.min(SCRAPE_POSTS, c.data?.post_count || SCRAPE_POSTS)) { console.log(`[Instagram/Apify] DB cache hit for @${handle}`); cache.set(handle, { at: c.fetchedAt, data: c.data }); return c.data; }
-  } catch { /* cache is best-effort */ }
+    // A retry resumes from the last scrape: any cached profile with a usable post set
+    // (12+, or everything the account has) is reused inside the TTL instead of asking
+    // Instagram again — the ask that turned a working handle into "not found".
+    const cachedPosts = c?.data?.recent_posts?.length || 0;
+    if (c && cachedPosts >= Math.min(12, c.data?.post_count || 12)) { console.log(`[Instagram/Apify] DB cache hit for @${handle} (${cachedPosts} posts)`); cache.set(handle, { at: c.fetchedAt, data: c.data }); return c.data; }
+  } catch (err) { console.warn(`[Instagram/Apify] profile cache read failed for @${handle}: ${err.message}`); }
 
   console.log(`[Instagram/Apify] Fetching @${handle}...`);
   require("./growth_engine_costs").scrape({ unit: "apify:instagram-profile", quantity: 1, handle, platform: "instagram" });
@@ -212,7 +215,7 @@ async function analyzeInstagramAccountViaApify(rawHandle) {
     source: "apify/instagram-profile-scraper",
   };
   cache.set(handle, { at: Date.now(), data });
-  try { await geDb.putCachedProfile("instagram", handle, data); } catch { /* best-effort */ }
+  try { await geDb.putCachedProfile("instagram", handle, data); } catch (err) { console.warn(`[Instagram/Apify] profile cache write failed for @${handle}: ${err.message} — a retry will scrape again`); }
   return data;
 }
 

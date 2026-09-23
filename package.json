@@ -8,7 +8,10 @@
   },
   "scripts": {
     "start": "node server/server.js",
-    "dev": "cd server && npm run dev"
+    "dev": "cd server && npm run dev",
+    "test": "node server/growth_engine_path.test.js && node server/growth_engine_db_postgres.test.js",
+    "check": "for f in server/*.js server/routes/*.js public/*.js; do node --check \"$f\" || exit 1; done",
+    "smoke": "node server/scripts/smoke.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

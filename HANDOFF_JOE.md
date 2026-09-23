@@ -34,6 +34,23 @@ list in `docs/WHAT_WE_BUILT.md` under "The Path". Nothing new for Render env. Th
 sample was cleaned by the deterministic rules; regenerate it from a fresh paid run when
 LLM quota allows (`docs/PATH_SPEC.md`, "Not in this build").
 
+## Crash report of 23 Sept (both fixed on `feat/path`)
+
+- `hasPlan is not defined`: declared in the wrapper, read in the worker function. Every run
+  that got past scoring died there. Fixed.
+- False "couldn't find it": an empty scraper result was mapped to not-found. Failures are now
+  classified (`PROFILE_NOT_FOUND`, `PROFILE_PRIVATE`, `NO_POSTS`, `UPSTREAM`, `WRITER`,
+  `OUR_SIDE`) and `GET /job/:id` returns `error_code`; the app shows a different screen for
+  each and never shows raw error text (the log has it next to the job id).
+- Retry reuses the cached scrape (24h) instead of asking Instagram again; cache write
+  failures are logged instead of swallowed — watch Render logs for
+  "profile cache write failed" (would mean Postgres cache rows aren't landing).
+- `npm test` (unit), `npm run check` (syntax), `npm run smoke` (end to end against a running
+  server). `.github/workflows/ci.yml` runs the first two on every push; the smoke job runs
+  on manual dispatch with a base URL. Not done: retry resuming mid-pipeline (it restarts, but
+  from cache), and the smoke job on a schedule (needs a server started with
+  `FREE_SNAPSHOTS_PER_EMAIL=unlimited`).
+
 ## Your part
 
 1. **Merge #5 and #6** → Render redeploys → set the env below → `SMOKE_BASE=https://scalecraft.onrender.com node scripts/smoke.js` (expect 20/20 once the Stripe placeholder is gone).
