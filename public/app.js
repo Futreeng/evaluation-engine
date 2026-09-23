@@ -209,8 +209,8 @@
   </div></div>`;
 
   // ------------------------------------------------------------ shared pieces
-  function dimRow(d, avg) {
-    const sc = clamp(d.score, 0, 100); const [gl] = grade(sc); const hue = hueOf(d.label);
+  function dimRow(d, avg, label) {
+    const sc = clamp(d.score, 0, 100); const gl = label || grade(sc)[0]; const hue = hueOf(d.label);
     return h`<div class="dimrow">
       <div class="lbl"><span class="hue${hue}">${d.label}</span><b>${sc} · ${gl}</b></div>
       <div class="bar"><div class="fill bg${hue}" style="width:${sc}%"></div>${avg != null ? raw(h`<div class="mark" style="left:${clamp(avg, 0, 100)}%"></div>`) : ''}</div>
@@ -838,6 +838,11 @@
                   ${followers ? raw(h`<span class="f">${fmtN(followers)} followers</span>`) : ''}
                 </div></div>
               <p class="why">${s.summary || ''}</p>
+              ${(s.dimensions || []).length ? raw(h`<div class="glance">
+                <div class="dims">${raw((s.dimensions || []).map(d => dimRow({ label: d.label, score: d.score }, d.category_avg, gradeIn({ score: clamp(d.score, 0, 100), label: d.label }, s.summary)[0])).join(''))}</div>
+                ${raw((() => { const facts = []; const cons = (s.dimensions || []).find(d => /consisten/i.test(d.label)); const ppw = cons && /([\d.]+)\/week/.exec(cons.evidence || ''); if (ppw) facts.push([ppw[1], 'posts a week']); if (pi && pi.avg_engagement) facts.push([fmtN(pi.avg_engagement), pi.metric === 'median' ? 'likes + comments on a typical post' : 'likes + comments per post']); const w = report.best_times && report.best_times.confident && report.best_times.windows && report.best_times.windows[0]; if (w) facts.push([w.label, 'your best window']); return facts.length ? h`<div class="facts">${raw(facts.map(([v, l]) => h`<div class="fact"><b>${v}</b><span>${l}</span></div>`).join(''))}</div>` : ''; })())}
+                <div class="fine">${(s.dimensions || []).some(d => d.category_avg != null) ? `Marker = ${niche} average.` : ''} Each dimension is explained below.</div>
+              </div>`) : ''}
               ${s.category_percentile ? raw(h`<div class="pct">Scores higher than <b>${s.category_percentile.beats_pct}%</b> of ${niche} accounts we've scored (${fmtN(s.category_percentile.n)}).</div>`) : ''}
               ${raw(historyChartHTML(hist))}
               ${(report.badges || []).length ? raw(h`<div class="badges">${raw(report.badges.map(b => h`<span class="badge" title="Earned ${fmtDate(b.earned_at)}">🏅 ${b.title}</span>`).join(''))}</div>`) : ''}
