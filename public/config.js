@@ -46,5 +46,5 @@
 
   // The mock API only ships when it's on: app.js reads window.scalecraftMockFetch
   // at call time, so it has to be parsed before app.js — hence document.write.
-  if (useMock) document.write('<script src="mock-api.js?v=13"><\/script>');
+  if (useMock) document.write('<script src="mock-api.js?v=14"><\/script>');
 })();

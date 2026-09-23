@@ -889,7 +889,7 @@ p { margin: 0; }
 
 /* ---- WCAG 2.2 AA pass ---- */
 /* 1.4.1 / 1.4.3: inline links are underlined, not colour-only; muted text on dark panels lifted to 6:1+ */
-p a, li a, .fine a, .pfoot a, .bridge a, .note a, .waitdone a, .cannot a, .samplebar a, .lede a, .howpage a, td a { text-decoration: underline; text-underline-offset: 2px; }
+p a, li a, .fine a, .pfoot a, .bridge a, .note a, .waitdone a, .cannot a, .samplebar a, .lede a, .howpage a, td a, .post .n a { text-decoration: underline; text-underline-offset: 2px; }
 .tier.dark .fine, .price .was, .tier.dark .note, .darkform .hint, .founders p, .darkform .reassure { color: var(--on-dark-dim); }
 .dark a, .founders a, .darkform a, .tier.dark a, .roast a, .moment a { color: #F2A470; }
 .roast .fine, .roast .eb { color: #F2A470; }
