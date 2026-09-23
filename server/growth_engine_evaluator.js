@@ -412,10 +412,13 @@ async function callGeminiNonStreaming(geminiKey, systemInstruction, userMessage)
 }
 
 async function callGroqNonStreaming(groqKey, systemInstruction, userMessage) {
-  // groq/compound routes to a large model with an 8k TPM cap on the free tier.
+  // Groq is the free rung of the ladder, so every model here has to be one the
+  // account can actually call. groq/compound and groq/compound-mini are not on
+  // the standard key (GET /openai/v1/models does not list them) and returned
+  // 404 model_not_found, which meant the free fallback never ran at all.
   // A single evaluation makes three calls, so honour Retry-After on 429 and
   // fall back to a smaller model before giving up.
-  const models = [process.env.GROQ_MODEL || "groq/compound", "openai/gpt-oss-20b", "groq/compound-mini"];
+  const models = [process.env.GROQ_MODEL || "openai/gpt-oss-120b", "qwen/qwen3.8-27b", "openai/gpt-oss-20b"];
   let lastErr;
   for (const model of models) {
     for (let attempt = 0; attempt < 3; attempt++) {

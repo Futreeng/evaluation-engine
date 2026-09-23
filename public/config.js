@@ -8,7 +8,12 @@
 // including auth (/auth/login, /auth/signup).
 (function () {
   var host = location.hostname;
-  var mockHosts = ['scalecraft-demo.vercel.app'];
+  // No permanently-mock host. scalecraft-demo.vercel.app used to be listed
+  // here and kept being mistaken for the real product -- it served invented
+  // scores for real handles with only a corner badge to say so. The shipped
+  // sample report (#/report/sample) covers the "show someone a real one"
+  // case with actual data, so a mock deploy has nothing left to do.
+  var mockHosts = [];
   var devHost = host === 'localhost' || host === '127.0.0.1' || /\.vercel\.app$/.test(host);
   var useMock = mockHosts.indexOf(host) !== -1;
   if (devHost) {

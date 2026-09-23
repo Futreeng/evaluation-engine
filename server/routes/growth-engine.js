@@ -424,9 +424,19 @@ const optionalAuth = async (req, _res, next) => {
   next();
 };
 
+// Dev-only escape hatch: run the full Growth Plan pipeline and read any report
+// without auth, entitlements or run metering. Set DEV_UNLOCK_ALL=true in
+// server/.env for local testing only — on a public deployment every anonymous
+// visitor would trigger the expensive pipeline (profile pull + LLM calls).
+const DEV_UNLOCK = process.env.DEV_UNLOCK_ALL === "true";
+if (DEV_UNLOCK) {
+  console.warn("[Growth Engine] DEV_UNLOCK_ALL is on — tiers, report ownership and run limits are bypassed. Do not use this in production.");
+}
+
 // Which evaluator runs for an account. business_evaluator maps to the
 // growth_plan pipeline until tier 2 has its own.
 async function evaluationTierFor(accountId) {
+  if (DEV_UNLOCK) return "growth_plan";
   if (!accountId || accountId === "demo-account") return "social_snapshot";
   try {
     const ent = await geDb.getEffectiveEntitlement(accountId);
@@ -546,7 +556,7 @@ router.post("/evaluate/social-snapshot", evaluateLimiter, optionalAuth, validate
     // (2) Paid on-demand runs are metered per day; the weekly refresh is scheduled
     // and doesn't count. Every run is a fresh Apify pull (cached 24h) plus five
     // LLM calls, so an unmetered "run again" button is an open tab on the bill.
-    if (tier !== "social_snapshot" && !req.body.scheduled) {
+    if (tier !== "social_snapshot" && !req.body.scheduled && !DEV_UNLOCK) {
       const limit = Number(process.env.PAID_RUNS_PER_DAY || 5);
       const used = await geDb.getUsage(accountId, "eval");
       if (used >= limit) {
@@ -667,7 +677,7 @@ router.get("/reports/:reportId", optionalAuth, async (req, res) => {
     if (!report) return res.status(404).json({ error: "Report not found" });
     // Free snapshots are link-shareable (the id is unguessable). Paid reports
     // belong to the account that paid for them.
-    if (report.tier && report.tier !== "social_snapshot" && report.accountId !== req.user?.id) {
+    if (!DEV_UNLOCK && report.tier && report.tier !== "social_snapshot" && report.accountId !== req.user?.id) {
       return sendError(res, req.user ? 403 : 401, req.user ? "NOT_YOUR_REPORT" : "MISSING_TOKEN", "Sign in to view this report");
     }
 
