@@ -14,6 +14,8 @@ t("topics", () => {
   assert.equal(q.topicOf({ title: "Boost Posting Consistency", action: "Post Reel Mon Wed Fri" }), "schedule");
   assert.equal(q.topicOf({ title: "Gear Spotlight Carousel", action: "Create a 5-slide carousel" }), "format");
   assert.equal(q.topicOf({ title: "Reply to every comment", action: "Answer comments within an hour" }), "engage");
+  assert.equal(q.topicOf({ title: "New Reel: Behind-the-camera recap", action: "Cut a 15s reel from the Rainier footage; caption ends with DM for collabs." }), "repurpose");
+  assert.equal(q.topicOf({ title: "Add contact line in bio", action: "Edit your bio to include a brand partnership CTA and your email address." }), "bio_cta");
 });
 const phases = [
   { label: "Improve Profile Clarity", visible_action: "Add a link to your bio", opener: {}, moves: [{ n: 2, title: "Add DM CTA", action: "Insert a DM line in your bio" }, { n: 3, title: "Make a highlight", action: "Add a highlight" }] },

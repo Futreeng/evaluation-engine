@@ -13,7 +13,8 @@ const DAY_IDX = Object.fromEntries(DAYS.map((d, i) => [d, i]));
 // dimension it serves. Order matters: first match wins.
 const TOPICS = [
   { key: "bio_link", dim: "profile", once: true, re: /\b(linktree|link in bio|external link|add (a |the |your )?link|bio link|website link|link to (a |your |the )?(media kit|booking|newsletter|shop|site))\b/i },
-  { key: "bio_cta", dim: "profile", once: true, re: /\b(dm (line|cta|for)|call[- ]?to[- ]?action|cta|contact (line|email|button)|email (line|address|in bio)|📩)/i },
+  // A CTA is a bio move only when the bio is what changes; "DM for collabs" in a reel caption is content.
+  { key: "bio_cta", dim: "profile", once: true, re: /\bbio\b.{0,60}\b(cta|dm|contact|email|call[- ]?to[- ]?action)\b|\b(cta|dm line|contact line|email line|call[- ]?to[- ]?action)\b.{0,60}\bbio\b|📩.{0,40}\bbio\b|\bbio\b.{0,40}📩|\bcontact (line|button)\b/i },
   { key: "bio_rewrite", dim: "profile", once: true, re: /\b(rewrite|revise|update|edit|rework|tighten|new)\b.{0,20}\bbio\b|\bbio\b.{0,30}\b(rewrite|revise|niche statement|tagline|first line)\b/i },
   { key: "highlight", dim: "profile", once: true, re: /\bhighlights?\b/i },
   { key: "pin", dim: "profile", once: true, re: /\bpin(ned|ning)?\b/i },
