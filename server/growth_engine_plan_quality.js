@@ -201,6 +201,21 @@ function dedupePhases(phases, { labels = [] } = {}) {
   return { phases: out, dropped };
 }
 
+// The phase openers are written in the free snapshot, before the schedule exists, so
+// they can name other days or times. Rewrite day lists and clock times in them to the
+// plan's one schedule. Moves are left alone: they were written with the schedule in hand.
+const DAY_WORD = "(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)(?:day|sday|nesday|rsday|urday)?";
+const DAY_LIST_RE = new RegExp(`\\b${DAY_WORD}(?:\\s*(?:,|/|&|and|\\+)\\s*${DAY_WORD}){1,5}\\b`, "g");
+const CLOCK_RE = /\b\d{1,2}(?::\d\d)?\s?(?:am|pm)\b/gi;
+function applySchedule(text, schedule) {
+  if (!text || !schedule?.days?.length) return text;
+  const days = schedule.days.join(", ").replace(/, ([^,]+)$/, " and $1");
+  const time = schedule.times?.[schedule.days[0]] || null;
+  let out = String(text).replace(DAY_LIST_RE, days);
+  if (time) out = out.replace(CLOCK_RE, time);
+  return out;
+}
+
 // ------------------------------------------------------------------ finish
 // Names, hygiene and verified steps across the whole report. Idempotent.
 function finishPlan(reportBody, { platform = reportBody.business?.platform || "instagram" } = {}) {
@@ -218,7 +233,9 @@ function finishPlan(reportBody, { platform = reportBody.business?.platform || "i
     o.topic = topic;
     return o;
   };
+  const schedule = reportBody.calendar?.schedule || null;
   for (const ph of reportBody.growth_path?.phases || []) {
+    if (schedule) { for (const k of ["visible_action", "detail"]) if (ph[k]) ph[k] = applySchedule(ph[k], schedule); if (ph.opener) { ph.opener = { ...ph.opener, how: (ph.opener.how || []).map((x) => applySchedule(x, schedule)), done_when: applySchedule(ph.opener.done_when, schedule), example: ph.opener.example ? applySchedule(ph.opener.example, schedule) : ph.opener.example }; } }
     if (ph.opener) ph.opener = fixMove(ph.opener, { title: ph.label, action: ph.visible_action });
     if (ph.visible_action) ph.visible_action = fix(ph.visible_action);
     if (ph.detail) ph.detail = fix(ph.detail);
@@ -252,4 +269,4 @@ function benchmarkText(t) {
   };
 }
 
-module.exports = { TOPICS, topicOf, topicDef, dimOfLabel, datesIn, postName, postIndex, namePosts, sanitize, HOWTO, howFor, deriveSchedule, cadenceFor, validatePhases, dedupePhases, finishPlan, benchmarkText };
+module.exports = { applySchedule, TOPICS, topicOf, topicDef, dimOfLabel, datesIn, postName, postIndex, namePosts, sanitize, HOWTO, howFor, deriveSchedule, cadenceFor, validatePhases, dedupePhases, finishPlan, benchmarkText };

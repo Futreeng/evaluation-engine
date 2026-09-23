@@ -159,6 +159,17 @@ t("verify against a baseline", () => {
   assert.equal(v2.p1m1.ok, false); assert.equal(v2.p1m2.ok, false); // marked done, but the bio reads the same → recorded as not seen
 });
 
+t("phase openers follow the plan's schedule", () => {
+  const sch = { days: ["Thu", "Fri", "Sun"], times: { Thu: "6pm", Fri: "6pm", Sun: "6pm" } };
+  assert.equal(q.applySchedule("Schedule three archive Reels on Mon, Wed, Fri at 7:15am.", sch), "Schedule three archive Reels on Thu, Fri and Sun at 6pm.");
+  assert.equal(q.applySchedule("Post every Monday and Wednesday", sch), "Post every Thu, Fri and Sun");
+  assert.equal(q.applySchedule("Reply within 2 hours", sch), "Reply within 2 hours");
+  const b = { business: { handle: "x" }, calendar: { schedule: sch, weeks: [] }, growth_path: { phases: [{ label: "Kick-start Cadence", visible_action: "Post Mon, Wed, Fri at 8am", detail: "Three fixed days", opener: { how: ["Schedule for 7:15am on Mon, Wed, and Fri"], done_when: "A reel every Mon/Wed/Fri", example: null }, moves: [] }] } };
+  q.finishPlan(b);
+  assert.equal(b.growth_path.phases[0].visible_action, "Post Thu, Fri and Sun at 6pm");
+  assert.equal(b.growth_path.phases[0].opener.done_when, "A reel every Thu, Fri and Sun");
+});
+
 // ---- data layer (crash report follow-ups): median, unpinned, recent
 const scoring = require("./growth_engine_scoring");
 const { calculateMetrics } = require("./instagram_fetcher");

@@ -808,7 +808,7 @@ window.SCALECRAFT_SAMPLE = {
    {
     "range": "31-60",
     "label": "Boost Posting Consistency",
-    "visible_action": "Post Reel Thu, Fri, Sun",
+    "visible_action": "Post Reel Thu, Fri and Sun",
     "detail": "Pick three fixed posting days and post a Reel each",
     "locked": {
      "count": 0,
@@ -838,7 +838,7 @@ window.SCALECRAFT_SAMPLE = {
       "Check the Scheduled content list under your profile menu."
      ],
      "example": "The last few steps in America. Cape Flattery, Washington.",
-     "done_when": "Your feed shows a reel every Thu, Fri, Sun",
+     "done_when": "Your feed shows a reel every Thu, Fri and Sun",
      "time": "10 min, ongoing",
      "topic": "schedule"
     },
@@ -1137,7 +1137,7 @@ window.SCALECRAFT_SAMPLE = {
   },
   {
    "n": 2,
-   "day": "Sun",
+   "day": "Fri",
    "time": "6pm",
    "format": "reel",
    "hook": "Wandering with purpose.",
@@ -1149,7 +1149,7 @@ window.SCALECRAFT_SAMPLE = {
   },
   {
    "n": 3,
-   "day": "Thu",
+   "day": "Sun",
    "time": "6pm",
    "format": "carousel",
    "hook": "Throwback to my journey.",
@@ -1161,7 +1161,7 @@ window.SCALECRAFT_SAMPLE = {
   },
   {
    "n": 4,
-   "day": "Fri",
+   "day": "Thu",
    "time": "6pm",
    "format": "reel",
    "hook": "Gear that takes me places.",
@@ -1173,7 +1173,7 @@ window.SCALECRAFT_SAMPLE = {
   },
   {
    "n": 5,
-   "day": "Sun",
+   "day": "Fri",
    "time": "6pm",
    "format": "reel",
    "hook": "Behind every reel...",
@@ -1185,7 +1185,7 @@ window.SCALECRAFT_SAMPLE = {
   },
   {
    "n": 6,
-   "day": "Fri",
+   "day": "Sun",
    "time": "6pm",
    "format": "reel",
    "hook": "Your next brand partnership starts here",
@@ -1251,43 +1251,6 @@ window.SCALECRAFT_SAMPLE = {
  },
  "created_at": 1790033506878,
  "sample": true,
- "plan_dropped": [
-  {
-   "phase": 1,
-   "title": "Revise Bio",
-   "reason": "duplicate",
-   "topic": "bio_cta"
-  },
-  {
-   "phase": 2,
-   "title": "Pin media kit reel",
-   "reason": "duplicate",
-   "topic": "pin"
-  },
-  {
-   "phase": 2,
-   "title": "Add contact line in bio",
-   "reason": "duplicate",
-   "topic": "bio_cta"
-  },
-  {
-   "phase": 2,
-   "title": "Create Brand Collabs highlight",
-   "reason": "duplicate",
-   "topic": "highlight"
-  },
-  {
-   "phase": 3,
-   "title": "Collab Highlight",
-   "reason": "duplicate",
-   "topic": "highlight"
-  },
-  {
-   "phase": 3,
-   "title": "Add CTA Email Line to Bio",
-   "reason": "duplicate",
-   "topic": "bio_cta"
-  }
- ],
- "sample_cleaned_at": 1790119525854
+ "plan_dropped": [],
+ "sample_cleaned_at": 1790189720493
 };
