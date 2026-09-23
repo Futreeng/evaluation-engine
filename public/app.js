@@ -249,8 +249,11 @@
     const last = sget('sc_form', {});
     const platform = supported(last.platform) ? last.platform : 'instagram';
     const niche = last.category || 'fitness_creator';
-    const sample = sget('sc_sample', null);
-    const hero = sample ? { ...sample, link: '#/report/' + sample.report_id } : SAMPLE;
+    // The hero is always the shipped sample. It used to show whichever report
+    // ran last, which made every visit look pinned to that account even after
+    // opening a different report. Real reports live on the account (adopted on
+    // signup) and in the baselines, not in a landing-page slot.
+    const hero = SAMPLE;
     const pr = promo();
     $view.innerHTML = h`
       <div class="wrap">
@@ -486,7 +489,7 @@
         const rawReport = job.resultPayload || job.result || null;
         const id = rawReport?.report_id || rawReport?.reportId || job.report_id;
         const report = rawReport && id ? normalizeReport(rawReport, id) : null;
-        if (report) { sset('sc_report_' + id, report); rememberSample(report); }
+        if (report) sset('sc_report_' + id, report);
         render({ status: 'complete', overall: report?.scores?.overall });
         setTimeout(() => { if (id) go('#/report/' + encodeURIComponent(id)); else $view.innerHTML = h`<div class="center-msg"><h2>Finished, but no report came back.</h2><a href="#/">Try again</a></div>`; }, 900);
         return;
@@ -496,11 +499,6 @@
     };
     render({ status: 'queued' });
     tick();
-  }
-  // The landing hero shows the visitor's own latest report once they have one.
-  function rememberSample(r) {
-    if (!r.scores || r.scores.overall == null) return;
-    sset('sc_sample', { report_id: r.report_id, handle: r.business?.handle, platform: r.business?.platform, date: r.generated_at || r.created_at, followers: r.business?.followers || r.followers || 0, overall: r.scores.overall, dims: (r.scores.dimensions || []).map(d => ({ label: d.label, score: d.score, category_avg: d.category_avg })), summary: r.scores.summary || '' });
   }
 
   // ------------------------------------------------------------ report normalisation
@@ -757,6 +755,26 @@
     render();
   }
 
+  // Checks a cached report against the server without blocking the render.
+  // A 404/403 means the cached copy is dead: clear it, and say so if the user
+  // is still looking at that report. Other errors (offline, server blip) leave
+  // the cache alone so a good report doesn't vanish on a bad connection.
+  async function revalidateReport(reportId) {
+    let fresh;
+    try {
+      fresh = normalizeReport(await api('/reports/' + encodeURIComponent(reportId)), reportId);
+    } catch (e) {
+      if (e.status !== 404 && e.status !== 403) return;
+      try { sessionStorage.removeItem('sc_report_' + reportId); } catch { }
+      if (location.hash.indexOf('#/report/' + reportId) === 0) {
+        renderHeader('report');
+        $view.innerHTML = h`<div class="center-msg"><h2>This report is no longer available.</h2><a href="#/">Score an account</a></div>`;
+      }
+      return;
+    }
+    sset('sc_report_' + reportId, fresh);
+  }
+
   async function viewReport(reportId) {
     // Live prices for the upsell and plan copy — never the numbers frozen into an old report body.
     // Founders spots and prices can change under an open tab: refetch after 10 minutes so the page and checkout agree.
@@ -764,6 +782,11 @@
     const isSample = reportId === 'sample';
     if (isSample && !SHIPPED) { renderHeader('report'); $view.innerHTML = h`<div class="center-msg"><h2>Score your own account to see a real one.</h2><a href="#/">Score my account</a></div>`; return; }
     let report = isSample ? SHIPPED : sget('sc_report_' + reportId, null);
+    // The cached copy paints instantly, but the server is the source of truth.
+    // A report can be gone server-side while a stale copy still sits in this
+    // tab: the page then looks fine until a button hits the API and 404s.
+    // Revalidate in the background and drop the cache if it no longer exists.
+    if (report && !isSample) revalidateReport(reportId);
     if (!report) {
       renderHeader('report');
       $view.innerHTML = h`<div class="center-msg">Loading your report…</div>`;
