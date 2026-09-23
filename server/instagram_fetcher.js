@@ -138,10 +138,18 @@ function calculateMetrics(user, posts) {
   averageCaptionLength = Math.round(averageCaptionLength / postCount);
   const avgEngagementPerPost = Math.round(totalEngagement / postCount);
   const avgLikesPerPost = Math.round(totalLikes / postCount);
-  const engagementRate =
-    user.followers_count > 0
-      ? (totalEngagement / (postCount * user.followers_count) * 100).toFixed(2)
-      : 0;
+  // Engagement rate is the MEDIAN post's likes+comments over followers, on the unpinned
+  // feed from the last year (when that leaves 8+ posts). One viral reel or a pinned
+  // post from 2019 no longer sets the number. The mean is kept for reference.
+  const yearAgo = Date.now() - 365 * 86400000;
+  const eng = (p) => (p.like_count || 0) + (p.comments_count || 0);
+  const unpinned = posts.filter((p) => !p.is_pinned);
+  const recent = unpinned.filter((p) => +new Date(p.timestamp) >= yearAgo);
+  const window = recent.length >= 8 ? recent : unpinned.length >= 8 ? unpinned : posts;
+  const sortedEng = window.map(eng).sort((a, b) => a - b);
+  const medianEngagement = sortedEng.length ? (sortedEng.length % 2 ? sortedEng[(sortedEng.length - 1) / 2] : (sortedEng[sortedEng.length / 2 - 1] + sortedEng[sortedEng.length / 2]) / 2) : 0;
+  const engagementRateMean = user.followers_count > 0 ? (totalEngagement / (postCount * user.followers_count) * 100).toFixed(2) : 0;
+  const engagementRate = user.followers_count > 0 ? (medianEngagement / user.followers_count * 100).toFixed(2) : 0;
 
   // Posting frequency (estimate from available posts)
   const dateRange = calculateDateRange(posts);
@@ -164,6 +172,9 @@ function calculateMetrics(user, posts) {
       avg_engagement_per_post: avgEngagementPerPost,
       avg_likes_per_post: avgLikesPerPost,
       engagement_rate_percent: parseFloat(engagementRate),
+      engagement_rate_mean_percent: parseFloat(engagementRateMean),
+      median_engagement_per_post: Math.round(medianEngagement),
+      engagement_window: { posts: window.length, basis: window === recent ? "unpinned, last 365 days" : window === unpinned ? "unpinned" : "all sampled" },
     },
     reach: {
       total_impressions: totalImpressions,

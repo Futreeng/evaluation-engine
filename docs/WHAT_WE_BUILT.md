@@ -212,6 +212,14 @@ answers on when to post, Instagram steps that don't exist. Two parts:
   `path_done`, `path_skipped`, `path_later`, `move_skipped`.
 - Tests: `node server/growth_engine_path.test.js`.
 
+### Data layer (crash-report follow-ups, 23 Sept)
+- Engagement rate is the median post's likes+comments over followers, on the unpinned
+  feed from the last year (the mean is kept as `engagement_rate_mean_percent`). One viral
+  reel or a pinned post from 2019 no longer sets the number.
+- Best/worst posts exclude pinned posts and rank against the median (`post_insights.metric`).
+- Best times need three posts per window (was two) and only look at the last year.
+- The evaluating screen's failures are classified; see the handoff note.
+
 ## Also fixed along the way
 
 - Stored report bodies carried a provisional `report_id` (share sheet broke).

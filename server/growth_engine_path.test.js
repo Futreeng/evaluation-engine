@@ -159,4 +159,37 @@ t("verify against a baseline", () => {
   assert.equal(v2.p1m1.ok, false); assert.equal(v2.p1m2.ok, false); // marked done, but the bio reads the same → recorded as not seen
 });
 
+// ---- data layer (crash report follow-ups): median, unpinned, recent
+const scoring = require("./growth_engine_scoring");
+const { calculateMetrics } = require("./instagram_fetcher");
+t("rankPosts drops pinned posts and ranks against the median", () => {
+  const mk = (d, l, pinned = false) => ({ timestamp: d, like_count: l, comments_count: 0, media_type: "VIDEO", is_reel: true, is_pinned: pinned, caption: "x" });
+  const r = scoring.rankPosts([mk("2019-12-11T00:00:00Z", 5000, true), mk("2026-09-01T00:00:00Z", 100), mk("2026-09-05T00:00:00Z", 120), mk("2026-09-10T00:00:00Z", 110), mk("2026-09-17T00:00:00Z", 8000)]);
+  assert.equal(r.metric, "median"); assert.equal(r.sample, 4);
+  assert.equal(r.avg_engagement, 115); // median of 100,110,120,8000
+  assert.equal(r.top[0].likes, 8000); assert.equal(r.top[0].vs_avg, +(8000 / 115).toFixed(2));
+  assert(!r.top.some((p) => p.pinned));
+});
+t("engagement rate is the median post on the recent unpinned feed", () => {
+  const posts = [];
+  for (let i = 0; i < 10; i++) posts.push({ timestamp: new Date(Date.now() - i * 7 * DAY).toISOString(), like_count: 100, comments_count: 0, media_type: "VIDEO" });
+  posts.push({ timestamp: new Date(Date.now() - 3 * DAY).toISOString(), like_count: 9000, comments_count: 0, media_type: "VIDEO" });
+  posts.push({ timestamp: "2019-12-11T00:00:00Z", like_count: 5000, comments_count: 0, media_type: "IMAGE", is_pinned: true });
+  const m = calculateMetrics({ followers_count: 1000 }, posts);
+  assert.equal(m.engagement.engagement_rate_percent, 10); // 100 / 1000
+  assert(m.engagement.engagement_rate_mean_percent > 100);
+  assert.equal(m.engagement.engagement_window.basis, "unpinned, last 365 days");
+});
+t("best times need three posts per window and use last year's posts", () => {
+  const bt = require("./growth_engine_besttime");
+  const at = (daysAgo, hour) => { const d = new Date(Date.now() - daysAgo * DAY); d.setUTCHours(hour, 0, 0, 0); return d.toISOString(); };
+  const posts = [];
+  for (let w = 0; w < 14; w++) { posts.push({ posted_at: at(w * 7, 19), likes: 300, comments: 10 }); posts.push({ posted_at: at(w * 7 + 2, 9), likes: 100, comments: 2 }); posts.push({ posted_at: at(w * 7 + 4, 9), likes: 90, comments: 2 }); }
+  posts.push({ posted_at: at(3, 13), likes: 5000, comments: 100 }); posts.push({ posted_at: at(10, 13), likes: 4000, comments: 100 }); // two-post window: not enough
+  const r = bt.bestTimes(posts, { tz: "UTC" });
+  assert.equal(r.confident, true);
+  assert(!r.windows.some((w) => w.n < 3));
+  assert(r.best_days.every((d) => d.n >= 3));
+});
+
 console.log(`${n} passed${process.exitCode ? "" : " — all good"}`);
