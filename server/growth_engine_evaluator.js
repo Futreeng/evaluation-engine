@@ -10,6 +10,8 @@ const evidence = require("./growth_engine_evidence");
 let currentLlmLabel = "";
 const { analyzeTikTokAccountViaApify } = require("./tiktok_apify_fetcher");
 const { scoreProfile, rankPosts } = require("./growth_engine_scoring");
+const scoring = require("./growth_engine_scoring");
+const planQuality = require("./growth_engine_plan_quality");
 
 // Persona prompts for each tier
 const PERSONA_PROMPTS = {
@@ -145,7 +147,14 @@ Category benchmarks: {{CATEGORY_BENCHMARKS}}
 Snapshot (already shown to the owner): {{SNAPSHOT_JSON}}
 This phase's first move (already written — do not repeat it as a numbered move): {{FIRST_MOVE}}
 {{OTHER_PHASES}}
+{{PRIOR_MOVES}}
+Posting schedule (fixed for the whole plan — every move, day and time must use it, never propose another): {{SCHEDULE}}
 {{PLAN_CONTEXT}}
+Plan rules:
+- Every move in this phase serves "{{PHASE_LABEL}}". A profile move (bio, link, highlight, pinned post) belongs only in a profile phase; a cadence move only in a consistency phase; a format or repurposing move only in a content phase.
+- One-off actions happen once in the whole plan: one bio edit, one link, one highlight, one pinned post. If a prior move already did it, do not do it again in any form.
+- Refer to posts by their name and date the way a person would ("the Cape Flattery reel, Sep 17"), never by a bare ISO date. Use any single post in at most two moves across the plan.
+- Never tell them to "swipe up" (it doesn't exist); say "link in bio".
 Field rules:
 - "how": 3 to 5 numbered steps, each under 20 words, concrete to {{PLATFORM}}'s actual screens ("Edit profile → Links → Add external link") and to this account's own posts and wording.
 - Never write bracketed placeholders like [Your Link Here] or email@domain.com. If a link or email is needed and none was given, say what to add and where, in plain words.
@@ -154,17 +163,16 @@ Field rules:
 - "time": effort in plain words, e.g. "20 min, once", "10 min per post, ongoing", "1 hour this week".
 
 Produce ONLY a JSON object, no prose, no markdown fences:
-{"posting_days":["Mon","Wed","Sat"],"posting_time":"7:15am",
- "first_move":{"how":["step","step","step"],"example":"…or null","done_when":"…","time":"…"},
+{"first_move":{"how":["step","step","step"],"example":"…or null","done_when":"…","time":"…"},
  "moves":[{"n":{{MOVE_FIRST}},"title":"under 6 words","action":"one imperative sentence, under 25 words","why":"one sentence under 25 words tied to a number, post or bio line from the data","how":["…","…","…"],"example":"…or null","done_when":"…","time":"…"}, … {{MOVE_COUNT}} moves total]}
-posting_days must match the snapshot's first moves if they name days. Valid JSON only.`;
+Valid JSON only.`;
 
 const PLAN_CALENDAR_PROMPT = `You are the Plan Writer for Scalecraft. Write a 12-week posting calendar for this account, built from its own best-performing formats and subjects.
 
 Handle: {{HANDLE}} ({{PLATFORM}})
 Category: {{CATEGORY}}
 Best and worst recent posts: {{POST_INSIGHTS}}
-Posting days: {{POSTING_DAYS}} at {{POSTING_TIME}}
+Posting schedule (fixed; one slot per listed day, at that time): {{POSTING_DAYS}}
 Phase plan (weeks 1-4 serve phase 1, 5-8 phase 2{{PHASE3_NOTE}}): {{PHASES_JSON}}
 {{PLAN_CONTEXT}}
 Produce ONLY a JSON array of {{WEEKS}} weeks, no prose, no markdown fences:
@@ -182,9 +190,10 @@ Best and worst recent posts: {{POST_INSIGHTS}}
 Their bio: {{BIO}}
 Current plan phase: {{PHASE}}
 Upcoming calendar slots (follow their formats and angles where sensible): {{SLOTS}}
-Posting windows that perform for this account (use these day/time pairs, cycling through them in order): {{WINDOWS}}
+Posting schedule (fixed; use these day/time pairs, cycling through them in order): {{WINDOWS}}
 {{PLAN_CONTEXT}}
 {{AVOID}}
+Audience rules: these posts are for the people who follow this account, not for sponsors. No media-kit pitches, no "DM for collabs" as the point of a post (a bio handles that), no "swipe up", no placeholders like [Name] — write "I" in their voice. Mention brand work at most once across the set, and only as a line in a caption. Refer to past posts by name and date ("the Cape Flattery reel, Sep 17"), never a bare ISO date.
 Produce ONLY a JSON array of {{COUNT}} posts, no prose, no markdown fences:
 [{"n":1,"day":"Thu","time":"7pm","format":"reel","hook":"the first line on screen or the first sentence spoken, under 12 words","caption":"the full caption in their voice, 2–5 short lines, hashtags only if they already use them","script":"for a reel/video: a 4–8 line spoken script or shot list as plain text with line breaks; for a carousel: one line per slide; for a photo: what to shoot and the caption angle","why":"one sentence tying this post to a specific past post or number","source":"new|archive|no_camera"}]
 Valid JSON only.`;
@@ -599,9 +608,10 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
   let postsLast14d = null;
   let postRecords = [];
   let profileBio = null;
+  let realData = null;
   try {
     await onStage("finding", 1);
-    const realData = await getRealPostData(handle, platform, category);
+    realData = await getRealPostData(handle, platform, category);
     await onStage("reading", 2);
     postRecords = Array.isArray(realData.posts) ? realData.posts : [];
     profileBio = realData.biography || null;
@@ -625,7 +635,9 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
     throw err;
   }
   await onStage("scoring", 3);
-  const benchmarks = CATEGORY_BENCHMARKS[category] || CATEGORY_BENCHMARKS.fitness;
+  // Creators: the benchmark text is generated from the same numbers the scorer uses, so the
+  // explanation, the evidence line and the plan quote one target.
+  const benchmarks = CATEGORY_BENCHMARKS[category] || planQuality.benchmarkText(scoring.targetFor(category).target) || CATEGORY_BENCHMARKS.fitness;
 
   const templateVars = {
     HANDLE: handle,
@@ -636,8 +648,8 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
     CATEGORY_BENCHMARKS: JSON.stringify(benchmarks),
     POST_INSIGHTS: postInsights
       ? JSON.stringify({ avg_engagement: postInsights.avg_engagement, best_format: postInsights.patterns.best_format, best_day: postInsights.patterns.best_day,
-          top: postInsights.top.map((p) => ({ date: String(p.date).slice(0, 10), format: p.format, day: p.weekday, vs_avg: p.vs_avg, caption: p.caption })),
-          bottom: postInsights.bottom.map((p) => ({ date: String(p.date).slice(0, 10), format: p.format, day: p.weekday, vs_avg: p.vs_avg, caption: p.caption })) })
+          top: postInsights.top.map((p) => ({ name: planQuality.postName({ caption: p.caption, type: p.format, posted_at: p.date }), date: String(p.date).slice(0, 10), format: p.format, day: p.weekday, vs_avg: p.vs_avg, caption: p.caption })),
+          bottom: postInsights.bottom.map((p) => ({ name: planQuality.postName({ caption: p.caption, type: p.format, posted_at: p.date }), date: String(p.date).slice(0, 10), format: p.format, day: p.weekday, vs_avg: p.vs_avg, caption: p.caption })) })
       : "not available",
     COMPUTED_SCORES: computed
       ? JSON.stringify({ overall: computed.overall, dimensions: computed.dimensions.map((d) => ({ label: d.label, score: d.score, evidence: d.evidence, parts: d.parts })) })
@@ -711,6 +723,8 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
     posts: postRecords,
     posts_sampled: postRecords.length,
     bio: profileBio,
+    // What the path's verification compares at each rescore (docs/PATH_SPEC.md).
+    profile: { external_url: realData?.analysis?.profile_clarity?.external_url || realData?.website || null, highlight_count: Number(realData?.analysis?.profile_clarity?.highlight_count) || 0, pinned_posts: Number(realData?.analysis?.content?.pinned_posts) || 0, bio: profileBio || "" },
     tz: inputParams.tz || null,
     best_times: postRecords.length ? bestTimes(postRecords, { tz: inputParams.tz || "UTC", platform }) : null,
     data_window: postRecords.length ? `Based on your last ${postRecords.length} posts. We can't see saves, reach or story views.` : null,
@@ -857,21 +871,43 @@ async function evaluateTier1(accountId, inputParams, onStage = () => {}, { tier:
     return null;
   };
 
-  // One call per phase, in parallel. Each phase's moves carry how / example /
-  // done_when / time, which is too much output for one call on the fallback
-  // models; splitting also means one flaky call loses a phase, not the plan.
+  // One schedule for the whole plan, derived from the account's own best days and the
+  // hours they said they have — the model never proposes days or times.
+  const schedule = planQuality.deriveSchedule(reportBody, { targetPerWeek: scoring.targetFor(category).target?.posts_per_week });
+  // Phases are written in order, each seeing the moves already in the plan, and each
+  // checked for repeats and off-phase moves before the next one is written. A failing
+  // phase is rewritten once with the problems quoted back; what still repeats is dropped.
   const snapPhases = reportBody.growth_path?.phases ?? [];
   const MOVES_PER_PHASE = 4;
-  const phaseResults = await Promise.all(snapPhases.slice(0, PHASES_BOUGHT).map((p, i) => {
+  const phaseResults = [];
+  const labels = snapPhases.map((p) => p.label);
+  for (const [i, p] of snapPhases.slice(0, PHASES_BOUGHT).entries()) {
     const first = i * MOVES_PER_PHASE + 2;
     const others = snapPhases.filter((_, k) => k !== i).map((q) => `${q.range}: ${q.label} — first move: ${q.visible_action}`);
-    return askJson(interpolateTemplate(PLAN_PHASE_PROMPT, {
+    const prior = phaseResults.flatMap((r, k) => r ? [{ n: 1, title: snapPhases[k].label, action: snapPhases[k].visible_action }, ...(r.moves || [])] : []).map((m) => `- ${m.title}: ${m.action}`);
+    const vars = {
       ...baseVars,
       PHASE_RANGE: p.range, PHASE_LABEL: p.label || `Phase ${i + 1}`, FIRST_MOVE: p.visible_action || "",
       MOVE_COUNT: MOVES_PER_PHASE, MOVE_FIRST: first, MOVE_LAST: first + MOVES_PER_PHASE - 1,
       OTHER_PHASES: others.length ? `Other phases (do not overlap with them):\n${others.join("\n")}` : "",
-    }), `Plan Writer: phase ${i + 1}`, 6144).then((r) => (r && Array.isArray(r.moves) && r.moves.length ? r : null));
-  }));
+      PRIOR_MOVES: prior.length ? `Already in the plan (never repeat these, never touch the same bio line, link, highlight or pinned post again):\n${prior.join("\n")}` : "",
+      SCHEDULE: schedule.label,
+    };
+    let result = null;
+    for (let attempt = 0; attempt < 2 && !result; attempt++) {
+      const prompt = interpolateTemplate(PLAN_PHASE_PROMPT, vars) + (attempt && result === null && vars.PROBLEMS ? `\n\nYour previous answer was rejected:\n${vars.PROBLEMS}\nWrite ${MOVES_PER_PHASE} different moves that serve "${vars.PHASE_LABEL}" and repeat nothing.` : "");
+      // One flaky phase must not throw the paid report away: a phase that fails on every model ships as missing and the plan is marked for an early refresh.
+      let r = null;
+      try { r = await askJson(prompt, `Plan Writer: phase ${i + 1}${attempt ? " (rewrite)" : ""}`, 6144).then((x) => (x && Array.isArray(x.moves) && x.moves.length ? x : null)); }
+      catch (err) { console.warn(`[Growth Engine] Plan Writer: phase ${i + 1} failed on every model: ${String(err.message).slice(0, 160)}`); }
+      if (!r) break;
+      const check = planQuality.validatePhases([...phaseResults.map((pr, k) => ({ label: labels[k], visible_action: snapPhases[k].visible_action, opener: pr?.first_move || null, moves: pr?.moves || [] })), { label: labels[i], visible_action: p.visible_action, opener: r.first_move || null, moves: r.moves }], { labels });
+      const mine = check.problems.filter((x) => x.phase === i || x.kind === "overcite");
+      if (!mine.length || attempt) { result = r; if (mine.length) console.warn(`[Growth Engine] phase ${i + 1} still has ${mine.length} problem(s) after rewrite; deduping`); }
+      else { vars.PROBLEMS = mine.map((x) => `- ${x.text}`).join("\n"); console.warn(`[Growth Engine] phase ${i + 1} rejected: ${mine.map((x) => x.text).join(" | ")}`); }
+    }
+    phaseResults.push(result);
+  }
   const gotPhases = phaseResults.filter(Boolean);
   if (!gotPhases.length) throw new Error("Plan Writer returned no usable plan");
   if (gotPhases.length < snapPhases.slice(0, PHASES_BOUGHT).length) {
@@ -880,19 +916,20 @@ async function evaluateTier1(accountId, inputParams, onStage = () => {}, { tier:
     console.warn(`[Growth Engine] Plan Writer: ${gotPhases.length} of ${snapPhases.length} phases written — shipping partial plan`);
     reportBody.plan_incomplete = true;
   }
-  const lead = phaseResults[0] || gotPhases[0];
   const moves = {
-    posting_days: lead.posting_days, posting_time: lead.posting_time,
+    posting_days: schedule.days, posting_time: schedule.times[schedule.days[0]] || null, schedule,
     phases: snapPhases.slice(0, PHASES_BOUGHT).map((p, i) => ({ range: p.range, moves: phaseResults[i]?.moves || [], first_move: phaseResults[i]?.first_move || null })),
   };
-  const calendarRaw = await askJson(interpolateTemplate(PLAN_CALENDAR_PROMPT, {
+  let calendarRaw = null;
+  try { calendarRaw = await askJson(interpolateTemplate(PLAN_CALENDAR_PROMPT, {
     ...baseVars,
-    POSTING_DAYS: (moves.posting_days || []).join(", ") || "Mon, Wed, Fri",
+    POSTING_DAYS: schedule.label,
     POSTING_TIME: moves.posting_time || "morning",
     PHASES_JSON: JSON.stringify((reportBody.growth_path?.phases ?? []).slice(0, PHASES_BOUGHT).map((p, i) => ({ range: p.range, label: p.label, first_move: p.visible_action, moves: (moves.phases?.[i]?.moves || []).map((m) => m.title) }))),
     PHASE3_NOTE: PHASES_BOUGHT === 3 ? ", 9-12 phase 3" : "",
     WEEKS: WEEKS_BOUGHT,
-  }), "Plan Writer: calendar", 6144);
+  }), "Plan Writer: calendar", 6144); }
+  catch (err) { console.warn(`[Growth Engine] calendar failed on every model — shipping without one: ${String(err.message).slice(0, 120)}`); reportBody.plan_incomplete = true; }
   let calendarArr = Array.isArray(calendarRaw) ? calendarRaw : (calendarRaw && Array.isArray(calendarRaw.calendar) ? calendarRaw.calendar : []);
   // Models sometimes stop early and the loose parser keeps the weeks that
   // parsed. Ask once more for just the missing weeks rather than shipping
@@ -900,14 +937,16 @@ async function evaluateTier1(accountId, inputParams, onStage = () => {}, { tier:
   if (calendarArr.length && calendarArr.length < WEEKS_BOUGHT) {
     const have = calendarArr.length;
     console.warn(`[Growth Engine] calendar came back with ${have}/${WEEKS_BOUGHT} weeks — asking for the rest`);
-    const more = await askJson(interpolateTemplate(PLAN_CALENDAR_PROMPT, {
+    let more = null;
+    try { more = await askJson(interpolateTemplate(PLAN_CALENDAR_PROMPT, {
       ...baseVars,
-      POSTING_DAYS: (moves.posting_days || []).join(", ") || "Mon, Wed, Fri",
+      POSTING_DAYS: schedule.label,
       POSTING_TIME: moves.posting_time || "morning",
       PHASES_JSON: JSON.stringify((reportBody.growth_path?.phases ?? []).slice(0, PHASES_BOUGHT).map((p, i) => ({ range: p.range, label: p.label, first_move: p.visible_action, moves: (moves.phases?.[i]?.moves || []).map((m) => m.title) }))),
       PHASE3_NOTE: PHASES_BOUGHT === 3 ? ", 9-12 phase 3" : "",
       WEEKS: WEEKS_BOUGHT,
-    }).replace(`Produce ONLY a JSON array of ${WEEKS_BOUGHT} weeks`, `Weeks 1-${have} are already written. Produce ONLY a JSON array of the remaining weeks ${have + 1} through ${WEEKS_BOUGHT} (${WEEKS_BOUGHT - have} weeks, "week" numbered ${have + 1}..${WEEKS_BOUGHT})`), "Plan Writer: calendar (rest)", 6144);
+    }).replace(`Produce ONLY a JSON array of ${WEEKS_BOUGHT} weeks`, `Weeks 1-${have} are already written. Produce ONLY a JSON array of the remaining weeks ${have + 1} through ${WEEKS_BOUGHT} (${WEEKS_BOUGHT - have} weeks, "week" numbered ${have + 1}..${WEEKS_BOUGHT})`), "Plan Writer: calendar (rest)", 6144); }
+    catch (err) { console.warn(`[Growth Engine] calendar (rest) failed on every model — shipping ${have} weeks: ${String(err.message).slice(0, 120)}`); reportBody.plan_incomplete = true; }
     const rest = Array.isArray(more) ? more : (more && Array.isArray(more.calendar) ? more.calendar : []);
     const seen = new Set(calendarArr.map((w) => Number(w.week)));
     for (const w of rest) { const n = Number(w.week); if (n > have && n <= WEEKS_BOUGHT && !seen.has(n)) { calendarArr.push(w); seen.add(n); } }
@@ -938,6 +977,9 @@ async function evaluateTier1(accountId, inputParams, onStage = () => {}, { tier:
     planPhases = Object.entries(byRange).map(([range, moves]) => ({ range, moves }));
   }
   planPhases = planPhases.map((ph) => ({ ...ph, range: normRange(ph.range), moves: Array.isArray(ph.moves) ? ph.moves : [] }));
+  { const dd = planQuality.dedupePhases(planPhases.map((ph, i) => ({ ...ph, label: labels[i], visible_action: snapPhases[i]?.visible_action, opener: ph.first_move || null })), { labels });
+    if (dd.dropped.length) console.warn(`[Growth Engine] dropped ${dd.dropped.length} repeated/off-phase move(s): ${dd.dropped.map((x) => `"${x.move.title}" (${x.reason}, ${x.topic})`).join(", ")}`);
+    planPhases = dd.phases; reportBody.plan_dropped = dd.dropped.map((x) => ({ phase: x.phase + 1, title: x.move.title, reason: x.reason, topic: x.topic })); }
 
   reportBody.tier = runTier;
   // Rescore cadence by tier (P.1: Pro every 3 days) — plan config, not a constant.
@@ -964,7 +1006,7 @@ async function evaluateTier1(accountId, inputParams, onStage = () => {}, { tier:
   });
   reportBody.growth_path.unlocked_steps = reportBody.growth_path.phases.reduce((n, p) => n + 1 + p.moves.length, 0);
   reportBody.growth_path.total_steps = reportBody.growth_path.unlocked_steps + reportBody.growth_path.phases.reduce((n, p) => n + (p.not_included ? (p.locked?.count || 4) : 0), 0);
-  reportBody.calendar = { posting_days: days, posting_time: plan.posting_time ? String(plan.posting_time) : null, weeks };
+  reportBody.calendar = { posting_days: days, posting_time: plan.posting_time ? String(plan.posting_time) : null, schedule, weeks };
   reportBody.plan_days = PHASES_BOUGHT * 30;
   reportBody.plan_context = planContext;
   // Your next posts (spec 1.12): written now so the report arrives complete.
@@ -973,6 +1015,8 @@ async function evaluateTier1(accountId, inputParams, onStage = () => {}, { tier:
   reportBody.next_posts = await writeNextPosts(accountId, reportBody, { count: require("./growth_engine_plans").limitFor(runTier, "written_posts_per_week") || Number(process.env.NEXT_POSTS_COUNT || 6) });
   if (reportBody.next_posts?.length && accountId && accountId !== "demo-account") { try { await require("./growth_engine_db_select").bumpUsage(accountId, "written_posts", reportBody.next_posts.length); } catch { /* fine */ } }
   reportBody.upsell = { cta_label: "Upgrade to Business Evaluator", target_tier: "business_evaluator", unlock_count: 0 };
+  // Names, hygiene and verified how-to steps across moves, calendar and posts.
+  planQuality.finishPlan(reportBody, { platform });
   return reportBody;
 }
 
@@ -1103,7 +1147,7 @@ function nextPostsPrompt(reportBody, { count, regenerate = null } = {}) {
   const b = reportBody; const ctx = b.plan_context || null;
   const phaseIdx = Math.min((b.growth_path?.phases || []).length - 1, Math.max(0, Math.floor(((Date.now() - (b.plan_started_at || Date.now())) / 86400000) / 30)));
   const phase = (b.growth_path?.phases || [])[phaseIdx];
-  const windows = (b.best_times?.windows || []).map((w) => `${w.day} ${String(w.label).split(" ").slice(1).join(" ")}`);
+  const windows = b.calendar?.schedule?.label ? b.calendar.schedule.label.split(", ") : (b.best_times?.windows || []).map((w) => `${w.day} ${String(w.label).split(" ").slice(1).join(" ")}`);
   const wk = (b.calendar?.weeks || []).filter((w) => w.phase === phaseIdx + 1).slice(0, 2).flatMap((w) => w.slots || []).map((s) => `${s.day} ${s.format}: ${s.angle}`);
   const pi = b.post_insights || {};
   const others = regenerate != null ? (b.next_posts || []).filter((_, i) => i !== regenerate).map((p) => p.hook).filter(Boolean) : [];

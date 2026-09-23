@@ -74,10 +74,13 @@ function scorePostingConsistency(pf, t) {
   const ppw = num(pf.posts_per_week);
   const gap = num(pf.longest_gap_days, 0);
   const since = num(pf.days_since_last_post, 0);
-  const cadence = ramp(ppw, t.posts_per_week, 0);              // 60
-  const gaps = ramp(gap, t.max_gap_days, t.max_gap_days * 4);   // 25: full at target, zero at 4×
-  const recency = ramp(since, 7, 30);                           // 15
-  const score = pct(cadence * 0.6 + gaps * 0.25 + recency * 0.15);
+  // Cadence carries the dimension: full marks at the target, nothing at a third of it, so
+  // an account posting 60% of its target lands in the 50s–60s, not the 70s. Gaps and
+  // recency can't lift a thin cadence into "Strong" on their own.
+  const cadence = ramp(ppw, t.posts_per_week, t.posts_per_week / 3);   // 65
+  const gaps = ramp(gap, t.max_gap_days, t.max_gap_days * 4);         // 20: full at target, zero at 4×
+  const recency = ramp(since, 7, 30);                                 // 15
+  const score = pct(cadence * 0.65 + gaps * 0.2 + recency * 0.15);
   return {
     label: "Posting Consistency", score,
     evidence: `${num(pf.posts_analyzed)} posts over ${num(pf.date_range_days)} days (${ppw}/week vs ${t.posts_per_week}/week target); longest gap ${gap} days; last post ${since} day${since === 1 ? "" : "s"} ago`,
@@ -245,9 +248,16 @@ function rankPosts(posts, { top = 3, bottom = 3 } = {}) {
       };
     })
     .filter((r) => r.date);
-  if (rows.length < 2) return null;
-  const avg = rows.reduce((a, r) => a + r.engagement, 0) / rows.length;
-  for (const r of rows) r.vs_avg = avg > 0 ? +(r.engagement / avg).toFixed(2) : 1;
+  // Pinned posts are old favourites, not a read on the feed: leave them out when the
+  // feed has enough on its own. "vs_avg" is against the MEDIAN post (the field name
+  // stays for the front end), so one outlier doesn't make every other post look weak.
+  const feed = rows.filter((r) => !r.pinned);
+  const use = feed.length >= 4 ? feed : rows;
+  if (use.length < 2) return null;
+  const sortedE = use.map((r) => r.engagement).sort((a, b) => a - b);
+  const avg = sortedE.length % 2 ? sortedE[(sortedE.length - 1) / 2] : (sortedE[sortedE.length / 2 - 1] + sortedE[sortedE.length / 2]) / 2;
+  for (const r of use) r.vs_avg = avg > 0 ? +(r.engagement / avg).toFixed(2) : 1;
+  rows.length = 0; rows.push(...use);
   const sorted = [...rows].sort((a, b) => b.engagement - a.engagement);
   const byFormat = {};
   for (const r of rows) { (byFormat[r.format] ||= []).push(r.engagement); }
@@ -258,6 +268,7 @@ function rankPosts(posts, { top = 3, bottom = 3 } = {}) {
   const bestFormat = Object.entries(format_avg).filter(([, v]) => v.posts >= 2).sort((a, b) => b[1].avg_engagement - a[1].avg_engagement)[0];
   const bestDay = Object.entries(day_avg).sort((a, b) => b[1] - a[1])[0];
   return {
+    metric: "median",
     sample: rows.length,
     avg_engagement: Math.round(avg),
     top: sorted.slice(0, top),

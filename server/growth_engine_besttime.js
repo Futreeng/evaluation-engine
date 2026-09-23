@@ -13,7 +13,8 @@
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const BLOCKS = [[6, 9], [9, 12], [12, 15], [15, 18], [18, 21], [21, 24], [0, 6]]; // local hours
 const MIN_POSTS = Number(process.env.BESTTIME_MIN_POSTS || 12);
-const MIN_PER_BUCKET = Number(process.env.BESTTIME_MIN_PER_BUCKET || 2);
+const MIN_PER_BUCKET = Number(process.env.BESTTIME_MIN_PER_BUCKET || 3);
+const WINDOW_DAYS = Number(process.env.BESTTIME_WINDOW_DAYS || 365);
 const MIN_LIFT = Number(process.env.BESTTIME_MIN_LIFT || 1.15);
 // Sensible defaults when the data can't say (labelled as a starting point).
 const DEFAULTS = { instagram: [{ day: "Tue", block: [18, 21] }, { day: "Thu", block: [18, 21] }, { day: "Sat", block: [9, 12] }], tiktok: [{ day: "Tue", block: [18, 21] }, { day: "Thu", block: [15, 18] }, { day: "Sun", block: [18, 21] }] };
@@ -37,7 +38,11 @@ function validTz(tz) { try { new Intl.DateTimeFormat("en-US", { timeZone: tz });
 
 function bestTimes(posts, { tz = "UTC", platform = "instagram" } = {}) {
   const zone = validTz(tz) ? tz : "UTC";
-  const rows = (posts || []).filter((p) => p && p.posted_at && !p.is_pinned).map((p) => ({ ...localParts(p.posted_at, zone), e: engagementOf(p) })).filter((r) => r.day);
+  // Last year's unpinned posts (older habits aren't a read on when the audience is around now).
+  const cutoff = Date.now() - WINDOW_DAYS * 86400000;
+  const all = (posts || []).filter((p) => p && p.posted_at && !p.is_pinned);
+  const fresh = all.filter((p) => +new Date(p.posted_at) >= cutoff);
+  const rows = (fresh.length >= MIN_POSTS ? fresh : all).map((p) => ({ ...localParts(p.posted_at, zone), e: engagementOf(p) })).filter((r) => r.day);
   const med = median(rows.map((r) => r.e)) || 1;
   const buckets = new Map(); // "Tue|18-21" → [e...]
   for (const r of rows) { const b = blockOf(r.hour); const k = `${r.day}|${b[0]}-${b[1]}`; (buckets.get(k) || buckets.set(k, []).get(k)).push(r.e); }
@@ -54,7 +59,7 @@ function bestTimes(posts, { tz = "UTC", platform = "instagram" } = {}) {
       tz: zone, confident: true, sample: rows.length, metric,
       windows: scored.map((w) => ({ day: w.day, start_hour: w.block[0], end_hour: w.block[1], label: `${w.day} ${blockLabel(w.block)}`, n: w.n, vs_avg: w.vs_avg,
         explanation: `Your ${w.day} ${blockLabel(w.block)} posts average ${w.vs_avg}× your usual ${metric} (${w.n} post${w.n === 1 ? "" : "s"}).` })),
-      best_days: days.slice(0, 3).filter((d) => d.vs_avg >= 1).map((d) => ({ day: d.day, n: d.n, vs_avg: d.vs_avg })),
+      best_days: days.filter((d) => d.n >= MIN_PER_BUCKET && d.vs_avg >= 1).slice(0, 3).map((d) => ({ day: d.day, n: d.n, vs_avg: d.vs_avg })),
       note: `From your last ${rows.length} posts, in ${zone.replace(/_/g, " ")}. Windows need at least ${MIN_PER_BUCKET} posts and ${MIN_LIFT}× your median to count.`,
     };
   }
@@ -63,7 +68,7 @@ function bestTimes(posts, { tz = "UTC", platform = "instagram" } = {}) {
   return {
     tz: zone, confident: false, sample: rows.length, metric,
     windows: d.map((w) => ({ day: w.day, start_hour: w.block[0], end_hour: w.block[1], label: `${w.day} ${blockLabel(w.block)}`, n: 0, vs_avg: null, explanation: "A common strong window for creators on this platform — a starting point, not your data." })),
-    best_days: days.slice(0, 2).filter((x) => x.n >= 2 && x.vs_avg > 1).map((x) => ({ day: x.day, n: x.n, vs_avg: x.vs_avg })),
+    best_days: days.slice(0, 2).filter((x) => x.n >= MIN_PER_BUCKET && x.vs_avg > 1).map((x) => ({ day: x.day, n: x.n, vs_avg: x.vs_avg })),
     note: `${why} These are starting points; we'll replace them with your own windows as you post.`,
   };
 }

@@ -510,7 +510,7 @@ window.SCALECRAFT_SAMPLE = {
     "vs_avg": 1.3
    }
   ],
-  "note": "From your last 27 posts, in America/New York. Windows need at least 2 posts and 1.15× your median to count."
+  "note": "From your last 27 posts, in America/New York. Windows need at least 3 posts and 1.15× your median to count."
  },
  "data_window": "Based on your last 30 posts. We can't see saves, reach or story views.",
  "plan_context": {
@@ -521,20 +521,20 @@ window.SCALECRAFT_SAMPLE = {
   "notes": "No trips planned until spring. Mostly weekends free."
  },
  "data_confidence": "full",
- "narrative": "**SCALECRAFT SOCIAL SNAPSHOT — @talon__wilson**\n\n**WHERE YOU STAND**  \nYour overall rating is 75. The biggest gaps are Posting Consistency (score 76) and Profile Clarity (score 25), which together hold back your score. On the plus side, your Reels pull an average of 656 interactions—about 31 % above your overall average—and deliver a 29.9 % engagement rate.\n\n**THE SINGLE BIGGEST OPPORTUNITY**  \nAdd a clear, trackable call‑to‑action and an external link (e.g., a Linktree to a newsletter or booking page) in your bio to turn the 656‑interaction‑per‑Reel audience into booked travel experiences or newsletter sign‑ups. Your audience is already highly responsive (29.9 % engagement), so a simple CTA can convert that attention into measurable business results.\n\n**YOUR 30‑60‑90 DAY PATH**  \n1. **Days 1‑30 – Improve Profile Clarity:** Add a Linktree URL to your bio and rewrite the first line to read “Adventure travel guide – book a private tour or join the newsletter.” This gives your 29.9 %‑engaged audience a direct next step.  \n   🔒 4 more moves for this phase + your weeks 1‑4 posting calendar  \n\n2. **Days 31‑60 – Boost Posting Consistency:** Post a Reel on **Monday, Wednesday, and Friday** each week, using existing footage (e.g., clips from your Sep 17 2026 Reel). Three posts per week fit your 2‑5 hour weekly window and raise your consistency score.  \n   🔒 4 more moves for this phase  \n\n3. **Days 61‑90 – Optimize Content Strategy:** **Post a throwback Reel on Thursday of week 7** using the Sep 17 2026 footage, add a fresh voice‑over that highlights “hidden‑gem travel tips,” and schedule it for that day. Repurposing top‑performing content keeps engagement high without new shoots.  \n   🔒 4 more moves for this phase  \n\n**WHAT YOUR BEST POSTS HAVE IN COMMON**  \nYour top post (Sep 17 2026) was a Reel that opened with “The last few steps in America…” and was published on a Thursday. The three best posts all share the Reel format, a travel‑focused hook in the first line, and a Thursday publishing day, which aligns with your peak average engagement of 1,662. The three lowest‑performing posts are also Reels but were posted on Tuesdays or Wednesdays, received only 4‑17 % of average engagement, and have shorter, less specific captions.\n\n**WHAT THE FULL PLAN ADDS**  \nThe locked moves complete the three phases, flesh out a week‑by‑week posting calendar, and provide content prompts drawn from your own archive.",
+ "narrative": "**SCALECRAFT SOCIAL SNAPSHOT — @talon__wilson**\n\n**WHERE YOU STAND**  \nYour overall rating is 75. The biggest gaps are Posting Consistency (score 76) and Profile Clarity (score 25), which together hold back your score. On the plus side, your Reels pull an average of 656 interactions—about 31 % above your overall average—and deliver a 29.9 % engagement rate.\n\n**THE SINGLE BIGGEST OPPORTUNITY**  \nAdd a clear, trackable call‑to‑action and an external link (e.g., a Linktree to a newsletter or booking page) in your bio to turn the 656‑interaction‑per‑Reel audience into booked travel experiences or newsletter sign‑ups. Your audience is already highly responsive (29.9 % engagement), so a simple CTA can convert that attention into measurable business results.\n\n**YOUR 30‑60‑90 DAY PATH**  \n1. **Days 1‑30 – Improve Profile Clarity:** Add a Linktree URL to your bio and rewrite the first line to read “Adventure travel guide – book a private tour or join the newsletter.” This gives your 29.9 %‑engaged audience a direct next step.  \n   🔒 4 more moves for this phase + your weeks 1‑4 posting calendar  \n\n2. **Days 31‑60 – Boost Posting Consistency:** Post a Reel on **Thu, Fri, Sun** each week, using existing footage (e.g., clips from your Sep 17 2026 Reel). Three posts per week fit your 2‑5 hour weekly window and raise your consistency score.  \n   🔒 4 more moves for this phase  \n\n3. **Days 61‑90 – Optimize Content Strategy:** **Post a throwback Reel on Thursday of week 7** using the Sep 17 2026 footage, add a fresh voice‑over that highlights “hidden‑gem travel tips,” and schedule it for that day. Repurposing top‑performing content keeps engagement high without new shoots.  \n   🔒 4 more moves for this phase  \n\n**WHAT YOUR BEST POSTS HAVE IN COMMON**  \nYour top post (Sep 17 2026) was a Reel that opened with “The last few steps in America…” and was published on a Thursday. The three best posts all share the Reel format, a travel‑focused hook in the first line, and a Thursday publishing day, which aligns with your peak average engagement of 1,662. The three lowest‑performing posts are also Reels but were posted on Tuesdays or Wednesdays, received only 4‑17 % of average engagement, and have shorter, less specific captions.\n\n**WHAT THE FULL PLAN ADDS**  \nThe locked moves complete the three phases, flesh out a week‑by‑week posting calendar, and provide content prompts drawn from your own archive.",
  "scores": {
-  "overall": 75,
+  "overall": 71,
   "category_avg": 55,
   "summary": "The biggest point losses come from Posting Consistency and Profile Clarity",
   "dimensions": [
    {
     "label": "Posting Consistency",
-    "score": 76,
+    "score": 61,
     "explanation": "You posted 16 times in the last 53 days, which works out to about 2.1 posts per week, below the target of 4‑5 posts per week; the longest 6‑day gap and the fact that your most recent post was 5 days ago kept the score from being higher. Posting more often (aim for at least 4‑5 times weekly) and shortening gaps would lift this score.",
     "explanation_source": "model",
     "evidence": "16 posts over 53 days (2.1/week vs 3.5/week target); longest gap 6 days; last post 5 days ago",
     "parts": {
-     "cadence": 60,
+     "cadence": 40,
      "gaps": 100,
      "recency": 100
     },
@@ -657,8 +657,8 @@ window.SCALECRAFT_SAMPLE = {
   "category_sample_size": 16
  },
  "growth_path": {
-  "unlocked_steps": 15,
-  "total_steps": 15,
+  "unlocked_steps": 9,
+  "total_steps": 9,
   "phases": [
    {
     "range": "1-30",
@@ -676,56 +676,57 @@ window.SCALECRAFT_SAMPLE = {
       "action": "Insert a DM line at the end of your bio.",
       "why": "Bio currently has no CTA; DM line invites collab inquiries.",
       "how": [
-       "Open Profile → Edit Profile → scroll to Bio → type '📩 DM for collabs' at end → Save."
+       "Open your profile → Edit profile → Bio.",
+       "Add the line as the last line of your bio.",
+       "Tap Done, then check it on your public profile."
       ],
       "example": "📩 DM for collabs",
       "done_when": "DM line visible in bio.",
-      "time": "3 min"
+      "time": "3 min",
+      "topic": "bio_cta"
      },
      {
       "n": 3,
       "title": "Create Media Kit Highlight",
       "action": "Add a highlight with top 3 reels.",
-      "why": "High‑engagement reels (e.g., 2026‑09‑17, 2026‑09‑12, 2026‑09‑05) showcase brand‑friendly content.",
+      "why": "High‑engagement reels (e.g., the \"Cape Flattery\" reel (Sep 17), the \"I used to think you had…\" reel (Sep 12), the \"Never climb mountains for the world…\" reel (Sep 5)) showcase brand‑friendly content.",
       "how": [
-       "Tap the + icon on profile → Highlight → select 2026‑09‑17, 2026‑09‑12, 2026‑09‑05 → name 'Collab Kit' → set cover → Save."
+       "Post the story first (or open an old one from Profile → the clock icon → Stories archive).",
+       "On the story, tap Highlight → New → name it → Add.",
+       "On your profile, press and hold the highlight → Edit highlight → set the cover."
       ],
-      "example": "Title: Collab Kit; Cover: 2026‑09‑17 reel frame.",
+      "example": "Title: Collab Kit; Cover: the \"Cape Flattery\" reel (Sep 17) frame.",
       "done_when": "Highlight appears on profile.",
-      "time": "10 min"
+      "time": "10 min",
+      "topic": "highlight"
      },
      {
       "n": 4,
       "title": "Pin Top Post",
-      "action": "Pin 2026‑09‑17 reel to profile.",
+      "action": "Pin the \"Cape Flattery\" reel (Sep 17) to profile.",
       "why": "Pinned proof post demonstrates engagement to sponsors.",
       "how": [
-       "Go to 2026‑09‑17 reel → tap three dots → Pin to Profile → Confirm."
+       "Open the post from your profile grid.",
+       "Tap the three dots (top right) → Pin to your profile.",
+       "Up to three posts can be pinned; unpin the weakest if it's full."
       ],
-      "example": "Pinned post: 2026‑09‑17 reel.",
+      "example": "Pinned post: the \"Cape Flattery\" reel (Sep 17).",
       "done_when": "Pinned post appears below bio.",
-      "time": "5 min"
-     },
-     {
-      "n": 5,
-      "title": "Revise Bio",
-      "action": "Replace bio with concise niche statement, location, and DM CTA.",
-      "why": "Clear niche attracts relevant sponsors; CTA increases contact rate.",
-      "how": [
-       "Edit profile → replace bio with new text → Save."
-      ],
-      "example": "📍Wandering with purpose | 🌍 Nature & culture explorer | 🎥 Reels that make you feel | 📩 DM for collabs",
-      "done_when": "New bio shows on profile.",
-      "time": "3 min"
+      "time": "5 min",
+      "topic": "pin"
      }
     ],
     "opener": {
      "how": [
-      "Open Instagram app → Profile → Edit Profile → Links → Add external link → Paste Linktree URL → Save."
+      "Open Instagram → your profile → Edit profile.",
+      "Tap Links → Add external link.",
+      "Paste the URL, give it a short title, tap Done.",
+      "Check it from a logged-out browser."
      ],
-     "example": "Add link: https://linktr.ee/talonwilson",
+     "example": "Add link: your link (the page brands should land on — a media kit, or a Linktree that points to it)",
      "done_when": "External link shows in bio.",
-     "time": "5 min"
+     "time": "5 min",
+     "topic": "bio_link"
     },
     "calendar_weeks": [
      {
@@ -733,21 +734,21 @@ window.SCALECRAFT_SAMPLE = {
       "phase": 1,
       "slots": [
        {
-        "day": "Mon",
+        "day": "Thu",
         "format": "reel",
         "angle": "Media kit preview",
-        "prompt": "Voiceover: 'Swipe up to view my media kit. Link in bio. DM for collabs.'",
+        "prompt": "Voiceover: 'tap the link in my bio to view my media kit. Link in bio. DM for collabs.'",
         "source": "no_camera"
        },
        {
-        "day": "Wed",
+        "day": "Fri",
         "format": "reel",
         "angle": "Cape Flattery steps",
-        "prompt": "Re-cut 2026-09-17 reel, add CTA: 'DM for brand deals' in caption.",
+        "prompt": "Re-cut the \"Cape Flattery\" reel (Sep 17), add CTA: 'DM for brand deals' in caption.",
         "source": "archive"
        },
        {
-        "day": "Fri",
+        "day": "Sun",
         "format": "reel",
         "angle": "Bio tagline showcase",
         "prompt": "Voiceover: 'New bio tagline. Check bio for linktree & contact.'",
@@ -760,24 +761,24 @@ window.SCALECRAFT_SAMPLE = {
       "phase": 1,
       "slots": [
        {
-        "day": "Mon",
+        "day": "Thu",
         "format": "reel",
         "angle": "Throwback carousel recap",
-        "prompt": "Convert 2021-05-25 carousel into reel. Add voiceover, include DM CTA.",
+        "prompt": "Convert the \"Normalizing black faces in beautiful places\" carousel (May 25) into reel. Add voiceover, include DM CTA.",
         "source": "archive"
-       },
-       {
-        "day": "Wed",
-        "format": "reel",
-        "angle": "Gear spotlight overlay",
-        "prompt": "Voiceover: 'My essential gear for travel. Swipe up for details.'",
-        "source": "no_camera"
        },
        {
         "day": "Fri",
         "format": "reel",
+        "angle": "Gear spotlight overlay",
+        "prompt": "Voiceover: 'My essential gear for travel. tap the link in my bio for details.'",
+        "source": "no_camera"
+       },
+       {
+        "day": "Sun",
+        "format": "reel",
         "angle": "Behind‑the‑scenes clip",
-        "prompt": "Use 2026-09-12 reel, add text overlay: 'Behind the scenes.' DM for collabs.",
+        "prompt": "Use the \"I used to think you had…\" reel (Sep 12), add text overlay: 'Behind the scenes.' DM for collabs.",
         "source": "archive"
        }
       ]
@@ -787,17 +788,17 @@ window.SCALECRAFT_SAMPLE = {
       "phase": 1,
       "slots": [
        {
-        "day": "Mon",
+        "day": "Thu",
         "format": "reel",
         "angle": "Local cityscape",
         "prompt": "Show 5‑min city clips. Voiceover: 'Exploring local vibes. DM for collabs.'",
         "source": "no_camera"
        },
        {
-        "day": "Wed",
+        "day": "Fri",
         "format": "reel",
         "angle": "What I'd do differently",
-        "prompt": "Use 2026-09-17 reel, add text: 'What I'd do differently?'. CTA: DM.",
+        "prompt": "Use the \"Cape Flattery\" reel (Sep 17), add text: 'What I'd do differently?'. CTA: DM.",
         "source": "archive"
        }
       ]
@@ -807,7 +808,7 @@ window.SCALECRAFT_SAMPLE = {
    {
     "range": "31-60",
     "label": "Boost Posting Consistency",
-    "visible_action": "Post Reel Mon Wed Fri",
+    "visible_action": "Post Reel Thu, Fri and Sun",
     "detail": "Pick three fixed posting days and post a Reel each",
     "locked": {
      "count": 0,
@@ -815,71 +816,32 @@ window.SCALECRAFT_SAMPLE = {
     },
     "moves": [
      {
-      "n": 6,
-      "title": "Pin media kit reel",
-      "action": "Create a 15‑second reel summarizing your brand kit and pin it to the top of your profile.",
-      "why": "Your profile has no pinned posts showing brand value, see post 2026‑09‑17 with 8,324 likes.",
-      "how": [
-       "Choose the 2026‑09‑17 reel",
-       "Add a 5‑second intro with logo and stats",
-       "Pin the reel under Profile → Edit profile"
-      ],
-      "example": "Your brand story, captured here",
-      "done_when": "A pinned reel is visible on your profile",
-      "time": "15 min, once"
-     },
-     {
-      "n": 7,
-      "title": "Add contact line in bio",
-      "action": "Edit your bio to include a brand partnership CTA and your email address.",
-      "why": "Bio lacks CTA and contact; sponsors need a clear outreach method.",
-      "how": [
-       "Open Edit profile → Bio",
-       "Add line: 📩 Brand collabs: your email",
-       "Save changes"
-      ],
-      "example": "📩 Brand collabs: your email",
-      "done_when": "Your bio shows the new line",
-      "time": "5 min, once"
-     },
-     {
-      "n": 8,
-      "title": "Create Brand Collabs highlight",
-      "action": "Add a new highlight with archive reels that showcase your work to sponsors.",
-      "why": "No current highlights; sponsors need quick proof of past collaborations.",
-      "how": [
-       "Go to Reels archive → 2026‑09‑17",
-       "Add it to a new highlight titled \"Collabs\"",
-       "Choose thumbnail from 2026‑09‑17"
-      ],
-      "example": "Highlight cover: thumbnail of 2026‑09‑17 reel",
-      "done_when": "Your profile shows a \"Collabs\" highlight",
-      "time": "20 min, once"
-     },
-     {
       "n": 9,
       "title": "Archive reel teaser for sponsors",
       "action": "Repost a 5‑second teaser from a top reel with a brand outreach overlay.",
-      "why": "Repurposing high‑engagement content attracts sponsors; 2026‑09‑17 had 8,324 likes.",
+      "why": "Repurposing high‑engagement content attracts sponsors; the \"Cape Flattery\" reel (Sep 17) had 8,324 likes.",
       "how": [
-       "Trim 5 seconds from 2026‑09‑17 reel",
-       "Add text: DM for brand collabs",
-       "Post to Story with #BrandCollab"
+       "Find the original clip in your camera roll (or open the reel → three dots → Save to keep a copy).",
+       "Create → Reel → pick the clip, trim to the moment that worked, add the new voiceover or text on screen.",
+       "Write the caption fresh — say what's different this time — and post at your scheduled slot.",
+       "Add text: DM for brand collabs"
       ],
       "example": "DM for brand collabs",
       "done_when": "Your story shows a teaser with the CTA",
-      "time": "10 min, ongoing"
+      "time": "10 min, ongoing",
+      "topic": "repurpose"
      }
     ],
     "opener": {
      "how": [
-      "Create a reel using the 2026‑09‑17 post as a template",
-      "Save it as a draft",
-      "Schedule the draft for 7:15am on Mon, Wed, and Fri"
+      "Film or edit the posts for the week in one sitting and save them as drafts.",
+      "When you open a draft to post, tap Advanced settings → Schedule this post and set the day and time.",
+      "Check the Scheduled content list under your profile menu."
      ],
-     "example": "The last few steps in America. Cape Flattery, Washington.",
-     "done_when": "Your feed shows a reel every Mon, Wed, Fri",
-     "time": "10 min, ongoing"
+     "example": null,
+     "done_when": "Your feed shows a reel every Thu, Fri and Sun",
+     "time": "10 min, ongoing",
+     "topic": "schedule"
     },
     "calendar_weeks": []
    },
@@ -887,7 +849,7 @@ window.SCALECRAFT_SAMPLE = {
     "range": "61-90",
     "label": "Optimize Content Strategy",
     "visible_action": "Post throwback Reel Thursday",
-    "detail": "Use Sep 17 2026 footage, add new voice‑over, schedule for Thursday",
+    "detail": "Use the \"Cape Flattery\" reel (Sep 17) footage, add new voice‑over, schedule for Thursday",
     "locked": {
      "count": 0,
      "teaser": ""
@@ -897,156 +859,133 @@ window.SCALECRAFT_SAMPLE = {
       "n": 10,
       "title": "Gear Spotlight Carousel",
       "action": "Create a 5‑slide carousel that showcases your camera gear and why it’s brand‑friendly.",
-      "why": "Carousel 2026‑08‑07 earned 145 likes and 67 comments – the highest carousel engagement, proving gear interest.",
+      "why": "the \"Mount Storm King\" carousel (Aug 7) earned 145 likes and 67 comments – the highest carousel engagement, proving gear interest.",
       "how": [
-       "Download the images from carousel 2026‑08‑07 (\"There’s always more room at the top.\").",
+       "Download the images from the \"Mount Storm King\" carousel (Aug 7) (\"There’s always more room at the top.\").",
        "Add 3 new slides with close‑ups of your camera, lens, and drone; overlay text describing each piece.",
        "Write a caption echoing your bio voice: \"From trail to edit, these tools make every shot sing. #GearTalk\" and post Monday."
       ],
       "example": "From trail to edit, these tools make every shot sing. 🎥✨ #GearTalk #TravelGear",
       "done_when": "Carousel with 5 slides is live on Monday.",
-      "time": "30 min this week"
+      "time": "30 min this week",
+      "topic": "format"
      },
      {
       "n": 11,
       "title": "Behind‑the‑Scenes Reel Cut",
       "action": "Trim your top‑performing reel into a 15‑second behind‑the‑scenes voiceover clip.",
-      "why": "Reel 2026‑09‑17 got 8,324 likes and 44.1k views; repurposing leverages proven audience interest for brand appeal.",
+      "why": "the \"Cape Flattery\" reel (Sep 17) got 8,324 likes and 44.1k views; repurposing leverages proven audience interest for brand appeal.",
       "how": [
-       "Download reel 2026‑09‑17 (Cape Flattery).",
-       "In the edit screen, cut to the first 15 seconds and record a voiceover: \"Planning a coastal hike in 3 steps…\".",
-       "Add text overlay with bullet points, then post Wednesday."
+       "Find the original clip in your camera roll (or open the reel → three dots → Save to keep a copy).",
+       "Create → Reel → pick the clip, trim to the moment that worked, add the new voiceover or text on screen.",
+       "Write the caption fresh — say what's different this time — and post at your scheduled slot.",
+       "In the edit screen, cut to the first 15 seconds and record a voiceover: \"Planning a coastal hike in 3 steps…\"."
       ],
       "example": "Planning a coastal hike in 3 steps: 1️⃣ Scout the trail 2️⃣ Pack light 3️⃣ Capture sunrise 🌅 #BTS",
       "done_when": "New behind‑the‑scenes reel is live on Wednesday.",
-      "time": "20 min per post, ongoing"
-     },
-     {
-      "n": 12,
-      "title": "Collab Highlight",
-      "action": "Add a permanent \"Collab\" highlight featuring your best partnership‑ready post.",
-      "why": "Profile clarity score is 25; a highlight gives brands a quick proof point. Use carousel 2026‑07‑31 (Colchuck Lake) with 245 likes and 103 comments.",
-      "how": [
-       "Open post 2026‑07‑31, tap “Save to Highlight”.",
-       "Create new highlight named \"Collab\" and set a cover with bold text “Collab”.",
-       "Place it at the front of your highlights row."
-      ],
-      "example": null,
-      "done_when": "\"Collab\" highlight appears on profile.",
-      "time": "10 min"
-     },
-     {
-      "n": 13,
-      "title": "Add CTA Email Line to Bio",
-      "action": "Insert a clear collaboration call‑to‑action with your contact method into the bio.",
-      "why": "Bio lacks a CTA; adding one directly addresses the brand‑deal goal and lifts profile clarity.",
-      "how": [
-       "Go to Profile → Edit Profile → Bio.",
-       "Add a new line: \"📩 For brand collaborations, DM me\".",
-       "Save changes."
-      ],
-      "example": "📩 For brand collaborations, DM me",
-      "done_when": "New CTA line is visible in the bio.",
-      "time": "5 min"
+      "time": "20 min per post, ongoing",
+      "topic": "repurpose"
      }
     ],
     "opener": {
      "how": [
-      "Open the archive and locate a high‑engagement reel (e.g., 2026‑09‑17).",
-      "Tap “Share → Add to Reel”, select “Throwback” sticker, write a brief nostalgic caption.",
-      "Publish on Thursday at 7:15 am."
+      "Find the original clip in your camera roll (or open the reel → three dots → Save to keep a copy).",
+      "Create → Reel → pick the clip, trim to the moment that worked, add the new voiceover or text on screen.",
+      "Write the caption fresh — say what's different this time — and post at your scheduled slot."
      ],
      "example": "Throwback to Cape Flattery 🌊—the coast that still takes my breath away. #ThrowbackThursday",
      "done_when": "Throwback Reel appears on Thursday feed.",
-     "time": "20 min, once"
+     "time": "20 min, once",
+     "topic": "repurpose"
     },
     "calendar_weeks": []
    }
   ]
  },
  "post_insights": {
-  "sample": 30,
-  "avg_engagement": 502,
+  "metric": "median",
+  "sample": 27,
+  "avg_engagement": 189,
   "top": [
    {
-    "date": "2026-09-17",
+    "date": "2026-09-17T00:11:54.000Z",
     "format": "reel",
     "weekday": "Thu",
     "likes": 8324,
     "comments": 311,
     "views": 44108,
     "engagement": 8635,
-    "caption": "The last few steps in America. Cape Flattery, Washington. Sometimes you have to go all the way out",
-    "url": null,
+    "caption": "The last few steps in America. Cape Flattery, Washington. Sometimes you have to go all the way out there to realize how big this world reall",
+    "url": "https://www.instagram.com/p/DdXhtyWOyLQ/",
     "pinned": false,
-    "vs_avg": 17.19
+    "vs_avg": 45.69
    },
    {
-    "date": "2021-05-25",
-    "format": "carousel",
-    "weekday": "Tue",
-    "likes": 372,
-    "comments": 72,
-    "views": 0,
-    "engagement": 444,
-    "caption": "Normalizing black faces in beautiful places! • • • #Yosemite #GlacierPoint #SentinelDome #VernalFa",
-    "url": null,
-    "pinned": false,
-    "vs_avg": 0.88
-   },
-   {
-    "date": "2026-09-12",
+    "date": "2026-09-12T00:01:53.000Z",
     "format": "reel",
     "weekday": "Sat",
     "likes": 361,
     "comments": 60,
     "views": 1812,
     "engagement": 421,
-    "caption": "I used to think you had to do something extraordinary to inspire somebody. Sometimes it’s just seei",
-    "url": null,
+    "caption": "I used to think you had to do something extraordinary to inspire somebody. Sometimes it’s just seeing someone choose to get outside, chase a",
+    "url": "https://www.instagram.com/p/DdKpXmCuoa9/",
     "pinned": false,
-    "vs_avg": 0.84
+    "vs_avg": 2.23
+   },
+   {
+    "date": "2026-08-13T22:15:27.000Z",
+    "format": "reel",
+    "weekday": "Fri",
+    "likes": 291,
+    "comments": 97,
+    "views": 1716,
+    "engagement": 388,
+    "caption": "On top of the world. 🏔️ . #MountRainier #skylineloop #WashingtonState #NationalParks #hikingadventures",
+    "url": "https://www.instagram.com/p/Db_yENGukK1/",
+    "pinned": false,
+    "vs_avg": 2.05
    }
   ],
   "bottom": [
    {
-    "date": "2026-08-04",
+    "date": "2026-08-04T18:19:54.000Z",
     "format": "reel",
     "weekday": "Tue",
     "likes": 0,
     "comments": 20,
     "views": 561,
     "engagement": 20,
-    "caption": "Everything is a win, when the goal is experience! . Sol Duc Falls hands down is my favorite waterfa",
-    "url": null,
+    "caption": "Everything is a win, when the goal is experience! . Sol Duc Falls hands down is my favorite waterfall in the park, and one of its most famou",
+    "url": "https://www.instagram.com/p/DboLX3Fxg5K/",
     "pinned": false,
-    "vs_avg": 0.04
+    "vs_avg": 0.11
    },
    {
-    "date": "2025-04-16",
+    "date": "2025-04-16T16:45:03.000Z",
     "format": "reel",
     "weekday": "Wed",
     "likes": 56,
     "comments": 12,
     "views": 382,
     "engagement": 68,
-    "caption": "I love the grind of chasing an extraordinary life—the challenge, the growth, the purpose. Every step",
-    "url": null,
+    "caption": "I love the grind of chasing an extraordinary life—the challenge, the growth, the purpose. Every step forward is a reminder that I’m not buil",
+    "url": "https://www.instagram.com/p/DIg70zZOi6a/",
     "pinned": false,
-    "vs_avg": 0.14
+    "vs_avg": 0.36
    },
    {
-    "date": "2025-06-18",
+    "date": "2025-06-18T09:20:00.000Z",
     "format": "reel",
     "weekday": "Wed",
     "likes": 83,
     "comments": 4,
     "views": 156,
     "engagement": 87,
-    "caption": "NY summer’s been more rain than sun but being 15 minutes from the ocean is still peace. I guess ever",
-    "url": null,
+    "caption": "NY summer’s been more rain than sun but being 15 minutes from the ocean is still peace. I guess every season in life can’t be perfect. #newy",
+    "url": "https://www.instagram.com/p/DLCXI8bsN1e/",
     "pinned": false,
-    "vs_avg": 0.17
+    "vs_avg": 0.46
    }
   ],
   "patterns": {
@@ -1054,11 +993,11 @@ window.SCALECRAFT_SAMPLE = {
     "format": "reel",
     "posts": 19,
     "avg_engagement": 656,
-    "vs_avg": 1.31
+    "vs_avg": 3.47
    },
    "best_day": {
     "day": "Thu",
-    "avg_engagement": 1662
+    "avg_engagement": 3019
    },
    "format_avg": {
     "reel": {
@@ -1066,54 +1005,50 @@ window.SCALECRAFT_SAMPLE = {
      "avg_engagement": 656
     },
     "carousel": {
-     "posts": 10,
-     "avg_engagement": 227
-    },
-    "static": {
-     "posts": 1,
-     "avg_engagement": 332
+     "posts": 8,
+     "avg_engagement": 205
     }
    },
    "day_avg": {
-    "Thu": 1662,
-    "Sat": 242,
-    "Fri": 258,
-    "Tue": 215,
-    "Sun": 228,
-    "Mon": 145,
-    "Wed": 162
+    "Thu": 3019,
+    "Sat": 254,
+    "Wed": 166,
+    "Fri": 316,
+    "Mon": 141,
+    "Tue": 115,
+    "Sun": 256
    }
   },
   "note": "Your top posts share the Reel format, a travel‑focused opening line, and Thursday publishing. Your bottom posts also use Reels but are posted on weekdays with lower‑engagement captions."
  },
  "calendar": {
   "posting_days": [
-   "Mon",
-   "Wed",
-   "Fri"
+   "Thu",
+   "Fri",
+   "Sun"
   ],
-  "posting_time": "8:00am",
+  "posting_time": "6pm",
   "weeks": [
    {
     "week": 1,
     "phase": 1,
     "slots": [
      {
-      "day": "Mon",
+      "day": "Thu",
       "format": "reel",
       "angle": "Media kit preview",
-      "prompt": "Voiceover: 'Swipe up to view my media kit. Link in bio. DM for collabs.'",
+      "prompt": "Voiceover: 'tap the link in my bio to view my media kit. Link in bio. DM for collabs.'",
       "source": "no_camera"
      },
      {
-      "day": "Wed",
+      "day": "Fri",
       "format": "reel",
       "angle": "Cape Flattery steps",
-      "prompt": "Re-cut 2026-09-17 reel, add CTA: 'DM for brand deals' in caption.",
+      "prompt": "Re-cut the \"Cape Flattery\" reel (Sep 17), add CTA: 'DM for brand deals' in caption.",
       "source": "archive"
      },
      {
-      "day": "Fri",
+      "day": "Sun",
       "format": "reel",
       "angle": "Bio tagline showcase",
       "prompt": "Voiceover: 'New bio tagline. Check bio for linktree & contact.'",
@@ -1126,24 +1061,24 @@ window.SCALECRAFT_SAMPLE = {
     "phase": 1,
     "slots": [
      {
-      "day": "Mon",
+      "day": "Thu",
       "format": "reel",
       "angle": "Throwback carousel recap",
-      "prompt": "Convert 2021-05-25 carousel into reel. Add voiceover, include DM CTA.",
+      "prompt": "Convert the \"Normalizing black faces in beautiful places\" carousel (May 25) into reel. Add voiceover, include DM CTA.",
       "source": "archive"
-     },
-     {
-      "day": "Wed",
-      "format": "reel",
-      "angle": "Gear spotlight overlay",
-      "prompt": "Voiceover: 'My essential gear for travel. Swipe up for details.'",
-      "source": "no_camera"
      },
      {
       "day": "Fri",
       "format": "reel",
+      "angle": "Gear spotlight overlay",
+      "prompt": "Voiceover: 'My essential gear for travel. tap the link in my bio for details.'",
+      "source": "no_camera"
+     },
+     {
+      "day": "Sun",
+      "format": "reel",
       "angle": "Behind‑the‑scenes clip",
-      "prompt": "Use 2026-09-12 reel, add text overlay: 'Behind the scenes.' DM for collabs.",
+      "prompt": "Use the \"I used to think you had…\" reel (Sep 12), add text overlay: 'Behind the scenes.' DM for collabs.",
       "source": "archive"
      }
     ]
@@ -1153,65 +1088,68 @@ window.SCALECRAFT_SAMPLE = {
     "phase": 1,
     "slots": [
      {
-      "day": "Mon",
+      "day": "Thu",
       "format": "reel",
       "angle": "Local cityscape",
       "prompt": "Show 5‑min city clips. Voiceover: 'Exploring local vibes. DM for collabs.'",
       "source": "no_camera"
      },
      {
-      "day": "Wed",
+      "day": "Fri",
       "format": "reel",
       "angle": "What I'd do differently",
-      "prompt": "Use 2026-09-17 reel, add text: 'What I'd do differently?'. CTA: DM.",
+      "prompt": "Use the \"Cape Flattery\" reel (Sep 17), add text: 'What I'd do differently?'. CTA: DM.",
       "source": "archive"
      }
     ]
    }
-  ]
+  ],
+  "schedule": {
+   "days": [
+    "Thu",
+    "Fri",
+    "Sun"
+   ],
+   "times": {
+    "Thu": "6pm",
+    "Fri": "6pm",
+    "Sun": "6pm"
+   },
+   "per_week": 3,
+   "label": "Thu 6pm, Fri 6pm, Sun 6pm",
+   "source": "your best days"
+  }
  },
  "plan_days": 90,
  "next_posts": [
   {
    "n": 1,
    "day": "Thu",
-   "time": "7pm",
+   "time": "6pm",
    "format": "reel",
    "hook": "Partner with a wanderer?",
-   "caption": "Linktree now live in bio. Swipe to see my media kit. Let's create something unforgettable together.\nReady to amplify your brand? 🎥✨",
-   "script": "Hey, I'm [Name] – a traveler with purpose.\nI capture nature, culture, and flight mode moments.\nMy reels bring real emotions that move people.\nMy audience loves authenticity, curiosity, and connection.\nHere’s my media kit showcasing reach, past collabs, and creative ideas.\nSwipe up in the bio to view it.\nLet's talk about elevating your brand.\nThank you for the opportunity.",
+   "caption": "Linktree now live in bio. Swipe to see my media kit. Let's create something unforgettable together.\n 🎥✨",
+   "script": "Hey, I'm @talon__wilson – a traveler with purpose.\nI capture nature, culture, and flight mode moments.\nMy reels bring real emotions that move people.\nMy audience loves authenticity, curiosity, and connection.\nHere’s my media kit showcasing reach, past collabs, and creative ideas.\ntap the link in my bio to view it.\nLet's talk about elevating your brand.",
    "why": "New reel builds on the high engagement of my Thursday best post.",
    "source": "new",
    "written_at": 1790033664972
   },
   {
    "n": 2,
-   "day": "Thu",
-   "time": "7pm",
-   "format": "reel",
-   "hook": "Your next brand partnership starts here",
-   "caption": "Hey, it’s talon__wilson.\nLinktree in bio for media kit.\nLet’s create authentic stories together.",
-   "script": "Voiceover: Hey, I’m talon__wilson, your wanderer with purpose.\nShot: Quick montage of my most engaging reels.\nVoiceover: From the cliffs of Cape Flattery to the waterfalls of Sol Duc Falls, I capture moments that resonate.\nShot: Overlay of media kit sections with key metrics.\nVoiceover: My media kit is about authenticity, engagement, and storytelling.\nShot: Call-to-action screen – DM or click Linktree.\nVoiceover: Let’s collaborate and make something that matters.",
-   "why": "This builds on the 17 September Cape Flattery reel that spiked engagement 17.19×, turning views into brand deals.",
-   "source": "new",
-   "written_at": 1790033690756
-  },
-  {
-   "n": 3,
-   "day": "Thu",
-   "time": "7pm",
+   "day": "Fri",
+   "time": "6pm",
    "format": "reel",
    "hook": "Wandering with purpose.",
    "caption": "Wandering with purpose.\nNature. Culture. Flight mode! 🎥 Reels that make you feel.\n🤞🏾 Chasing legacy, not likes.\nSwipe to see how I turn moments into stories.",
-   "script": "Hey, I'm [Name].\nI wander with purpose, capturing nature, culture, and flight.\nEach reel is a slice of my journey, meant to make you feel.\nI chase legacy, not likes.\nJoin me in exploring the world.",
+   "script": "Hey, I'm @talon__wilson.\nI wander with purpose, capturing nature, culture, and flight.\nEach reel is a slice of my journey, meant to make you feel.\nI chase legacy, not likes.\nJoin me in exploring the world.",
    "why": "Uses bio tagline to reinforce niche clarity as per plan.",
    "source": "no_camera",
    "written_at": 1790033664972
   },
   {
-   "n": 4,
-   "day": "Fri",
-   "time": "7pm",
+   "n": 3,
+   "day": "Sun",
+   "time": "6pm",
    "format": "carousel",
    "hook": "Throwback to my journey.",
    "caption": "A quick recap of my past adventures.\nFrom Washington to the world, each photo tells a story of growth and discovery.\nSwipe to revisit the moments that shaped me.",
@@ -1221,9 +1159,9 @@ window.SCALECRAFT_SAMPLE = {
    "written_at": 1790033664972
   },
   {
-   "n": 5,
+   "n": 4,
    "day": "Thu",
-   "time": "7pm",
+   "time": "6pm",
    "format": "reel",
    "hook": "Gear that takes me places.",
    "caption": "Gear that fuels my wander.\nFrom lenses to backpacks, it helps me capture every moment.\nSwipe to see what keeps me moving.",
@@ -1233,9 +1171,9 @@ window.SCALECRAFT_SAMPLE = {
    "written_at": 1790033664972
   },
   {
-   "n": 6,
+   "n": 5,
    "day": "Fri",
-   "time": "7pm",
+   "time": "6pm",
    "format": "reel",
    "hook": "Behind every reel...",
    "caption": "The hustle behind the lens.\nFrom scouting to editing, each step is a story.\nSwipe to see the process.",
@@ -1243,13 +1181,25 @@ window.SCALECRAFT_SAMPLE = {
    "why": "Shows authenticity to build trust for brand deals.",
    "source": "archive",
    "written_at": 1790033664972
+  },
+  {
+   "n": 6,
+   "day": "Sun",
+   "time": "6pm",
+   "format": "reel",
+   "hook": "Your next brand partnership starts here",
+   "caption": "Hey, it’s talon__wilson.\nLinktree in bio for media kit.\nLet’s create authentic stories together.",
+   "script": "Voiceover: Hey, I’m talon__wilson, your wanderer with purpose.\nShot: Quick montage of my most engaging reels.\nVoiceover: From the cliffs of Cape Flattery to the waterfalls of Sol Duc Falls, I capture moments that resonate.\nShot: Overlay of media kit sections with key metrics.\nVoiceover: My media kit is about authenticity, engagement, and storytelling.\nShot: Call-to-action screen – DM or click Linktree.\nVoiceover: Let’s collaborate and make something that matters.",
+   "why": "This builds on the 17 September Cape Flattery reel that spiked engagement 17.19×, turning views into brand deals.",
+   "source": "new",
+   "written_at": 1790033690756
   }
  ],
  "competitors": {
   "generated_at": 1790033665058,
   "you": {
    "handle": "talon__wilson",
-   "overall": 75
+   "overall": 71
   },
   "competitors": [
    {
@@ -1299,5 +1249,7 @@ window.SCALECRAFT_SAMPLE = {
   }
  },
  "created_at": 1790033506878,
- "sample": true
+ "sample": true,
+ "plan_dropped": [],
+ "sample_cleaned_at": 1790191181940
 };

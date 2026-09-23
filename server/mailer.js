@@ -25,6 +25,7 @@ const pauseLink = (userId) => `${APP.replace(/\/$/, "")}/api/growth-engine/v1/em
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const reportUrl = (id) => `${APP}/#/report/${encodeURIComponent(id)}`;
+const pathUrl = (id) => `${APP}/#/path/${encodeURIComponent(id)}`;
 
 function layout(title, inner, { footerNote, userId } = {}) {
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(title)}</title></head>
@@ -106,7 +107,7 @@ function mondayMove({ to, userId, handle, reportId, paid, kind, move, doneUrl, o
       + moveCard(`PHASE ${move.phase} · MOVE ${String(move.n).padStart(2, "0")}`, move.action, move.why)
       + (steps ? `<ol style="margin:14px 0 0;padding-left:20px;font-size:14px;line-height:1.55;color:#5B4C3B">${steps}</ol>` : "")
       + (quest ? `<div style="margin-top:16px;padding:12px 16px;background:#FFF6E9;border-radius:12px;font-size:14px;line-height:1.5;color:#2A2118"><b>This week's quest:</b> ${esc(quest.title)}. <span style="color:#7A6A57">Checked at your next rescore.</span></div>` : "")
-      + button(doneUrl, "Mark done", "#2E7D5B") + ghost(url, "Open the plan");
+      + button(doneUrl, "Mark done", "#2E7D5B") + ghost(paid ? pathUrl(reportId) : url, paid ? "Open my path" : "Open the plan");
   }
   return send({ to, userId, subject, html: layout("Monday move", inner, { userId }), tag: "monday_move", optOutUrl: oo });
 }

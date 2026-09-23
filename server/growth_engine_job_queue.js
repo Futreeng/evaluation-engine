@@ -18,6 +18,7 @@ const moments = require("./growth_engine_moments");
 const events = require("./growth_engine_events");
 const costs = require("./growth_engine_costs");
 const thumbs = require("./growth_engine_thumbs");
+const pathEngine = require("../public/path-engine.js");
 
 // Weekly refresh: does what the creator told us still match what they're
 // doing? At most one nudge per phase; the report and the score-changed
@@ -39,6 +40,19 @@ function detectNudge(reportBody, prevReport, inputParams) {
   }
   void posts;
   return null;
+}
+
+// Failure classes the evaluating screen renders differently. Only PROFILE_NOT_FOUND
+// tells the user to check the spelling; everything else names our side or the platform's.
+function classifyFailure(err, inputParams = {}) {
+  const m = String(err?.message || "");
+  const h = inputParams.handle ? `@${inputParams.handle}` : "the account";
+  if (/as private/i.test(m)) return { code: "PROFILE_PRIVATE", text: `${h} is private, so there are no public posts for us to score.` };
+  if (/account @\S+ not found|does not exist|is not a valid/i.test(m)) return { code: "PROFILE_NOT_FOUND", text: `We couldn't find ${h} on ${inputParams.platform || "that platform"}.` };
+  if (/no public posts/i.test(m)) return { code: "NO_POSTS", text: `${h} has no public posts yet, so there is nothing to score.` };
+  if (/apify|didn't return a profile|returned an error for|timed? ?out|timeout|rate limit|429|50\d|ECONN|fetch failed|socket/i.test(m)) return { code: "UPSTREAM", text: `${(inputParams.platform || "the platform").replace(/^\w/, (c) => c.toUpperCase())} didn't answer when we asked for ${h}. That's on their side, not yours.` };
+  if (/LLM|Plan Writer|Growth Scanner|Gap Auditor|Merge|Gemini|Groq|Claude|OpenAI|no usable plan/i.test(m)) return { code: "WRITER", text: "We read the account but the writing step failed." };
+  return { code: "OUR_SIDE", text: "Something broke on our side." };
 }
 
 class JobQueue {
@@ -88,6 +102,8 @@ class JobQueue {
     return costs.run({ accountId: accountId !== "demo-account" ? accountId : null, jobId, feature }, () => this._processJob(jobId, accountId, tier, inputParams));
   }
   async _processJob(jobId, accountId, tier, inputParams) {
+    // Declared here as well as in processJob: everything below runs in this scope.
+    const hasPlan = tier !== "social_snapshot" && tier !== "maintenance";
     (this._started ||= new Map()).set(jobId, Date.now());
     if (this.processingJobs.has(jobId)) {
       console.log(`[JobQueue] Job ${jobId} already processing`);
@@ -194,6 +210,10 @@ class JobQueue {
                 if (prevReport?.reportBody?.nudges_sent) reportBody.nudges_sent = prevReport.reportBody.nudges_sent;
                 if (prevReport?.reportBody?.emails_sent) reportBody.emails_sent = prevReport.reportBody.emails_sent;
                 if (prevReport?.reportBody?.moves_done && !reportBody.moves_done) reportBody.moves_done = prevReport.reportBody.moves_done;
+                // The Path (docs/PATH_SPEC.md): skips and deferrals ride along; moves are checked against the profile.
+                for (const k of ["moves_skipped", "moves_later", "moves_verified"]) if (prevReport?.reportBody?.[k] && !reportBody[k]) reportBody[k] = prevReport.reportBody[k];
+                reportBody.path_baseline = prevReport?.reportBody?.path_baseline || { bio: prevReport?.reportBody?.profile?.bio ?? prevReport?.reportBody?.bio ?? null, external_url: prevReport?.reportBody?.profile?.external_url || null, highlight_count: prevReport?.reportBody?.profile?.highlight_count || 0, pinned_posts: prevReport?.reportBody?.profile?.pinned_posts || 0 };
+                try { reportBody.moves_verified = pathEngine.verify(reportBody, reportBody.path_baseline); } catch (e) { console.warn("[Path] verify failed:", e.message); }
                 if (prevReport?.reportBody?.moments_seen) reportBody.moments_seen = prevReport.reportBody.moments_seen;
                 if (prevReport?.reportBody?.annual_offer_at) reportBody.annual_offer_at = prevReport.reportBody.annual_offer_at;
               }
@@ -336,8 +356,12 @@ class JobQueue {
       console.error(`[JobQueue] ❌ Job ${jobId} failed:`, err.message);
       events.track("evaluate_failed", { accountId: accountId !== "demo-account" ? accountId : null, anon: inputParams.attribution?.anon || null, ref: inputParams.attribution?.ref || null, props: { tier, platform: inputParams.platform, error: String(err.message).slice(0, 200) } });
 
+      // What the user sees is a code plus a sentence that names whose problem it is; the raw
+      // error stays in the log next to the job id (never an identifier or stack in the UI).
+      const { code, text } = classifyFailure(err, inputParams);
+      console.error(`[JobQueue] ${jobId} → ${code}: ${String(err.stack || err.message).split("\n").slice(0, 3).join(" | ")}`);
       await geDb.updateJobStatus(jobId, "failed", {
-        error: err.message,
+        error: `[${code}] ${text}`,
         stage: "failed",
       });
     } finally {

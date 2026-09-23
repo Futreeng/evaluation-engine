@@ -174,6 +174,67 @@ Two rules run through all of it: **scores are deterministic** (fixed rules set e
 **Where:** `growth_engine_plans.js` (every price, limit and feature list; `PLAN_PRICES_JSON` / `PLAN_LIMITS_JSON` overrides), `growth_engine_entitlements.js` (`effective`, `has`, `checkLimit`, `gate`), `GET /billing/pricing` (with `founders` and `limits`), `/admin/limits`, `/admin/price-test` (P.7: conversion, revenue per visitor, month-two retention by variant; founders excluded).
 **Not built:** Pro's single *combined* multi-platform plan — Pro can score every platform under one subscription, each with its own plan; merging them into one plan is evaluator work.
 
+## The Path (branch `feat/path`, after the sample audit)
+
+Spec: `docs/PATH_SPEC.md`. The sample report read well at the top and fell apart as a
+to-do list: the same bio move four times, one reel cited ten times, four different
+answers on when to post, Instagram steps that don't exist. Two parts:
+
+### Plan quality (`server/growth_engine_plan_quality.js`)
+- Phases are written in order; each prompt carries the moves already in the plan and a
+  fixed posting schedule. A validator rejects repeats, off-phase moves and over-cited
+  posts; the phase is rewritten once with the problems quoted back, then what still
+  repeats is dropped (`report.plan_dropped` says what).
+- One schedule for the plan: cadence from the hours answer, days from the account's best
+  days, time from its best window. Moves, calendar and written posts all use it.
+- A library of real Instagram/TikTok steps (link, bio, pin, highlight, schedule) replaces
+  the model's "how" whenever a move matches.
+- Posts are named by caption ("the Cape Flattery reel, Sep 17"), never by ISO date.
+  "Swipe up", `[Name]` placeholders and sponsor-facing lines are removed; at most one
+  written post per set pitches brand work.
+- Benchmark text for creator niches is generated from the scorer's numeric targets, so
+  the explanation and the evidence line quote the same number.
+- A dimension the summary names as a loss is labelled "Biggest gap", never "Strong".
+- `scripts/clean_sample.js` runs the deterministic parts over the shipped sample.
+
+### The Path (`public/path-engine.js`, `#/path/:report`)
+- One shared engine for the server route, the app and the mock: every move, calendar
+  slot (with its written post attached) and phase becomes a step with a status.
+- One card at a time: Done, Skip (with a reason), Not today. "2 today" when a move and a
+  post day coincide. Caught-up state names the next step and offers "work ahead".
+- Soft order: phase 2 opens when phase 1's moves are done or day 31 arrives.
+- Verification at rescore: link in bio, bio changed, pinned post, new highlight, a post on
+  the slot's day. A second tick, or "we couldn't see this yet" on moves marked done.
+- Free reports: the three openers are live, the rest is a greyed trail with the unlock.
+- Signed-in users with a plan land on the Path; the report is one tap away. The report's
+  "This week" card is now "Start here →". Monday emails open the Path.
+- Routes: `GET /reports/:id/path`, `POST /reports/:id/path/:key`. Events: `path_viewed`,
+  `path_done`, `path_skipped`, `path_later`, `move_skipped`.
+- Tests: `node server/growth_engine_path.test.js`.
+
+### Data layer (crash-report follow-ups, 23 Sept)
+- Engagement rate is the median post's likes+comments over followers, on the unpinned
+  feed from the last year (the mean is kept as `engagement_rate_mean_percent`). One viral
+  reel or a pinned post from 2019 no longer sets the number.
+- Best/worst posts exclude pinned posts and rank against the median (`post_insights.metric`).
+- Best times need three posts per window (was two) and only look at the last year.
+- The evaluating screen's failures are classified; see the handoff note.
+
+### Unsatisfied-customer pass (23 Sept)
+- Posting Consistency: cadence carries the dimension (full at target, nothing at a third
+  of it), so 60% of target reads Fair, not Strong. The sample re-scored 76 → 61, overall 75 → 71.
+- The weakest dimension shows a checklist of what's there and what's missing, parsed from
+  the scorer's evidence line, instead of one paragraph.
+- No invented links or emails: anything the creator didn't give us becomes words ("your
+  link — the page brands should land on"). The Path asks for the link on that step and
+  writes it in (`POST /reports/:id/context`).
+- Best and worst posts open by default with the best multiple in the heading; pinned posts
+  out; against the median.
+- Calendar heading says how many weeks are written when the set is short; the sample's
+  competitor section is labelled as one example account; "16 accounts scored so far";
+  "10 points to Elite".
+- Score box carries the four dimensions, the niche marker and three facts.
+
 ## Also fixed along the way
 
 - Stored report bodies carried a provisional `report_id` (share sheet broke).
