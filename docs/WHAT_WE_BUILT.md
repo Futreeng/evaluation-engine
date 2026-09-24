@@ -235,6 +235,29 @@ answers on when to post, Instagram steps that don't exist. Two parts:
   "10 points to Elite".
 - Score box carries the four dimensions, the niche marker and three facts.
 
+### Sample regenerated (24 Sept)
+- After Joe fixed the Groq model list (#8), full paid runs complete. The public sample is
+  now report `rpt_7dfd1504fa2770d33b19f24f` (the third clean run, chosen after the refund-pass rules and the growth playbook went into every prompt), exported with `server/scripts/export_sample_report.js`
+  and finished with `scripts/clean_sample.js`: three phases, 12 weeks, five posts, one schedule,
+  explanations that quote the scorer's targets.
+- Fixed on the way: the merge output budget (6144 → 8192) was truncating the third phase;
+  openers now seed the one-off topics so moves can't repeat them; post names count toward
+  the two-mentions cap; plural and lone weekdays follow the schedule; placeholder or unknown
+  @handles drop the written post; the how-to library only replaces steps where the mechanic
+  is the move or the model's steps are bogus.
+
+### Refund pass (24 Sept)
+- Later phase openers can't repeat an earlier phase's one-off action: the repeated clause is
+  cut, or the phase's first move is promoted to opener.
+- One sponsor-pitch move per plan; intake constraints enforced (behind the camera → no
+  on-camera moves; no new shoots → no new-footage moves); invented dollar amounts become
+  "a rate you set"; bare label and lone-emoji lines left by stripped emails go.
+- A growth playbook (hooks, saves and shares over likes, one idea and one CTA per post,
+  consistency over volume, reply in the first hour, repurpose at most twice, never invent)
+  is in the snapshot merge, the plan-phase prompt and the post prompt.
+- Guessed posting days are labelled on the calendar; collapsed calendar weeks show their
+  subjects.
+
 ## Also fixed along the way
 
 - Stored report bodies carried a provisional `report_id` (share sheet broke).

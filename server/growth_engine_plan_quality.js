@@ -14,13 +14,13 @@ const DAY_IDX = Object.fromEntries(DAYS.map((d, i) => [d, i]));
 const TOPICS = [
   { key: "bio_link", dim: "profile", once: true, re: /\b(linktree|link in bio|external link|add (a |the |your )?link|bio link|website link|link to (a |your |the )?(media kit|booking|newsletter|shop|site))\b/i },
   // A CTA is a bio move only when the bio is what changes; "DM for collabs" in a reel caption is content.
-  { key: "bio_cta", dim: "profile", once: true, re: /\bbio\b.{0,60}\b(cta|dm|contact|email|call[- ]?to[- ]?action)\b|\b(cta|dm line|contact line|email line|call[- ]?to[- ]?action)\b.{0,60}\bbio\b|📩.{0,40}\bbio\b|\bbio\b.{0,40}📩|\bcontact (line|button)\b/i },
+  { key: "bio_cta", dim: "profile", once: true, re: /\bbio\b.{0,60}\b(cta|dm|contact|email|call[- ]?to[- ]?action)\b|\b(cta|dm line|contact line|email line|call[- ]?to[- ]?action)\b.{0,60}\bbio\b|📩.{0,40}\bbio\b|\bbio\b.{0,40}📩|\bcontact line\b/i },
   { key: "bio_rewrite", dim: "profile", once: true, re: /\b(rewrite|revise|update|edit|rework|tighten|new)\b.{0,20}\bbio\b|\bbio\b.{0,30}\b(rewrite|revise|niche statement|tagline|first line)\b/i },
   { key: "highlight", dim: "profile", once: true, re: /\bhighlights?\b/i },
   { key: "pin", dim: "profile", once: true, re: /\bpin(ned|ning)?\b/i },
   { key: "media_kit", dim: "profile", once: true, re: /\bmedia kit\b/i },
   { key: "schedule", dim: "consistency", once: false, re: /\b(schedule|fixed (posting )?days|posting days|cadence|calendar|batch|draft(s)? for|same days? each week|every (mon|tue|wed|thu|fri|sat|sun)|per week|(mon|tue|wed|thu|fri|sat|sun)[a-z]*\b[ ,/&and]{1,6}\b(mon|tue|wed|thu|fri|sat|sun))\b/i },
-  { key: "repurpose", dim: "content_mix", once: false, re: /\b(re-?cut|re-?post|throwback|repurpos|archive|convert|trim)\b/i },
+  { key: "repurpose", dim: "content_mix", once: false, re: /\b(re-?cut|re-?post|re-?mix|throwback|repurpos|archive|trim)\b|\bconvert\b.{0,30}\b(reel|carousel|video|post|clip|photo)s?\b/i },
   { key: "format", dim: "content_mix", once: false, re: /\b(carousel|static|photo|reel|video|format|mix)\b/i },
 
   { key: "engage", dim: "engagement", once: false, re: /\b(comment|repl(y|ies)|question|hook|caption opener|first line|dm your|conversation|poll|sticker)\b/i },
@@ -29,10 +29,29 @@ const DIM_OF_LABEL = [
   ["profile", /profile|bio|clarity/i], ["consistency", /consisten|cadence|posting|schedule|frequen/i],
   ["content_mix", /content|mix|format|strategy/i], ["engagement", /engage|comment|conversation|reach/i],
 ];
+// A move that is really a sponsor pitch posted to the audience ("DM for collabs" reels).
+const PITCH_RE = /\b(dm (me )?for (brand )?(collabs?|deals?|partnerships?)|partnership potential|let'?s team up|brand collaborations welcome|sponsor(ed)? (q&a|pitch)|pitch reel)\b/i;
+const isPitch = (m) => PITCH_RE.test(`${m?.title || ""} ${m?.action || ""} ${m?.example || ""} ${(m?.how || []).join(" ")}`);
+// What the creator told us they won't do. "behind" = never on camera; "fewer_shoots" = no new footage.
+const ON_CAMERA_RE = /\b(talk(ing)?[- ]to[- ]camera|on[- ]camera|face[- ]to[- ]camera|selfie video|record yourself|film yourself|show your face|piece to camera)\b/i;
+const NEW_FOOTAGE_RE = /\b(record \d+ (new )?clips?|film (new|a|the|\d+)|shoot (new|a|the|\d+)|new footage|new shoot|go (out|to) [^.]{0,40}(record|film|shoot)|walk [^.]{0,40}record)\b/i;
+function violatesContext(move, ctx) {
+  if (!ctx) return null;
+  const blob = `${move?.title || ""} ${move?.action || ""} ${(move?.how || []).join(" ")}`;
+  if (ctx.style === "behind" && ON_CAMERA_RE.test(blob)) return "needs the creator on camera, and they said they stay behind it";
+  if (ctx.horizon === "fewer_shoots" && NEW_FOOTAGE_RE.test(blob)) return "needs new footage, and they said no new shoots this quarter";
+  return null;
+}
 function topicOf(move) {
   const text = `${move?.title || ""} ${move?.action || ""}`;
   for (const t of TOPICS) if (t.re.test(text)) return t.key;
   return "other";
+}
+function openerTopics(ph) {
+  const segs = String(`${ph.visible_action || ""}`).split(/\s*(?:,|;|\band\b|\+|·)\s*/).filter(Boolean);
+  const out = new Set(); for (const seg of segs) { const t = topicOf({ title: "", action: seg }); if (t !== "other") out.add(t); }
+  const whole = topicOf({ title: ph.label, action: ph.visible_action }); if (whole !== "other") out.add(whole);
+  return [...out];
 }
 const topicDef = (key) => TOPICS.find((t) => t.key === key) || { key, dim: null, once: false };
 function dimOfLabel(label) { for (const [k, re] of DIM_OF_LABEL) if (re.test(String(label || ""))) return k; return null; }
@@ -94,13 +113,16 @@ function namePosts(text, idx) {
   s = s.replace(MON_RE, (m, mon, d, y) => { if (!y) return m; const mi = MONTHS.findIndex((x) => x.toLowerCase() === mon.slice(0, 3).toLowerCase()); const p = idx.get(`${y}-${String(mi + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`); return p ? postName(p) : m; });
   // "post the "Cape Flattery" reel (Sep 17) reel" → drop the doubled noun; "reel the ..." → tidy.
   s = s.replace(/(\))\s+(reel|post|carousel)\b/gi, "$1").replace(/\b(reel|post|carousel|video)\s+the "/gi, 'the "');
-  return s;
+  // "the "On top of the world" reel (Aug 13) ('On top of the world')" — the model's own parenthetical after our name.
+  s = s.replace(/("[^"]+" (?:reel|carousel|post) \([^)]+\))\s*\('[^']*'\)/g, "$1");
+  return s.replace(/\b(the|The)\s+the\s+"/g, '$1 "');
 }
 
 // ------------------------------------------------------------------ text hygiene
 const BANNED = [
   [/\bswipe[- ]up( (in|to) (the|my) (bio|link))?\b/gi, "tap the link in my bio"],
-  [/\bthank you for the opportunity\.?/gi, ""], [/\bready to amplify your brand\??/gi, ""],
+  [/\bthank you for the opportunity\.?/gi, ""],
+  [/@(?:brand|your|new|their|company|partner)[a-z]*(?:name|handle)\b/gi, "the brand"], [/\bready to amplify your brand\??/gi, ""],
   [/\b(dear|hi|hello) (brands?|sponsors?)\b[^.\n]*[.\n]?/gi, ""],
 ];
 function sanitize(text, { name = null } = {}) {
@@ -108,7 +130,8 @@ function sanitize(text, { name = null } = {}) {
   // Placeholders: the model doesn't know their name; use the handle or drop the phrase.
   s = s.replace(/\[\s*(your )?name\s*\]/gi, name ? `@${name}` : "").replace(/\[\s*(your |insert )?[a-z ]{2,30}\]/gi, "").replace(/\b(I['’]m|I am|it['’]s|this is)\s+([–—-]\s+)/gi, "$1 ").replace(/\b(I['’]m|I am|it['’]s|this is)\s*[.,]/gi, "$1 me,");
   for (const [re, rep] of BANNED) s = s.replace(re, rep);
-  return s.replace(/[ \t]{2,}/g, " ").replace(/\n{3,}/g, "\n\n").replace(/^\s*[-–]\s*$/gm, "").trim();
+  s = s.replace(/(\s*\+\s*){2,}/g, " + ").replace(/:\s*\+\s*/g, ": ").replace(/\(\s*\)/g, "").replace(/\s+,/g, ",").replace(/,\s*,/g, ",");
+  return s.replace(/[ \t]{2,}/g, " ").replace(/\n{3,}/g, "\n\n").replace(/^\s*[-–]\s*$/gm, "").replace(/[\s•·\-–—|]+$/g, "").trim();
 }
 
 // ------------------------------------------------------------------ verified mechanics
@@ -160,24 +183,36 @@ function deriveSchedule(reportBody, { targetPerWeek = null } = {}) {
   const times = {};
   for (const d of days) { const w = (bt.windows || []).find((x) => x.day === d) || best; times[d] = w ? hourLabel(w.start_hour) : "7pm"; }
   const source = (bt.best_days || []).some((d) => Number(d.n) >= 2) ? "your best days" : "starting points until we have more of your posts";
-  return { days, times, per_week: n, label: days.map((d) => `${d} ${times[d]}`).join(", "), source };
+  const evidence = days.filter((d) => (bt.best_days || []).some((x) => x.day === d && Number(x.n) >= 2) || (bt.windows || []).some((w) => w.day === d));
+  return { days, times, per_week: n, label: days.map((d) => `${d} ${times[d]}`).join(", "), source, evidence, guessed: days.filter((d) => !evidence.includes(d)) };
 }
 
 // ------------------------------------------------------------------ validation and dedupe
 // Problems are strings the retry prompt can quote back to the model.
-function validatePhases(phases, { labels = [] } = {}) {
+function validatePhases(phases, { labels = [], posts = null, context = null } = {}) {
+  // Known posts by name ("Cape Flattery") so mentions count whether the model wrote a date or a name.
+  const postNames = posts ? [...posts.entries()].map(([date, p]) => { const n = postName(p) || ""; const q = /"([^"]+)"/.exec(n); return q ? { key: q[1], date } : null; }).filter(Boolean) : [];
   const problems = [];
   const seenOnce = new Map(); // topic → "phase i move n"
   const postCites = new Map(); // date → [moves]
+  // Openers come from the free snapshot and can't be rewritten, so every opener's one-off
+  // topic is taken before any move is checked — a move may not repeat any phase's opener.
+  phases.forEach((ph, i) => { for (const t of openerTopics(ph)) { if (!topicDef(t).once) continue; if (seenOnce.has(t) && !seenOnce.get(t).startsWith(`phase ${i + 1} `)) problems.push({ kind: "opener_repeat", phase: i, topic: t, text: `phase ${i + 1} first move repeats ${seenOnce.get(t)} (both are about ${t.replace("_", " ")}).` }); else if (!seenOnce.has(t)) seenOnce.set(t, `phase ${i + 1} first move`); } });
+  let pitches = 0;
   phases.forEach((ph, i) => {
     const dim = dimOfLabel(labels[i] || ph.label);
     const all = [...(ph.opener ? [{ ...ph.opener, title: ph.first_move_title || ph.label, action: ph.visible_action || "", _opener: true }] : []), ...(ph.moves || [])];
     for (const m of all) {
       const t = topicOf(m); const def = topicDef(t);
       const id = m._opener ? `phase ${i + 1} first move` : `move ${m.n} "${m.title}"`;
-      if (def.once) { if (seenOnce.has(t)) problems.push({ kind: "duplicate", phase: i, move: m, topic: t, text: `${id} repeats ${seenOnce.get(t)} (both are about ${t.replace("_", " ")}).` }); else seenOnce.set(t, id); }
+      if (m._opener) { /* seeded above */ } else if (def.once) { if (seenOnce.has(t)) problems.push({ kind: "duplicate", phase: i, move: m, topic: t, text: `${id} repeats ${seenOnce.get(t)} (both are about ${t.replace("_", " ")}).` }); else seenOnce.set(t, id); }
+      if (!m._opener && isPitch(m)) { pitches++; if (pitches > 1) problems.push({ kind: "pitch", phase: i, move: m, text: `${id} is another sponsor pitch post; only one move in the plan may pitch brands to the audience — the rest serve the audience.` }); }
+      const cv = !m._opener && violatesContext(m, context); if (cv) problems.push({ kind: "context", phase: i, move: m, text: `${id} ${cv}.` });
       if (dim && def.dim && def.dim !== dim && !m._opener) problems.push({ kind: "off_phase", phase: i, move: m, topic: t, text: `${id} is about ${def.dim.replace("_", " ")}, but phase ${i + 1} is "${labels[i] || ph.label}".` });
-      for (const d of datesIn(`${m.title} ${m.action} ${m.why} ${(m.how || []).join(" ")} ${m.example || ""}`)) { const l = postCites.get(d) || []; l.push(id); postCites.set(d, l); }
+      const blob = `${m.title} ${m.action} ${m.why} ${(m.how || []).join(" ")} ${m.example || ""}`;
+      const cited = new Set(datesIn(blob));
+      for (const nm of postNames) if (blob.includes(nm.key)) cited.add(nm.date);
+      for (const d of cited) { const l = postCites.get(d) || []; l.push(id); postCites.set(d, l); }
     }
   });
   for (const [d, l] of postCites) if (l.length > 2) problems.push({ kind: "overcite", date: d, text: `The post from ${d} is used by ${l.length} moves (${l.join(", ")}); use it at most twice.` });
@@ -185,15 +220,45 @@ function validatePhases(phases, { labels = [] } = {}) {
 }
 // Drop what the retry didn't fix: later duplicates of one-off topics and
 // off-phase moves that a same-topic move elsewhere already covers.
-function dedupePhases(phases, { labels = [] } = {}) {
-  const seen = new Set(); const dropped = [];
+function dedupePhases(phases, { labels = [], context = null } = {}) {
+  const seen = new Set(); const dropped = []; let pitches = 0;
+  // Openers first, in order. A later opener that repeats an earlier phase's one-off action
+  // loses that clause; if nothing is left, its first move becomes the opener.
+  const cutClauses = (text, takenTopics) => {
+    const parts = String(text || "").split(/(\s*(?:,|;|\band\b)\s*)/);
+    const keep = []; for (let k = 0; k < parts.length; k += 2) { const seg = parts[k]; const t = topicOf({ title: "", action: seg }); if (!(topicDef(t).once && takenTopics.has(t))) keep.push(seg.trim()); }
+    return keep.filter(Boolean).join(", ").replace(/^(\w)/, (c) => c.toUpperCase());
+  };
+  phases = phases.map((ph, i) => {
+    const mine = openerTopics(ph).filter((t) => topicDef(t).once);
+    const repeated = mine.filter((t) => seen.has(t));
+    let o = { ...ph };
+    if (repeated.length) {
+      const taken = new Set(repeated);
+      const va = cutClauses(ph.visible_action, taken);
+      if (va && va.length >= 8) { o.visible_action = va; o.detail = ph.detail; if (o.opener) o.opener = { ...o.opener, done_when: cutClauses(o.opener.done_when, taken) || o.opener.done_when }; }
+      else if ((ph.moves || []).length) {
+        // Whole opener already done earlier: the first surviving move takes its place.
+        const first = ph.moves.find((m) => !(topicDef(topicOf(m)).once && seen.has(topicOf(m)))) || ph.moves[0];
+        o.visible_action = first.action || first.title; o.detail = first.why || ""; o.opener = { how: first.how || [], example: first.example ?? null, done_when: first.done_when || "", time: first.time || "" }; o.moves = ph.moves.filter((m) => m !== first); o.promoted_move = first.n;
+        dropped.push({ phase: i, move: { title: ph.visible_action }, reason: "opener_repeat_promoted", topic: repeated.join("+") });
+        if (isPitch(first)) pitches++;
+      }
+    }
+    for (const t of openerTopics(o)) if (topicDef(t).once) seen.add(t);
+    // This phase's moves happen before the next phase's opener, so they count as taken too.
+    for (const m of o.moves || []) { const t = topicOf(m); if (topicDef(t).once) seen.add(t); }
+    return o;
+  });
+  seen.clear(); for (const ph of phases) for (const t of openerTopics(ph)) if (topicDef(t).once) seen.add(t);
   const out = phases.map((ph, i) => {
     const dim = dimOfLabel(labels[i] || ph.label);
-    if (ph.opener) { const t = topicOf({ title: ph.label, action: ph.visible_action }); if (topicDef(t).once) seen.add(t); }
     const moves = [];
     for (const m of ph.moves || []) {
       const t = topicOf(m); const def = topicDef(t);
       if (def.once && seen.has(t)) { dropped.push({ phase: i, move: m, reason: "duplicate", topic: t }); continue; }
+      const cv = violatesContext(m, context); if (cv) { dropped.push({ phase: i, move: m, reason: "context", topic: t }); continue; }
+      if (isPitch(m)) { pitches++; if (pitches > 1) { dropped.push({ phase: i, move: m, reason: "pitch", topic: t }); continue; } }
       if (dim && def.dim && def.dim !== dim && def.once && i > 0) { dropped.push({ phase: i, move: m, reason: "off_phase", topic: t }); seen.add(t); continue; }
       if (def.once) seen.add(t);
       moves.push(m);
@@ -206,7 +271,9 @@ function dedupePhases(phases, { labels = [] } = {}) {
 // The phase openers are written in the free snapshot, before the schedule exists, so
 // they can name other days or times. Rewrite day lists and clock times in them to the
 // plan's one schedule. Moves are left alone: they were written with the schedule in hand.
-const DAY_WORD = "(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)(?:day|sday|nesday|rsday|urday)?";
+const DAY_WORD = "(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)(?:day|sday|nesday|rsday|urday)?s?";
+const LONE_DAY_RE = /\b(every|each|on)\s+((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)(?:day|sday|nesday|rsday|urday)?s?)\b/gi;
+const CADENCE_RE = /\b(\d)[- ](?:post|posts)[- ](?:a|per|weekly|every)\s*(?:week|cadence)?\b|\b(\d)\s*(?:posts?|reels?|videos?)\s+(?:a|per)\s+week\b/gi;
 const DAY_LIST_RE = new RegExp(`\\b${DAY_WORD}(?:\\s*(?:,|/|&|and|\\+)\\s*${DAY_WORD}){1,5}\\b`, "g");
 const CLOCK_RE = /\b\d{1,2}(?::\d\d)?\s?(?:am|pm)\b/gi;
 function applySchedule(text, schedule) {
@@ -214,6 +281,12 @@ function applySchedule(text, schedule) {
   const days = schedule.days.join(", ").replace(/, ([^,]+)$/, " and $1");
   const time = schedule.times?.[schedule.days[0]] || null;
   let out = String(text).replace(DAY_LIST_RE, days);
+  // "every Tuesday" when Tuesday isn't a posting day → the first posting day.
+  const short = (d) => String(d).slice(0, 3).toLowerCase();
+  out = out.replace(LONE_DAY_RE, (m, w, d) => (schedule.days.some((x) => short(x) === short(d)) ? m : `${w} ${schedule.days[0]}`));
+  if (schedule.per_week) out = out.replace(CADENCE_RE, (m) => m.replace(/\d/, String(schedule.per_week)));
+  // Any other weekday that isn't a posting day ("Drafts Tue", "for Tuesday 6pm") → the first posting day.
+  out = out.replace(/\b((?:Mon|Tues?|Wed|Thurs?|Fri|Sat|Sun)(?:day|sday|nesday|rsday|urday)?s?)\b/g, (m) => (schedule.days.some((x) => short(x) === short(m)) ? m : schedule.days[0]));
   if (time) out = out.replace(CLOCK_RE, time);
   return out;
 }
@@ -235,7 +308,20 @@ function stripInvented(text, { links, contact, goal }) {
   const linkWords = goal === "deals" ? "your link (the page brands should land on — a media kit, or a Linktree that points to it)" : goal === "sell" ? "your link (the page where they buy)" : goal === "bookings" ? "your link (your booking page)" : "your link";
   let out = String(text).replace(URL_RE, (u) => { const k = u.trim().replace(/\/$/, "").toLowerCase(); return [...links].some((l) => k === l || k.endsWith(l) || l.endsWith(k)) ? u : linkWords; });
   out = out.replace(EMAIL_RE, (e) => (contact && e.toLowerCase() === String(contact).toLowerCase() ? e : "your email"));
-  return out.replace(/\b(your link)\s*\(([^)]*)\)([^.]*)\1\s*\([^)]*\)/g, "$1 ($2)$3$1"); // don't explain twice in one sentence
+  // Dollar amounts the model made up ("Reel: $200") — the account gives us no pricing data.
+  out = out.replace(/\$\s?\d[\d,]*(?:\.\d+)?\s?[kK]?\b/g, "a rate you set");
+  out = out.replace(/\b(your link)\s*\(([^)]*)\)([^.]*)\1\s*\([^)]*\)/g, "$1 ($2)$3$1"); // don't explain twice in one sentence
+  // Lines left as a bare label, a lone emoji, or just "your email" after the stripping go too.
+  const bare = (line) => { const t = line.replace(/[\p{Extended_Pictographic}\uFE0F]/gu, "").trim(); if (t === "") return /\p{Extended_Pictographic}/u.test(line); return /^[A-Za-z&' ]{2,40}:\s*(your email|your link.*)?$/i.test(t) || /^(your email|your link.*)$/i.test(t); };
+  if (out.includes("\n")) out = out.split("\n").filter((l) => !bare(l)).join("\n"); // multi-line examples (a bio) only; a one-line "Add link: your link" stays
+  return out.replace(/\b(contact|email|link|website|work with me)\s*:\s*(?=[.,;•]|$)[.,;]?\s*/gi, "").replace(/\s+([.,;])/g, "$1").replace(/[ \t]{2,}/g, " ").trim();
+}
+
+// "Tuesday Throwback Protocol" when Tuesday isn't a posting day → "Throwback Protocol".
+function titleDay(title, schedule) {
+  if (!title || !schedule?.days?.length) return title;
+  const short = (d) => String(d).slice(0, 3).toLowerCase();
+  return String(title).replace(/^((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)(?:day|sday|nesday|rsday|urday)?s?)\s+/i, (m, d) => (schedule.days.some((x) => short(x) === short(d)) ? m : ""));
 }
 
 // ------------------------------------------------------------------ finish
@@ -245,22 +331,29 @@ function finishPlan(reportBody, { platform = reportBody.business?.platform || "i
   const name = reportBody.business?.handle || null;
   const linkCtx = { links: allowedLinks(reportBody), contact: reportBody.plan_context?.contact || null, goal: reportBody.plan_context?.goal || null };
   const fix = (s) => stripInvented(sanitize(namePosts(s, idx), { name }), linkCtx);
+  // The library replaces the model's steps only where the mechanic IS the move (profile
+  // edits) or where the model's own steps invent a flow that doesn't exist.
+  const LIBRARY_ALWAYS = new Set(["bio_link", "bio_cta", "bio_rewrite", "highlight", "pin", "media_kit"]);
+  const BOGUS_HOW = /throwback sticker|add to reel|swipe[- ]up|save to highlight|reels archive|remix button|archive(d)?:|archive the|hide (the|your) (lowest|worst)|delete (the|your) (lowest|worst)/i;
   const fixMove = (m, asOpener = null) => {
     if (!m) return m;
-    const topic = topicOf(asOpener || m);
+    const topic = m.topic || topicOf(asOpener || m);
     const lib = howFor(platform, topic);
+    const ownHow = (m.how || []).map(fix);
+    const useLib = !!lib && (LIBRARY_ALWAYS.has(topic) || !ownHow.length || ownHow.some((x) => BOGUS_HOW.test(x)));
     const o = { ...m };
     for (const k of ["title", "action", "why", "example", "done_when"]) if (o[k]) o[k] = fix(o[k]);
-    o.how = lib ? [...lib] : (o.how || []).map(fix);
+    o.how = useLib ? [...lib] : ownHow;
     // A scheduling move's "starting point" is a day/time, never a caption pasted in by mistake.
     if (topic === "schedule" && o.example && !/\b(mon|tue|wed|thu|fri|sat|sun|am|pm|\d{1,2}:\d\d)\b/i.test(o.example)) o.example = null;
-    if (lib && m.how && m.how.length) { const own = m.how.map(fix).find((x) => /\b(caption|write|name it|title|text|say|record|voiceover)\b/i.test(x) && !/edit profile|three dots|tap/i.test(x)); if (own && !o.how.includes(own)) o.how.push(own); }
+    if (useLib && ownHow.length) { const own = ownHow.find((x) => /\b(caption|write|name it|title|text|say|record|voiceover)\b/i.test(x) && !/edit profile|three dots|tap/i.test(x)); if (own && !o.how.includes(own)) o.how.push(own); }
     o.topic = topic;
     return o;
   };
   const schedule = reportBody.calendar?.schedule || null;
   for (const ph of reportBody.growth_path?.phases || []) {
-    if (schedule) { for (const k of ["visible_action", "detail"]) if (ph[k]) ph[k] = applySchedule(ph[k], schedule); if (ph.opener) { ph.opener = { ...ph.opener, how: (ph.opener.how || []).map((x) => applySchedule(x, schedule)), done_when: applySchedule(ph.opener.done_when, schedule), example: ph.opener.example ? applySchedule(ph.opener.example, schedule) : ph.opener.example }; } }
+    if (schedule) { for (const k of ["visible_action", "detail"]) if (ph[k]) ph[k] = applySchedule(ph[k], schedule);
+      ph.moves = (ph.moves || []).map((m) => ({ ...m, topic: m.topic || topicOf(m), title: titleDay(m.title, schedule), action: applySchedule(m.action, schedule), why: applySchedule(m.why, schedule), done_when: applySchedule(m.done_when, schedule), how: (m.how || []).map((x) => applySchedule(x, schedule)), example: m.example ? applySchedule(m.example, schedule) : m.example })); if (ph.opener) { ph.opener = { ...ph.opener, how: (ph.opener.how || []).map((x) => applySchedule(x, schedule)), done_when: applySchedule(ph.opener.done_when, schedule), example: ph.opener.example ? applySchedule(ph.opener.example, schedule) : ph.opener.example }; } }
     if (ph.opener) ph.opener = fixMove(ph.opener, { title: ph.label, action: ph.visible_action });
     if (ph.visible_action) ph.visible_action = fix(ph.visible_action);
     if (ph.detail) ph.detail = fix(ph.detail);
@@ -270,6 +363,11 @@ function finishPlan(reportBody, { platform = reportBody.business?.platform || "i
   for (const w of reportBody.calendar?.weeks || []) for (const s of w.slots || []) { s.angle = fix(s.angle); s.prompt = fix(s.prompt); }
   if (Array.isArray(reportBody.next_posts)) {
     let pitched = 0;
+    const PLACEHOLDER_HANDLE = /@(?:brand|your|new|their|company|partner)[a-z]*(?:name|handle)\b/i;
+    // Only handles we know: the creator's own, competitors they picked, anyone in their bio. A shout-out to any other @handle is an invented endorsement.
+    const known = new Set([reportBody.business?.handle, ...((reportBody.competitors?.competitors || []).map((c) => c.handle)), ...((String(reportBody.bio || "").match(/@[a-z0-9_.]+/gi) || []).map((h) => h.slice(1)))].filter(Boolean).map((h) => String(h).toLowerCase()));
+    const unknownMention = (t) => (String(t).match(/@[a-z0-9_.]{2,}/gi) || []).some((h) => !known.has(h.slice(1).toLowerCase()));
+    reportBody.next_posts = reportBody.next_posts.filter((p) => { const t = `${p.hook} ${p.caption} ${p.script}`; return !PLACEHOLDER_HANDLE.test(t) && !unknownMention(t); });
     reportBody.next_posts = reportBody.next_posts.map((p) => {
       const o = { ...p };
       for (const k of ["hook", "caption", "script", "why"]) if (o[k]) o[k] = fix(o[k]);
@@ -294,4 +392,4 @@ function benchmarkText(t) {
   };
 }
 
-module.exports = { stripInvented, allowedLinks, applySchedule, TOPICS, topicOf, topicDef, dimOfLabel, datesIn, postName, postIndex, namePosts, sanitize, HOWTO, howFor, deriveSchedule, cadenceFor, validatePhases, dedupePhases, finishPlan, benchmarkText };
+module.exports = { isPitch, violatesContext, openerTopics, titleDay, stripInvented, allowedLinks, applySchedule, TOPICS, topicOf, topicDef, dimOfLabel, datesIn, postName, postIndex, namePosts, sanitize, HOWTO, howFor, deriveSchedule, cadenceFor, validatePhases, dedupePhases, finishPlan, benchmarkText };

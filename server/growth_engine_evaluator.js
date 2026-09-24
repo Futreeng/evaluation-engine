@@ -59,6 +59,8 @@ GROWTH_SCANNER_OUTPUT: {{PERSONA_A_RESPONSE}}
 GAP_AUDITOR_OUTPUT: {{PERSONA_B_RESPONSE}}
 POST_INSIGHTS (their best and worst recent posts, ranked against their own average): {{POST_INSIGHTS}}
 
+What grows small accounts (the phases and first moves must follow these): the first second of a reel and the first line of a caption decide whether anyone stays; posts people save and share (lists, places, how-tos, relatable lines) grow reach, posts that pitch brands to followers do not — brands find creators through audience engagement and the bio, so a "brand deals" goal means a clearer bio, proof pinned, and posts the audience saves, never pitch posts; one idea and one call to action per post; the same posting days every week at the account's best times beat volume; reply to comments in the first hour; repurpose what already worked. Never invent prices, links, emails or brand names. Phase labels name what changes for the audience or the profile, not a funnel.
+
 Write the report in exactly this shape:
 
 **SCALECRAFT SOCIAL SNAPSHOT — @{{HANDLE}}**
@@ -150,6 +152,14 @@ This phase's first move (already written — do not repeat it as a numbered move
 {{PRIOR_MOVES}}
 Posting schedule (fixed for the whole plan — every move, day and time must use it, never propose another): {{SCHEDULE}}
 {{PLAN_CONTEXT}}
+What grows small accounts (apply these; never contradict them):
+- The first 1–2 seconds decide a reel: open on the payoff or a question, never a logo or "hey guys". Captions: the first line must stand alone before "more".
+- Saves and shares beat likes. Posts people save (lists, how-tos, "which one?" carousels, places) and share (relatable lines, local pride) grow reach; "DM for collabs" posts do neither.
+- One idea per post, one call to action per post. Talk to the audience, never to brands — brands find creators through the audience's engagement and the bio, not through pitch posts.
+- Consistency beats volume: the same days each week at the account's best times, a repeatable series (same format, new subject) so followers know what to expect.
+- Reply to comments in the first hour; ask a question in the caption that a follower can answer in five words.
+- Repurpose what already worked: a strong post gets a re-cut, a carousel, a story — but each original post at most twice in the plan.
+- Never invent prices, rates, links, emails or brand names. Never promise what the data can't show.
 Plan rules:
 - Every move in this phase serves "{{PHASE_LABEL}}". A profile move (bio, link, highlight, pinned post) belongs only in a profile phase; a cadence move only in a consistency phase; a format or repurposing move only in a content phase.
 - One-off actions happen once in the whole plan: one bio edit, one link, one highlight, one pinned post. If a prior move already did it, do not do it again in any form.
@@ -193,6 +203,7 @@ Upcoming calendar slots (follow their formats and angles where sensible): {{SLOT
 Posting schedule (fixed; use these day/time pairs, cycling through them in order): {{WINDOWS}}
 {{PLAN_CONTEXT}}
 {{AVOID}}
+Craft rules: the hook lands in the first line/second; the caption's first line stands alone; one idea and one question or CTA per post; aim for saves and shares (lists, places, how-tos, relatable lines). Repeat a proven series format with a new subject.
 Audience rules: these posts are for the people who follow this account, not for sponsors. No media-kit pitches, no "DM for collabs" as the point of a post (a bio handles that), no "swipe up", no placeholders like [Name] — write "I" in their voice. Mention brand work at most once across the set, and only as a line in a caption. Refer to past posts by name and date ("the Cape Flattery reel, Sep 17"), never a bare ISO date.
 Produce ONLY a JSON array of {{COUNT}} posts, no prose, no markdown fences:
 [{"n":1,"day":"Thu","time":"7pm","format":"reel","hook":"the first line on screen or the first sentence spoken, under 12 words","caption":"the full caption in their voice, 2–5 short lines, hashtags only if they already use them","script":"for a reel/video: a 4–8 line spoken script or shot list as plain text with line breaks; for a carousel: one line per slide; for a photo: what to shoot and the caption angle","why":"one sentence tying this post to a specific past post or number","source":"new|archive|no_camera"}]
@@ -696,7 +707,9 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
   const mergePrompt = interpolateTemplate(PERSONA_PROMPTS.tier0.merge, mergeTemplateVars);
 
   // Merge: Claude → Gemini → Groq → OpenAI
-  const mergedReport = await withOutputTokens(6144, () => callWithQuadFallback(
+  // 8192: the merge carries narrative + a JSON block with three phases and their locked
+  // teasers; at 6144 the third phase was being cut off and silently dropped by the parser.
+  const mergedReport = await withOutputTokens(8192, () => callWithQuadFallback(
     () => callClaudeNonStreaming(claudeKey, claudeWorkspaceId, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt),
     () => callGeminiNonStreaming(geminiKey, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt),
     () => callGroqNonStreaming(groqKey, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt),
@@ -793,6 +806,7 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
         }
       : { ...llmScores, category_avg: null, summary: typeof structured?.summary === "string" ? structured.summary : null, method: "llm" };
     const phases = Array.isArray(structured?.phases) ? structured.phases : [];
+    if (phases.length && phases.length < 3) { console.warn(`[Growth Engine] snapshot came back with ${phases.length} of 3 phases (merge output truncated?) — marking for an early refresh`); reportBody.plan_incomplete = true; }
     if (phases.length) {
       reportBody.growth_path = {
         unlocked_steps: phases.length,
@@ -904,7 +918,7 @@ async function evaluateTier1(accountId, inputParams, onStage = () => {}, { tier:
       try { r = await askJson(prompt, `Plan Writer: phase ${i + 1}${attempt ? " (rewrite)" : ""}`, 6144).then((x) => (x && Array.isArray(x.moves) && x.moves.length ? x : null)); }
       catch (err) { console.warn(`[Growth Engine] Plan Writer: phase ${i + 1} failed on every model: ${String(err.message).slice(0, 160)}`); }
       if (!r) break;
-      const check = planQuality.validatePhases([...phaseResults.map((pr, k) => ({ label: labels[k], visible_action: snapPhases[k].visible_action, opener: pr?.first_move || null, moves: pr?.moves || [] })), { label: labels[i], visible_action: p.visible_action, opener: r.first_move || null, moves: r.moves }], { labels });
+      const check = planQuality.validatePhases([...phaseResults.map((pr, k) => ({ label: labels[k], visible_action: snapPhases[k].visible_action, opener: pr?.first_move || null, moves: pr?.moves || [] })), { label: labels[i], visible_action: p.visible_action, opener: r.first_move || null, moves: r.moves }], { labels, posts: planQuality.postIndex(reportBody), context: planContext });
       const mine = check.problems.filter((x) => x.phase === i || x.kind === "overcite");
       if (!mine.length || attempt) { result = r; if (mine.length) console.warn(`[Growth Engine] phase ${i + 1} still has ${mine.length} problem(s) after rewrite; deduping`); }
       else { vars.PROBLEMS = mine.map((x) => `- ${x.text}`).join("\n"); console.warn(`[Growth Engine] phase ${i + 1} rejected: ${mine.map((x) => x.text).join(" | ")}`); }
@@ -980,7 +994,7 @@ async function evaluateTier1(accountId, inputParams, onStage = () => {}, { tier:
     planPhases = Object.entries(byRange).map(([range, moves]) => ({ range, moves }));
   }
   planPhases = planPhases.map((ph) => ({ ...ph, range: normRange(ph.range), moves: Array.isArray(ph.moves) ? ph.moves : [] }));
-  { const dd = planQuality.dedupePhases(planPhases.map((ph, i) => ({ ...ph, label: labels[i], visible_action: snapPhases[i]?.visible_action, opener: ph.first_move || null })), { labels });
+  { const dd = planQuality.dedupePhases(planPhases.map((ph, i) => ({ ...ph, label: labels[i], visible_action: snapPhases[i]?.visible_action, opener: ph.first_move || null })), { labels, context: planContext });
     if (dd.dropped.length) console.warn(`[Growth Engine] dropped ${dd.dropped.length} repeated/off-phase move(s): ${dd.dropped.map((x) => `"${x.move.title}" (${x.reason}, ${x.topic})`).join(", ")}`);
     planPhases = dd.phases; reportBody.plan_dropped = dd.dropped.map((x) => ({ phase: x.phase + 1, title: x.move.title, reason: x.reason, topic: x.topic })); }
 
