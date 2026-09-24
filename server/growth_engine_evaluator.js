@@ -820,6 +820,8 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
         })),
       };
     }
+    // Free report: every phase opener gets its button (1.5.1); posting moves paywall to the plan.
+    if (reportBody.growth_path) planQuality.stampFreeCtas(reportBody);
     if (postInsights) {
       reportBody.post_insights = {
         ...postInsights,

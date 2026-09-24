@@ -142,7 +142,7 @@
     const tick = now => { const t = Math.min(1, (now - start) / ms); const e = 1 - Math.pow(1 - t, 3); el.textContent = Math.round(from + (to - from) * e); if (t < 1) requestAnimationFrame(tick); else el.textContent = to; };
     el.textContent = from; requestAnimationFrame(tick);
   }
-  function rememberPricing(p) { try { const g = (p.tiers || []).find(t => t.tier === 'growth_plan'); sset('sc_pricing', { at: Date.now(), variant: p.variant || 'control', growth_plan: g?.monthlyPrice, plan_unlock: p.one_time?.[0]?.price, one_time_sold: !!(p.one_time || []).length, founders: p.founders && p.founders.left > 0 ? p.founders : null, pro: (p.tiers || []).find(t => t.tier === 'growth_plan_pro')?.monthlyPrice, rescore: Object.fromEntries(Object.entries(p.limits || {}).map(([k, v]) => [k, v && v.rescore_days])) }); } catch { } }
+  function rememberPricing(p) { try { const g = (p.tiers || []).find(t => t.tier === 'growth_plan'); sset('sc_pricing', { at: Date.now(), cta: p.cta || null, variant: p.variant || 'control', growth_plan: g?.monthlyPrice, plan_unlock: p.one_time?.[0]?.price, one_time_sold: !!(p.one_time || []).length, founders: p.founders && p.founders.left > 0 ? p.founders : null, pro: (p.tiers || []).find(t => t.tier === 'growth_plan_pro')?.monthlyPrice, rescore: Object.fromEntries(Object.entries(p.limits || {}).map(([k, v]) => [k, v && v.rescore_days])) }); } catch { } }
   // Admin link in the nav: ask /auth/me once per token and remember the answer.
   async function refreshAdminFlag() {
     if (!token()) { try { localStorage.removeItem('sc_admin'); } catch { } return; }
@@ -835,6 +835,8 @@
     const duePhase = subscriber ? ([[2, 25, 45], [3, 55, 75]].find(([ph, a, b]) => ageDays >= a && ageDays < b && !checkins['p' + ph]) || [])[0] : 0;
     const nudge = subscriber && report.nudge ? report.nudge : null;
     if (paid && !isSample) lset('sc_path_home', report.report_id);
+    // Came from "Get this post written" on a free report: the new plan opens on that step.
+    { const rm = sget('sc_return_move', null); if (rm && paid && !isSample) { sessionStorage.removeItem('sc_return_move'); go(`#/path/${encodeURIComponent(report.report_id)}?open=${encodeURIComponent(rm.key)}`); return; } }
     if (subscriber && qs.get('checkin') && qs.get('changed') === '1') { go(`#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=checkin&phase=${qs.get('checkin')}`); return; }
     if (isSample) sset('sc_once_price', oneTime);
 
@@ -904,7 +906,7 @@
               ${raw((s.dimensions || []).map(d => { const sc = clamp(d.score, 0, 100); const [g, gcc] = gradeIn({ score: sc, label: d.label }, s.summary); const hue = hueOf(d.label); const dd = hist?.delta_dimensions?.find(x => x.label === d.label);
                 return h`<div class="dimcard bd${hue}"><div class="top"><span class="n">${d.label}</span><span class="s hue${hue}">${sc} · ${g}${dd && dd.delta ? raw(h`<span class="dd g-${dd.delta > 0 ? 'strong' : 'weak'}">${dd.delta > 0 ? '+' : ''}${dd.delta}</span>`) : ''}</span></div>
                   <div class="bar in"><div class="fill bg${hue}" style="width:${sc}%"></div>${d.category_avg != null ? raw(h`<div class="mark" style="left:${clamp(d.category_avg, 0, 100)}%"></div>`) : ''}</div>
-                  <p>${d.explanation || ''}</p>${raw(checklistHTML(d.evidence))}${raw(evidenceHTML(d.evidence_posts))}</div>`; }).join(''))}
+                  <p>${d.explanation || ''}</p>${raw(checklistHTML(d.evidence))}${raw(evidenceHTML(d.evidence_posts))}${(() => { const ph = phaseForDim(d.label, phases); return ph ? raw(h`<a class="todo" href="#" data-dim-fix="${ph.key}m1">What to do about this →</a>`) : ''; })()}</div>`; }).join(''))}
               <div class="fine">${s.category_avg != null ? `The marker is your ${niche} average (${fmtN(s.category_sample_size)} accounts scored so far).` : pending ? `The marker is your niche average. Your ${niche} average appears once ${pending.min_n} accounts are scored — ${pending.n} so far.` : nicheKnown ? 'The marker is your niche average.' : `Scored against all creators — we don't have enough ${niche} accounts yet.`}</div>
             </div>
           </details>
@@ -937,9 +939,9 @@
               return h`<div class="phase">
                 <div class="ph" style="background:${raw(tone)}"><span>${p.days} · ${p.label}</span>${paid && p.not_included ? raw(h`<span class="prog" style="color:${raw(toneT)}">Growth Plan only</span>`) : paid && p.moves.length ? raw(h`<span class="prog" style="color:${raw(toneT)}">${doneN} of ${total} done</span>`) : ''}</div>
                 <div class="pb">
-                  ${paid && p.opener ? raw(h`<div class="mvrow opener ${isSample || i === 0 ? 'open' : ''} ${isDone(p.key + 'm1') ? 'on' : ''}" data-row="${p.key}m1"><button class="box" aria-label="Mark move done" aria-pressed="${isDone(p.key + 'm1') ? 'true' : 'false'}" data-move="${p.key}m1" aria-label="Mark move 01 done">${isDone(p.key + 'm1') ? '✓' : ''}</button><div class="b"><div class="t">01 · ${p.label}</div><p>${p.action}</p>${p.detail ? raw(h`<p class="w">${p.detail}</p>`) : ''}${raw(moveDetailHTML(p.opener))}<span class="more" aria-hidden="true"></span></div></div>`)
-                  : raw(h`<div class="move"><span class="n">01</span><p>${p.action}</p></div>`)}
-                  ${paid && !p.not_included ? raw(p.moves.map(m => h`<div class="mvrow ${isSample || i === 0 ? 'open' : ''} ${isDone(p.key + 'm' + m.n) ? 'on' : ''}" data-row="${p.key}m${m.n}"><button class="box" aria-label="Mark move done" aria-pressed="${isDone(p.key + 'm' + m.n) ? 'true' : 'false'}" data-move="${p.key}m${m.n}" aria-label="Mark move ${m.n} done">${isDone(p.key + 'm' + m.n) ? '✓' : ''}</button><div class="b"><div class="t">${String(m.n).padStart(2, '0')} · ${m.title || ''}</div><p>${m.action}</p>${m.why ? raw(h`<p class="w">Why: ${m.why}</p>`) : ''}${raw(moveDetailHTML(m))}<span class="more" aria-hidden="true"></span></div></div>`).join(''))
+                  ${paid && p.opener ? raw(h`<div class="mvrow opener ${isSample || i === 0 ? 'open' : ''} ${isDone(p.key + 'm1') ? 'on' : ''}" data-row="${p.key}m1"><button class="box" aria-label="Mark move done" aria-pressed="${isDone(p.key + 'm1') ? 'true' : 'false'}" data-move="${p.key}m1" aria-label="Mark move 01 done">${isDone(p.key + 'm1') ? '✓' : ''}</button><div class="b"><div class="t">01 · ${p.label}</div><p>${p.action}</p>${p.detail ? raw(h`<p class="w">${p.detail}</p>`) : ''}${raw(moveDetailHTML(p.opener))}${raw(ctaHTML(p.opener && p.opener.cta, { paid, moveKey: p.key + 'm1' }))}<span class="more" aria-hidden="true"></span></div></div>`)
+                  : raw(h`<div class="move"><span class="n">01</span><div><p>${p.action}</p>${raw(ctaHTML(p.opener && p.opener.cta, { paid, moveKey: p.key + 'm1' }))}</div></div>`)}
+                  ${paid && !p.not_included ? raw(p.moves.map(m => h`<div class="mvrow ${isSample || i === 0 ? 'open' : ''} ${isDone(p.key + 'm' + m.n) ? 'on' : ''}" data-row="${p.key}m${m.n}"><button class="box" aria-label="Mark move done" aria-pressed="${isDone(p.key + 'm' + m.n) ? 'true' : 'false'}" data-move="${p.key}m${m.n}" aria-label="Mark move ${m.n} done">${isDone(p.key + 'm' + m.n) ? '✓' : ''}</button><div class="b"><div class="t">${String(m.n).padStart(2, '0')} · ${m.title || ''}</div><p>${m.action}</p>${m.why ? raw(h`<p class="w">Why: ${m.why}</p>`) : ''}${raw(moveDetailHTML(m))}${raw(ctaHTML(m.cta, { paid, moveKey: p.key + 'm' + m.n }))}<span class="more" aria-hidden="true"></span></div></div>`).join(''))
                   : raw(h`<div class="locked"><div class="rows">${raw((p.teasers.length ? p.teasers : Array.from({ length: p.count }, () => 'Written from your posts when you unlock')).slice(0, 4).map((t, k) => h`<div>${String(p.firstLocked + k).padStart(2, '0')} · ${t.replace(/^MOVE \d+\s*·?\s*/i, '')}${/…$/.test(t) ? '' : '…'}</div>`).join(''))}
                       <div class="grid">${raw(Array.from({ length: 28 }, (_, k) => `<span style="${[0, 2, 4, 6].includes(k % 7) ? `background:var(--c${(Math.floor(k / 7) % 4) + 1})` : ''}"></span>`).join(''))}</div></div>
                     <div class="lk"><i>🔒</i>${p.lockedHeader}</div></div>`)}
@@ -1007,6 +1009,8 @@
       if (!isSample) { report.moves_done = done; sset('sc_report_' + report.report_id, report); }
       $view.querySelectorAll('.phase').forEach((ph, i) => { const p = phases[i]; if (!p || !paid) return; const total = 1 + p.moves.length; const dn = (isDone(p.key + 'm1') ? 1 : 0) + p.moves.filter(m => isDone(p.key + 'm' + m.n)).length; const el = ph.querySelector('.prog'); if (el) el.textContent = `${dn} of ${total} done`; });
     }));
+    bindCta($view, { paid, reportId: report.report_id, openPost: i => { const det = $view.querySelector('#nextPosts')?.closest('details'); if (det) det.open = true; const art = $view.querySelector(`#nextPosts [data-post="${i}"]`); if (art) { art.scrollIntoView({ behavior: 'smooth', block: 'center' }); art.classList.add('flash'); setTimeout(() => art.classList.remove('flash'), 1600); } else toast('Your written posts arrive with the plan.'); } });
+    $view.querySelectorAll('[data-dim-fix]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); const row = $view.querySelector(`[data-row="${a.dataset.dimFix}"]`); const det = row?.closest('details'); if (det) det.open = true; if (row) { row.classList.add('open'); row.scrollIntoView({ behavior: 'smooth', block: 'center' }); } }));
     $view.querySelector('[data-action=share]').addEventListener('click', () => { if (!isSample) track('share_clicked', { overall }, report.report_id); openShareSheet(report); });
     $view.querySelectorAll('[data-moment-share]').forEach(b => b.addEventListener('click', () => { const m = (report.moments || []).find(x => x.key === b.dataset.momentShare); if (m) openShareSheet(report, m); }));
     $view.querySelectorAll('[data-moment-dismiss]').forEach(b => b.addEventListener('click', () => { try { localStorage.setItem('sc_moment_' + report.report_id + '_' + b.dataset.momentDismiss, '1'); } catch { } b.closest('.moment')?.remove(); }));
@@ -1145,6 +1149,29 @@
     }).join(''))}</div>`;
   }
   // The "how" under a move: numbered steps, paste-ready example, done-when, time.
+  // Move buttons (1.5.1). Flags come from /billing/pricing; a type whose flag is off, or a
+  // move without a destination, renders nothing extra — the checkbox / Done is the fallback.
+  const ctaFlags = () => (sget('sc_pricing', null)?.cta) || { flags: { write_post: true, see_example: true, fix_profile: false, mark_done: true }, free_mode: 'paywall' };
+  function ctaHTML(cta, { paid, moveKey, dark }) {
+    if (!cta || !cta.type || cta.type === 'mark_done') return '';
+    const cf = ctaFlags(); if (!cf.flags[cta.type]) return '';
+    if (cta.type === 'see_example' && cta.url) return h`<a class="btn ${dark ? 'light' : 'ghost'} sm ctabtn" href="${cta.url}" target="_blank" rel="noopener" data-cta="see_example" data-key="${moveKey}">${cta.label || 'See the post'} ↗</a>`;
+    if (cta.type === 'write_post') { if (!paid && cf.free_mode === 'hidden') return ''; return h`<button type="button" class="btn ${dark ? 'light' : 'ghost'} sm ctabtn" data-cta="write_post" data-key="${moveKey}" data-post="${cta.post_index ?? 0}">${paid ? (cta.label || 'Open the written post') : 'Get this post written'}</button>`; }
+    return '';
+  }
+  // Click handling shared by the report and the Path. `openPost` is how each screen shows a written post.
+  function bindCta(root, { paid, reportId, openPost }) {
+    root.querySelectorAll('[data-cta]').forEach(b => b.addEventListener('click', e => {
+      const type = b.dataset.cta, key = b.dataset.key;
+      if (reportId !== 'sample') track('cta_clicked', { type, paid, key }, reportId);
+      if (type === 'see_example') return; // plain link
+      if (type === 'write_post') {
+        e.preventDefault();
+        if (!paid) { sset('sc_return_move', { report: reportId, key }); sset('sc_intent_tier', 'growth_plan'); go('#/pricing'); return; }
+        openPost(Number(b.dataset.post) || 0);
+      }
+    }));
+  }
   function moveDetailHTML(d, dark) {
     if (!d || (!(d.how || []).length && !d.example && !d.done_when)) return '';
     return h`<div class="mvdetail ${dark ? 'dark' : ''}">
@@ -1164,6 +1191,9 @@
     if (!has.length && !missing.length) return '';
     return h`<ul class="checklist">${raw(has.map(x => h`<li class="ok"><span aria-hidden="true">✓</span>${x}</li>`).join(''))}${raw(missing.map(x => h`<li class="no"><span aria-hidden="true">✗</span>${x}</li>`).join(''))}</ul>`;
   }
+  // Which phase of the plan works on a dimension (same label rules the server uses).
+  const dimKeyOf = l => /profile|bio|clarity/i.test(l) ? 'profile' : /consisten|cadence|posting|schedule|frequen|rhythm/i.test(l) ? 'consistency' : /content|mix|format|strategy|reel|archive/i.test(l) ? 'content' : /engage|comment|conversation|reach|save|share/i.test(l) ? 'engagement' : null;
+  function phaseForDim(label, phases) { const k = dimKeyOf(label); if (!k) return null; return (phases || []).find(p => dimKeyOf(p.label) === k && !p.not_included) || null; }
   function competitorRows(c) {
     const rows = [...c.competitors.filter(x => x.ok !== false).map(x => ({ ...x, you: false })), { handle: c.you.handle, overall: c.you.overall, you: true }].sort((a, b) => b.overall - a.overall);
     return h`<div class="fine" style="margin-bottom:10px">You rank #${c.rank.position} of ${c.rank.of}</div><div class="comprows">${raw(rows.map((r, i) => h`<div class="crow ${r.you ? 'you' : ''}"><div class="h"><span>${i + 1} · @${r.handle}${r.you ? ' (you)' : ''}</span><span>${r.overall}</span></div>${!r.you ? raw(h`<ul>${raw((r.does_differently && r.does_differently.length ? r.does_differently : ['Nothing they do better on these measures.']).map(t => h`<li>${t}</li>`).join(''))}</ul>`) : ''}</div>`).join(''))}${raw(c.competitors.filter(x => x.ok === false).map(x => h`<div class="crow"><span>@${x.handle}</span><span class="fine">${x.error}</span></div>`).join(''))}</div>`;
@@ -1721,6 +1751,7 @@
       : raw(moveDetailHTML({ how: s.how, example: s.example, done_when: s.done_when, time: s.time }))}
       ${s.kind === 'move' && s.topic === 'bio_link' && !(report.plan_context && report.plan_context.link) ? raw(h`<div class="asklink"><label for="askLink">Which link? Paste the page you want people to land on and we'll write it into this step.</label><div class="row"><input id="askLink" type="url" placeholder="https://…" autocomplete="url"><button class="btn dark sm" data-save-link>Use this link</button></div><div class="fine">No link yet? A free Linktree or a one-page media kit works. This is the one thing we can't write for you.</div></div>`) : ''}
       ${s.kind === 'slot' && !post ? raw(h`<div class="dw"><span><b>Done when:</b> ${s.done_when}</span><span class="tm">${s.time}</span></div>`) : ''}
+      ${s.kind === 'move' && s.cta ? raw(h`<div class="pcta">${raw(ctaHTML(s.cta, { paid: !path.free, moveKey: s.key }))}</div>`) : ''}
       <div class="pacts">
         <button class="btn green" data-path="done" data-key="${s.key}">Done</button>
         <button class="btn ghost" data-path="skip" data-key="${s.key}">Skip</button>
@@ -1812,7 +1843,7 @@
       }));
       $view.querySelectorAll('[data-skip-reason]').forEach(b => b.addEventListener('click', () => update(b.dataset.key, 'skip', b.dataset.skipReason)));
       $view.querySelectorAll('[data-skip-cancel]').forEach(b => b.addEventListener('click', () => { b.closest('.skipwhy').hidden = true; }));
-      const showStep = (key) => { const s = steps.find(x => x.key === key); if (!s) return; const card = $view.querySelector('.pstep'); const el = document.createElement('div'); el.innerHTML = pathStepCard(s, path, { isSample, report }); const nc = el.firstElementChild; if (card) card.replaceWith(nc); else $view.querySelector('.pprog').insertAdjacentElement('afterend', nc); bind(nc); nc.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+      const showStep = (key) => { const s = steps.find(x => x.key === key); if (!s) return; $view.querySelectorAll(`[data-open="${key}"]`).forEach(r => r.remove()); const card = $view.querySelector('.pstep'); const el = document.createElement('div'); el.innerHTML = pathStepCard(s, path, { isSample, report }); const nc = el.firstElementChild; if (card) card.replaceWith(nc); else $view.querySelector('.pprog').insertAdjacentElement('afterend', nc); bind(nc); nc.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
       const saveLink = async (root) => {
         const inp = root.querySelector('#askLink'); const v = (inp?.value || '').trim();
         if (!/^https?:\/\/\S+$/i.test(v)) { toast('Paste a full link, starting with https://'); inp?.focus(); return; }
@@ -1825,9 +1856,12 @@
           toast('Saved. It’s in the step now.'); render(null);
         } catch (e) { toast(e.message || 'Could not save the link.'); }
       };
-      const bind = (root) => { root.querySelector('[data-save-link]')?.addEventListener('click', () => saveLink(root)); root.querySelectorAll('[data-path]').forEach(b => b.addEventListener('click', () => { const key = b.dataset.key, st = b.dataset.path; if (st === 'skip') { const box = b.closest('.pstep').querySelector('.skipwhy'); box.hidden = !box.hidden; return; } update(key, st); })); root.querySelectorAll('[data-skip-reason]').forEach(b => b.addEventListener('click', () => update(b.dataset.key, 'skip', b.dataset.skipReason))); root.querySelectorAll('[data-skip-cancel]').forEach(b => b.addEventListener('click', () => { b.closest('.skipwhy').hidden = true; })); root.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', () => { const t = b.closest('.fld').querySelector('.txt, .hook')?.textContent || ''; navigator.clipboard?.writeText(t).then(() => toast('Copied.')).catch(() => toast('Select the text and copy it.')); })); };
+      const openPost = (i) => { const slot = steps.find(x => x.kind === 'slot' && x.post && (x.post.n === i + 1 || x.post.n === i)); if (slot) showStep(slot.key); else go('#/report/' + report.report_id); };
+      const bind = (root) => { bindCta(root, { paid: !path.free, reportId: report.report_id, openPost }); root.querySelector('[data-save-link]')?.addEventListener('click', () => saveLink(root)); root.querySelectorAll('[data-path]').forEach(b => b.addEventListener('click', () => { const key = b.dataset.key, st = b.dataset.path; if (st === 'skip') { const box = b.closest('.pstep').querySelector('.skipwhy'); box.hidden = !box.hidden; return; } update(key, st); })); root.querySelectorAll('[data-skip-reason]').forEach(b => b.addEventListener('click', () => update(b.dataset.key, 'skip', b.dataset.skipReason))); root.querySelectorAll('[data-skip-cancel]').forEach(b => b.addEventListener('click', () => { b.closest('.skipwhy').hidden = true; })); root.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', () => { const t = b.closest('.fld').querySelector('.txt, .hook')?.textContent || ''; navigator.clipboard?.writeText(t).then(() => toast('Copied.')).catch(() => toast('Select the text and copy it.')); })); };
       $view.querySelectorAll('[data-open], [data-ahead]').forEach(b => b.addEventListener('click', () => showStep(b.dataset.open || b.dataset.ahead)));
       $view.querySelector('[data-save-link]')?.addEventListener('click', () => saveLink($view));
+      bindCta($view, { paid: !path.free, reportId: report.report_id, openPost });
+      if (qs.get('open') && !$view.dataset.opened) { $view.dataset.opened = '1'; const k = qs.get('open'); if (steps.some(x => x.key === k)) showStep(k); }
       $view.querySelectorAll('.pstep [data-copy]').forEach(b => b.addEventListener('click', () => { const t = b.closest('.fld').querySelector('.txt, .hook')?.textContent || ''; navigator.clipboard?.writeText(t).then(() => toast('Copied.')).catch(() => toast('Select the text and copy it.')); }));
       $view.querySelector('[data-action=unlock-path]')?.addEventListener('click', () => { sset('sc_intent_tier', 'growth_plan'); sset('sc_unlock_report', report.report_id); go('#/pricing'); });
     };

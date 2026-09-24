@@ -10,7 +10,7 @@ const EVENTS = [
   "evaluate_started", "evaluate_completed", "evaluate_failed",
   "report_viewed", "share_clicked", "card_downloaded", "share_page_visited",
   "signup", "pricing_viewed", "subscribe", "unlock", "cancel", "resume",
-  "promo_applied", "checkin_answered", "move_done", "move_skipped", "post_regenerated", "post_copied", "referral_signup",
+  "promo_applied", "checkin_answered", "move_done", "move_skipped", "cta_clicked", "post_regenerated", "post_copied", "referral_signup",
   "rank_up", "milestone", "record", "badge", "moment_shared",
   "roast_opened", "roast_generated", "roast_rejected", "roast_skipped_minor", "roast_shared",
   "monday_move_sent", "monday_move_done", "goal_set", "post_reviewed",

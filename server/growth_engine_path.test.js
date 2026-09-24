@@ -296,6 +296,38 @@ t("placeholder handles are stripped from moves and drop a written post", () => {
   assert.deepEqual(b.next_posts.map((p) => p.hook), ["Trail day"]);
 });
 
+// ---- 1.5.1: why numbers and buttons
+t("a why may only quote the account's numbers; other sentences go, the move stays", () => {
+  const r = { scores: { overall: 71, dimensions: [{ score: 61, evidence: "16 posts over 53 days (2.1/week vs 3.5/week target)" }] }, business: { followers: 1701 }, posts: [{ likes: 8523, comments: 318, views: 44914, posted_at: "2026-09-17T00:00:00Z" }], post_insights: { avg_engagement: 188 }, best_times: { windows: [{ vs_avg: 1.62, n: 3 }] } };
+  const allowed = q.numbersInReport(r);
+  assert.deepEqual(q.checkWhy("The Sep 17 reel has 8,523 likes and 44.9k views. Brands pay $500 for 12% lifts. Pinning it shows proof.", allowed), { text: "The Sep 17 reel has 8,523 likes and 44.9k views. Pinning it shows proof.", stripped: 1 });
+  assert.deepEqual(q.checkWhy("Nothing numeric here.", allowed), { text: "Nothing numeric here.", stripped: 0 });
+});
+t("buttons: see the cited post, open the written post, else mark done", () => {
+  const r = { business: { handle: "t" }, posts: [{ id: "1", caption: "The last few steps in America.\nCape Flattery, Washington.", type: "reel", posted_at: "2026-09-17T00:11:54.000Z", permalink: "https://www.instagram.com/p/x/" }], next_posts: [{ n: 1, format: "reel", hook: "a" }, { n: 2, format: "carousel", hook: "b" }], growth_path: { phases: [{ label: "Profile", visible_action: "Pin the Sep 17 2026 reel", opener: { how: [], example: null }, moves: [
+    { n: 2, title: "Pin Viral Proof", action: "Pin the 2026-09-17 reel to your profile", how: [], example: null },
+    { n: 3, title: "Thursday Carousel", action: "Convert the archive photos into a carousel", how: [], example: null },
+    { n: 4, title: "Verify category", action: "Set your public category", how: [], example: null },
+  ] }] }, calendar: { weeks: [] } };
+  q.finishPlan(r);
+  const ph = r.growth_path.phases[0];
+  assert.equal(ph.opener.cta.type, "see_example"); assert.equal(ph.opener.cta.url, "https://www.instagram.com/p/x/");
+  assert.equal(ph.moves[0].cta.type, "see_example");
+  assert.equal(ph.moves[1].cta.type, "write_post"); assert.equal(ph.moves[1].cta.post_index, 1);
+  const r2 = { ...r, next_posts: [{ n: 1, day: "Mon", format: "reel" }, { n: 2, day: "Thu", format: "reel" }], growth_path: { phases: [{ label: "Content", visible_action: "Post reels", opener: {}, moves: [{ n: 2, title: "Thursday Memory Reel", action: "Re-cut a reel for Thursday", how: [], example: null }] }] } };
+  q.finishPlan(r2); assert.equal(r2.growth_path.phases[0].moves[0].cta.post_index, 1);
+  assert.equal(ph.moves[2].cta.type, "mark_done");
+  const p = P.build({ ...r, tier: "growth_plan", plan_started_at: Date.now() }, {});
+  assert.equal(p.steps.find((x) => x.key === "p1m3").cta.type, "write_post");
+});
+
+t("free reports: openers get a button; posting moves paywall", () => {
+  const r = { business: { handle: "t" }, posts: [], growth_path: { phases: [{ label: "Profile", visible_action: "Add a link to your bio" }, { label: "Consistency", visible_action: "Post a reel on Thu, Fri and Sun" }] } };
+  q.stampFreeCtas(r);
+  assert.equal(r.growth_path.phases[0].opener.cta.type, "mark_done");
+  assert.deepEqual(r.growth_path.phases[1].opener.cta, { type: "write_post", label: "Get this post written", post_index: 0 });
+});
+
 // ---- data layer (crash report follow-ups): median, unpinned, recent
 const scoring = require("./growth_engine_scoring");
 const { calculateMetrics } = require("./instagram_fetcher");

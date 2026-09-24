@@ -324,6 +324,61 @@ function titleDay(title, schedule) {
   return String(title).replace(/^((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)(?:day|sday|nesday|rsday|urday)?s?)\s+/i, (m, d) => (schedule.days.some((x) => short(x) === short(d)) ? m : ""));
 }
 
+// ------------------------------------------------------------------ why check + buttons
+const evidence = require("./growth_engine_evidence");
+// Every number the account's data can vouch for: scores, follower count, every post's
+// likes/comments/views, best-time lifts, the evidence lines, targets.
+function numbersInReport(r) {
+  const posts = (r.posts || []).map((p) => ({ l: p.likes, c: p.comments, v: p.views, d: p.posted_at ? new Date(p.posted_at).getDate() : null }));
+  return evidence.allowedNumbers({
+    scores: { overall: r.scores?.overall, dims: (r.scores?.dimensions || []).map((d) => ({ s: d.score, e: d.evidence, p: d.parts, avg: d.category_avg })), pct: r.scores?.category_percentile },
+    followers: r.business?.followers, sampled: r.posts_sampled, window: r.data_window,
+    posts, insights: r.post_insights, best: r.best_times, schedule: r.calendar?.schedule, plan_days: r.plan_days,
+    year: new Date().getFullYear(),
+  });
+}
+// A move's "why" may only quote the account's own numbers. Sentences that quote anything
+// else are dropped; the move stays. Returns how many sentences went.
+function checkWhy(text, allowed) {
+  if (!text) return { text, stripped: 0 };
+  const sentences = String(text).split(/(?<=[.!?])\s+/);
+  const keep = sentences.filter((sn) => evidence.validateExplanation(sn, allowed).ok);
+  return { text: keep.join(" ").trim(), stripped: sentences.length - keep.length };
+}
+// The button on a move, decided from the move itself — never model output.
+//   see_example: the move cites one of the account's posts → open that post
+//   write_post:  a posting move with a written post to show → open it
+//   mark_done:   everything else (the Path and the report already have the checkbox)
+function ctaFor(move, r, idx, postNames, { free = false } = {}) {
+  const blob = `${move.title || ""} ${move.action || ""} ${move.why || ""} ${(move.how || []).join(" ")} ${move.example || ""}`;
+  const byDate = new Map(); for (const p of r.posts || []) { const d = new Date(p.posted_at || p.timestamp); if (Number.isFinite(+d)) byDate.set(d.toISOString().slice(0, 10), p); }
+  let hit = null;
+  for (const nm of postNames) if (blob.includes(nm.key)) { hit = byDate.get(nm.date) || idx.get(nm.date); if (hit) break; }
+  if (!hit) for (const d of datesIn(blob)) { hit = byDate.get(d); if (hit) break; }
+  if (hit && (hit.permalink || hit.url)) return { type: "see_example", label: "See the post", url: hit.permalink || hit.url, post_id: hit.id || hit.post_id || null };
+  const topic = move.topic || topicOf(move);
+  // A free report has no written posts yet: the button is the paywall ("Get this post written").
+  if (free && ["format", "repurpose", "schedule"].includes(topic)) return { type: "write_post", label: "Get this post written", post_index: 0 };
+  if (["format", "repurpose", "schedule"].includes(topic) && (r.next_posts || []).length) {
+    const fmt = /carousel/i.test(blob) ? "carousel" : /reel|video/i.test(blob) ? "reel" : /static|photo|image/i.test(blob) ? "static" : null;
+    const sameFmt = (p) => !fmt || String(p.format).toLowerCase() === fmt || (fmt === "static" && /photo|image/i.test(p.format));
+    // Prefer the written post on the day the move names ("Monday Memory Reel" → the Monday reel).
+    const dayM = /\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun)/i.exec(blob); const day = dayM ? dayM[1].slice(0, 3).toLowerCase() : null;
+    let i = day ? r.next_posts.findIndex((p) => String(p.day).slice(0, 3).toLowerCase() === day && sameFmt(p)) : -1;
+    if (i < 0) i = r.next_posts.findIndex(sameFmt);
+    return { type: "write_post", label: "Open the written post", post_index: i >= 0 ? i : 0 };
+  }
+  return { type: "mark_done", label: "Mark done" };
+}
+
+// Free snapshot: only the phase openers exist; give each its button (paywall for posting moves).
+function stampFreeCtas(reportBody) {
+  const idx = postIndex(reportBody);
+  const postNames = [...idx.entries()].map(([date, p]) => { const n = postName(p) || ""; const q = /"([^"]+)"/.exec(n); return q ? { key: q[1], date } : null; }).filter(Boolean);
+  for (const ph of reportBody.growth_path?.phases || []) ph.opener = { ...(ph.opener || {}), cta: ctaFor({ title: ph.label, action: ph.visible_action, why: ph.detail, how: [], example: null }, reportBody, idx, postNames, { free: true }) };
+  return reportBody;
+}
+
 // ------------------------------------------------------------------ finish
 // Names, hygiene and verified steps across the whole report. Idempotent.
 function finishPlan(reportBody, { platform = reportBody.business?.platform || "instagram" } = {}) {
@@ -361,6 +416,15 @@ function finishPlan(reportBody, { platform = reportBody.business?.platform || "i
     for (const w of ph.calendar_weeks || []) for (const s of w.slots || []) { s.angle = fix(s.angle); s.prompt = fix(s.prompt); }
   }
   for (const w of reportBody.calendar?.weeks || []) for (const s of w.slots || []) { s.angle = fix(s.angle); s.prompt = fix(s.prompt); }
+  // Why-lines only quote the account's numbers; every move gets its button.
+  { const allowed = numbersInReport(reportBody); let stripped = 0;
+    const postNames = [...idx.entries()].map(([date, p]) => { const n = postName(p) || ""; const q = /"([^"]+)"/.exec(n); return q ? { key: q[1], date } : null; }).filter(Boolean);
+    for (const ph of reportBody.growth_path?.phases || []) {
+      if (ph.detail) { const c = checkWhy(ph.detail, allowed); ph.detail = c.text; stripped += c.stripped; }
+      if (ph.opener) ph.opener = { ...ph.opener, cta: ctaFor({ title: ph.label, action: ph.visible_action, why: ph.detail, how: ph.opener.how, example: ph.opener.example, topic: ph.opener.topic }, reportBody, idx, postNames) };
+      ph.moves = (ph.moves || []).map((m) => { const c = checkWhy(m.why, allowed); stripped += c.stripped; const o = { ...m, why: c.text }; return { ...o, cta: ctaFor(o, reportBody, idx, postNames) }; });
+    }
+    reportBody.why_stripped = stripped; }
   if (Array.isArray(reportBody.next_posts)) {
     let pitched = 0;
     const PLACEHOLDER_HANDLE = /@(?:brand|your|new|their|company|partner)[a-z]*(?:name|handle)\b/i;
@@ -392,4 +456,4 @@ function benchmarkText(t) {
   };
 }
 
-module.exports = { isPitch, violatesContext, openerTopics, titleDay, stripInvented, allowedLinks, applySchedule, TOPICS, topicOf, topicDef, dimOfLabel, datesIn, postName, postIndex, namePosts, sanitize, HOWTO, howFor, deriveSchedule, cadenceFor, validatePhases, dedupePhases, finishPlan, benchmarkText };
+module.exports = { stampFreeCtas, numbersInReport, checkWhy, ctaFor, isPitch, violatesContext, openerTopics, titleDay, stripInvented, allowedLinks, applySchedule, TOPICS, topicOf, topicDef, dimOfLabel, datesIn, postName, postIndex, namePosts, sanitize, HOWTO, howFor, deriveSchedule, cadenceFor, validatePhases, dedupePhases, finishPlan, benchmarkText };

@@ -1064,7 +1064,7 @@ router.get("/levels", (_req, res) => {
 
 router.get("/billing/pricing", optionalAuth, async (req, res) => {
   try {
-    res.json(await billingManager.getPricingAsync(pricingAB.prices(await variantFor(req))));
+    res.json({ ...(await billingManager.getPricingAsync(pricingAB.prices(await variantFor(req)))), cta: require("../growth_engine_plans").CTA });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
