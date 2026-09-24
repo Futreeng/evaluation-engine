@@ -904,7 +904,7 @@ async function evaluateTier1(accountId, inputParams, onStage = () => {}, { tier:
       try { r = await askJson(prompt, `Plan Writer: phase ${i + 1}${attempt ? " (rewrite)" : ""}`, 6144).then((x) => (x && Array.isArray(x.moves) && x.moves.length ? x : null)); }
       catch (err) { console.warn(`[Growth Engine] Plan Writer: phase ${i + 1} failed on every model: ${String(err.message).slice(0, 160)}`); }
       if (!r) break;
-      const check = planQuality.validatePhases([...phaseResults.map((pr, k) => ({ label: labels[k], visible_action: snapPhases[k].visible_action, opener: pr?.first_move || null, moves: pr?.moves || [] })), { label: labels[i], visible_action: p.visible_action, opener: r.first_move || null, moves: r.moves }], { labels });
+      const check = planQuality.validatePhases([...phaseResults.map((pr, k) => ({ label: labels[k], visible_action: snapPhases[k].visible_action, opener: pr?.first_move || null, moves: pr?.moves || [] })), { label: labels[i], visible_action: p.visible_action, opener: r.first_move || null, moves: r.moves }], { labels, posts: planQuality.postIndex(reportBody) });
       const mine = check.problems.filter((x) => x.phase === i || x.kind === "overcite");
       if (!mine.length || attempt) { result = r; if (mine.length) console.warn(`[Growth Engine] phase ${i + 1} still has ${mine.length} problem(s) after rewrite; deduping`); }
       else { vars.PROBLEMS = mine.map((x) => `- ${x.text}`).join("\n"); console.warn(`[Growth Engine] phase ${i + 1} rejected: ${mine.map((x) => x.text).join(" | ")}`); }

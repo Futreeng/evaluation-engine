@@ -190,6 +190,48 @@ t("consistency: 60% of target cadence is not Strong", () => {
   assert(cons, "scored"); assert(cons.score < 70, `score ${cons.score} should be below Strong`); assert(cons.score >= 45, `score ${cons.score} should not be Weak`);
 });
 
+t("openers seed one-off topics; moves may not repeat any phase's opener", () => {
+  const ph = [
+    { label: "Profile", visible_action: "Add a link to your bio", moves: [{ n: 2, title: "Pin top reels", action: "Pin your three best reels to the grid" }] },
+    { label: "Consistency", visible_action: "Post Thu, Fri and Sun", moves: [{ n: 6, title: "Batch film", action: "Film the week in one sitting" }] },
+    { label: "Proof", visible_action: "Pin your top 3 reels to the top of your grid", moves: [] },
+  ];
+  const v = q.validatePhases(ph, { labels: ph.map((p) => p.label) });
+  assert(v.problems.some((p) => p.kind === "duplicate" && p.move.n === 2));
+  const d = q.dedupePhases(ph, { labels: ph.map((p) => p.label) });
+  assert.deepEqual(d.phases[0].moves, []);
+});
+t("post names count toward the two-mentions cap", () => {
+  const posts = q.postIndex({ posts: [{ caption: "The last few steps in America.\nCape Flattery, Washington.", type: "reel", posted_at: "2026-09-17T00:00:00Z" }] });
+  const mk = (n, t) => ({ n, title: t, action: `Use the "Cape Flattery" reel (Sep 17) for this` });
+  const ph = [{ label: "Content", visible_action: "Post a reel", moves: [mk(2, "A"), mk(3, "B"), mk(4, "C")] }];
+  const v = q.validatePhases(ph, { labels: ["Content"], posts });
+  assert(v.problems.some((p) => p.kind === "overcite"));
+});
+t("schedule rewrite handles plural days, lone off-schedule days and cadence numbers", () => {
+  const sch = { days: ["Mon", "Thu", "Fri"], times: { Mon: "6pm", Thu: "6pm", Fri: "6pm" }, per_week: 3 };
+  assert.equal(q.applySchedule("Commit to a 2-post weekly cadence on Thursdays and Saturdays.", sch), "Commit to a 3-post weekly cadence on Mon, Thu and Fri.");
+  assert.equal(q.applySchedule("Publish one throwback carousel every Tuesday.", sch), "Publish one throwback carousel every Mon.");
+  assert.equal(q.applySchedule("Publish every Thursday.", sch), "Publish every Thursday.");
+});
+t("moves follow the schedule: off-schedule weekday titles and days", () => {
+  const sch = { days: ["Mon", "Thu", "Fri"], times: { Mon: "6pm" }, per_week: 3 };
+  assert.equal(q.titleDay("Tuesday Throwback Protocol", sch), "Throwback Protocol");
+  assert.equal(q.titleDay("Thursday Reel", sch), "Thursday Reel");
+  assert.equal(q.topicOf({ title: "Switch to a Creator Account", action: "Convert to a Creator account to unlock the contact button." }), "other");
+  assert.equal(q.topicOf({ title: "Throwback carousel", action: "Convert the 2021 Yosemite photos into a carousel" }), "repurpose");
+  const b = { business: { handle: "t" }, calendar: { schedule: sch, weeks: [] }, growth_path: { phases: [{ label: "Content", visible_action: "Post reels", moves: [{ n: 2, title: "Saturday Grid Proof", action: "Post a quote card every Saturday.", how: [], example: null }] }] } };
+  q.finishPlan(b);
+  assert.equal(b.growth_path.phases[0].moves[0].title, "Grid Proof");
+  assert.equal(b.growth_path.phases[0].moves[0].action, "Post a quote card every Mon.");
+});
+t("placeholder handles are stripped from moves and drop a written post", () => {
+  assert.equal(q.sanitize("Big thanks to @BrandName for the pack"), "Big thanks to the brand for the pack");
+  const b = { business: { handle: "t" }, growth_path: { phases: [] }, calendar: { weeks: [] }, next_posts: [{ n: 1, hook: "Moving to @newhandle", caption: "follow there", script: "" }, { n: 2, hook: "Trail day", caption: "Rain", script: "" }] };
+  q.finishPlan(b);
+  assert.deepEqual(b.next_posts.map((p) => p.hook), ["Trail day"]);
+});
+
 // ---- data layer (crash report follow-ups): median, unpinned, recent
 const scoring = require("./growth_engine_scoring");
 const { calculateMetrics } = require("./instagram_fetcher");
