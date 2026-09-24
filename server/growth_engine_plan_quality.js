@@ -130,6 +130,7 @@ function sanitize(text, { name = null } = {}) {
   // Placeholders: the model doesn't know their name; use the handle or drop the phrase.
   s = s.replace(/\[\s*(your )?name\s*\]/gi, name ? `@${name}` : "").replace(/\[\s*(your |insert )?[a-z ]{2,30}\]/gi, "").replace(/\b(I['’]m|I am|it['’]s|this is)\s+([–—-]\s+)/gi, "$1 ").replace(/\b(I['’]m|I am|it['’]s|this is)\s*[.,]/gi, "$1 me,");
   for (const [re, rep] of BANNED) s = s.replace(re, rep);
+  s = s.replace(/(\s*\+\s*){2,}/g, " + ").replace(/:\s*\+\s*/g, ": ").replace(/\(\s*\)/g, "").replace(/\s+,/g, ",").replace(/,\s*,/g, ",");
   return s.replace(/[ \t]{2,}/g, " ").replace(/\n{3,}/g, "\n\n").replace(/^\s*[-–]\s*$/gm, "").replace(/[\s•·\-–—|]+$/g, "").trim();
 }
 
@@ -330,7 +331,7 @@ function finishPlan(reportBody, { platform = reportBody.business?.platform || "i
   // The library replaces the model's steps only where the mechanic IS the move (profile
   // edits) or where the model's own steps invent a flow that doesn't exist.
   const LIBRARY_ALWAYS = new Set(["bio_link", "bio_cta", "bio_rewrite", "highlight", "pin", "media_kit"]);
-  const BOGUS_HOW = /throwback sticker|add to reel|swipe[- ]up|save to highlight|reels archive|remix button/i;
+  const BOGUS_HOW = /throwback sticker|add to reel|swipe[- ]up|save to highlight|reels archive|remix button|archive(d)?:|archive the|hide (the|your) (lowest|worst)|delete (the|your) (lowest|worst)/i;
   const fixMove = (m, asOpener = null) => {
     if (!m) return m;
     const topic = m.topic || topicOf(asOpener || m);

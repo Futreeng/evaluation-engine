@@ -59,6 +59,8 @@ GROWTH_SCANNER_OUTPUT: {{PERSONA_A_RESPONSE}}
 GAP_AUDITOR_OUTPUT: {{PERSONA_B_RESPONSE}}
 POST_INSIGHTS (their best and worst recent posts, ranked against their own average): {{POST_INSIGHTS}}
 
+What grows small accounts (the phases and first moves must follow these): the first second of a reel and the first line of a caption decide whether anyone stays; posts people save and share (lists, places, how-tos, relatable lines) grow reach, posts that pitch brands to followers do not — brands find creators through audience engagement and the bio, so a "brand deals" goal means a clearer bio, proof pinned, and posts the audience saves, never pitch posts; one idea and one call to action per post; the same posting days every week at the account's best times beat volume; reply to comments in the first hour; repurpose what already worked. Never invent prices, links, emails or brand names. Phase labels name what changes for the audience or the profile, not a funnel.
+
 Write the report in exactly this shape:
 
 **SCALECRAFT SOCIAL SNAPSHOT — @{{HANDLE}}**
