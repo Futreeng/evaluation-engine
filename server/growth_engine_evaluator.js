@@ -696,7 +696,9 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
   const mergePrompt = interpolateTemplate(PERSONA_PROMPTS.tier0.merge, mergeTemplateVars);
 
   // Merge: Claude → Gemini → Groq → OpenAI
-  const mergedReport = await withOutputTokens(6144, () => callWithQuadFallback(
+  // 8192: the merge carries narrative + a JSON block with three phases and their locked
+  // teasers; at 6144 the third phase was being cut off and silently dropped by the parser.
+  const mergedReport = await withOutputTokens(8192, () => callWithQuadFallback(
     () => callClaudeNonStreaming(claudeKey, claudeWorkspaceId, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt),
     () => callGeminiNonStreaming(geminiKey, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt),
     () => callGroqNonStreaming(groqKey, "You are an expert at synthesizing independent analyses into clear, customer-facing reports.", mergePrompt),
@@ -793,6 +795,7 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
         }
       : { ...llmScores, category_avg: null, summary: typeof structured?.summary === "string" ? structured.summary : null, method: "llm" };
     const phases = Array.isArray(structured?.phases) ? structured.phases : [];
+    if (phases.length && phases.length < 3) { console.warn(`[Growth Engine] snapshot came back with ${phases.length} of 3 phases (merge output truncated?) — marking for an early refresh`); reportBody.plan_incomplete = true; }
     if (phases.length) {
       reportBody.growth_path = {
         unlocked_steps: phases.length,
