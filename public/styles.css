@@ -796,7 +796,7 @@ p { margin: 0; }
 .goalpick .acts .btn[disabled] { opacity: .45; cursor: not-allowed; }
 .goalcard.ask { padding: 20px 22px; }
 .goalcard.ask h2 { font-size: 20px; }
-@media (max-width: 560px) { .goalpick .opts { grid-template-columns: 1fr; } .goalpick .opt { min-height: 0; flex-direction: row; align-items: baseline; gap: 8px; flex-wrap: wrap; } .goalpick .acts .btn { flex: 1 1 140px; } }
+@media (max-width: 560px) { .goalpick .opts { grid-template-columns: 1fr; } .goalpick .opt { min-height: 0; flex-direction: row; align-items: baseline; justify-content: flex-start; gap: 4px 8px; flex-wrap: wrap; text-align: left; } .goalpick .acts .btn { flex: 1 1 140px; } }
 .goalbar { margin: 0 0 14px; padding: 12px 16px; border-radius: 14px; background: var(--card); border: 1px solid var(--line); }
 .goalbar .t { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; margin-bottom: 8px; } .goalbar .t .l { font-weight: 700; } .goalbar .t .v { color: var(--body); }
 .goalbar .bar { height: 10px; border-radius: 999px; background: var(--ground); overflow: hidden; } .goalbar .bar .fill { height: 100%; background: var(--act); border-radius: 999px; transition: width .4s ease; }
