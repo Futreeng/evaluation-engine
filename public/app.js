@@ -98,7 +98,7 @@
   const GOALS = [['followers', 'Grow to a follower target', 'a number you want to hit'], ['deals', 'Land brand deals'], ['sell', 'Sell a product or service', 'a guide, coaching, bookings'], ['bookings', 'Bookings or clients'], ['consistency', 'Just grow consistently']];
   const goalLabel = g => (GOALS.find(x => x[0] === g) || [])[1] || '';
   const niceTarget = f => { const n = Math.max(100, (Number(f) || 0) * 1.5); const p = Math.pow(10, Math.floor(Math.log10(n))); return Math.ceil(n / p) * p; };
-  const knownGoal = report => (report && report.goal) || sget('sc_goal', null)?.goal || null;
+  const knownGoal = report => (report && (report.goal || (report.plan_context && report.plan_context.goal))) || sget('sc_goal', null)?.goal || null;
   // Progress toward the goal, from what the report already knows. null = nothing measurable yet.
   function goalProgress(goal, target, report) {
     if (!goal || !report) return null;
@@ -676,17 +676,21 @@
   // ------------------------------------------------------------ plan setup (intake)
   // Four taps and an optional line, asked once, between "start the plan" and
   // payment. Saved on the account per handle; edited from the report.
+  // The goal comes first: it's the frame for everything else. The five keys are what the plan
+  // generator, the Monday move and the progress bar switch on; the free line under it is the
+  // goal in the creator's own words, quoted to the model and used for the target.
   const INTAKE = [
-    { key: 'horizon', q: 'Your next 90 days', opts: [['usual', 'Business as usual'], ['fewer_shoots', 'Fewer new shoots', 'no trips, off-season, injury, busy'], ['launch', 'Something launching', 'an event, a drop, a move']] },
+    { key: 'goal', q: "What's the goal for the next 90 days?", opts: [['followers', 'More followers'], ['deals', 'Brand deals'], ['sell', 'Sell something', 'a guide, coaching, a product'], ['bookings', 'Bookings or clients'], ['consistency', 'Just get consistent']] },
+    { key: 'horizon', q: 'What do the next 90 days look like?', opts: [['usual', 'Business as usual'], ['fewer_shoots', 'Fewer new shoots', 'no trips, off-season, injury, busy'], ['launch', 'Something launching', 'an event, a drop, a move']] },
     { key: 'hours', q: 'Time you can give this each week', opts: [['lt2', 'Under 2 hours'], ['2_5', '2–5 hours'], ['5_10', '5–10 hours'], ['10plus', '10+ hours']] },
-    { key: 'goal', q: 'What you want from the next 90 days', opts: [['followers', 'More followers'], ['deals', 'Brand deals'], ['sell', 'Sell something', 'a guide, coaching, a product'], ['bookings', 'Bookings or clients'], ['consistency', 'Just get consistent']] },
     { key: 'style', q: 'How you like to make content', opts: [['on_camera', 'On camera, talking'], ['behind', 'Behind the camera', 'voiceover, b-roll'], ['photos', 'Photos and carousels'], ['help', 'I have help', 'an editor or team']] },
   ];
+  const GOAL_HINT = { followers: 'e.g. 5,000 followers by spring', deals: 'e.g. two paid partnerships by December', sell: 'e.g. sell 30 guides this quarter', bookings: 'e.g. four new clients a month', consistency: 'e.g. three posts a week without missing one' };
   const ctxLabel = (k, v) => { const q = INTAKE.find(x => x.key === k); const o = q && q.opts.find(x => x[0] === v); return o ? o[1] : ''; };
   function contextChips(ctx) {
     if (!ctx) return '';
     const parts = INTAKE.map(q => ctxLabel(q.key, ctx[q.key])).filter(Boolean);
-    return parts.map(t => h`<span class="chip">${t}</span>`).join('');
+    return parts.map(t => h`<span class="chip">${t}</span>`).join('') + (ctx.goal_note ? h`<span class="chip note">“${ctx.goal_note}”</span>` : '');
   }
   async function viewPlanSetup() {
     renderHeader('report');
@@ -713,7 +717,7 @@
             <div class="eyebrow">${biz.handle ? '@' + biz.handle + ' · ' : ''}${days}-day plan</div>
             <h1>${heading}</h1>
             <p class="sub">${sub}</p>
-            ${raw(INTAKE.map(x => h`<div class="qblock"><div class="q">${x.q.replace('90', String(days))}</div><div class="opts">${raw(x.opts.map(o => h`<button type="button" class="opt ${state[x.key] === o[0] ? 'on' : ''}" data-q="${x.key}" data-v="${o[0]}"><span>${o[1]}</span>${o[2] ? raw(h`<small>${o[2]}</small>`) : ''}</button>`).join(''))}</div></div>`).join(''))}
+            ${raw(INTAKE.map(x => h`<div class="qblock"><div class="q">${x.q.replace('90', String(days))}</div><div class="opts">${raw(x.opts.map(o => h`<button type="button" class="opt ${state[x.key] === o[0] ? 'on' : ''}" data-q="${x.key}" data-v="${o[0]}"><span>${o[1]}</span>${o[2] ? raw(h`<small>${o[2]}</small>`) : ''}</button>`).join(''))}</div>${x.key === 'goal' && state.goal ? raw(h`<div class="inwords"><label for="ctxGoalNote">Say it in your words <span class="opt-note">optional</span></label><input type="text" id="ctxGoalNote" class="txt" maxlength="120" placeholder="${GOAL_HINT[state.goal] || ''}" value="${state.goal_note || ''}"><div class="fine">${state.goal === 'followers' ? 'A number here becomes your target on the report.' : 'Every phase is written as a step toward this.'}</div></div>`) : ''}</div>`).join(''))}
             ${needLink ? raw(h`<div class="qblock"><div class="q">Where should the link go?</div><input type="url" id="ctxLink" class="txt" placeholder="yoursite.com/guide" value="${state.link || ''}"><div class="fine">The bio and CTA moves use this exact link instead of a placeholder.</div></div>`) : ''}
             ${needContact ? raw(h`<div class="qblock"><div class="q">Email brands should use <span class="opt-note">optional</span></div><input type="email" id="ctxContact" class="txt" placeholder="collabs@you.com" value="${state.contact || ''}"><div class="fine">Goes into the bio and contact moves exactly as written.</div></div>`) : ''}
             <div class="qblock"><div class="q">Anything else? <span class="opt-note">optional</span></div><input type="text" id="ctxNotes" class="txt" maxlength="140" placeholder="moving in November · just got a drone · off for three weeks" value="${state.notes || ''}"></div>
@@ -722,10 +726,11 @@
             ${path === 'checkin' ? raw(h`<a class="btn ghost block" href="#/report/${reportId}?checkin=${phase}&changed=0">Nothing changed — carry on</a>`) : path === 'edit' ? raw(h`<a class="btn ghost block" href="#/report/${reportId}">Cancel</a>`) : raw(h`<div class="fine center">You can change these any time from your report.</div>`)}
           </div>
         </div>${raw(footer())}`;
-      $view.querySelectorAll('.opt').forEach(b => b.addEventListener('click', () => { state[b.dataset.q] = b.dataset.v; const l = $view.querySelector('#ctxLink'); const n = $view.querySelector('#ctxNotes'); const c = $view.querySelector('#ctxContact'); if (l) state.link = l.value; if (n) state.notes = n.value; if (c) state.contact = c.value; render(); }));
+      $view.querySelectorAll('.opt').forEach(b => b.addEventListener('click', () => { state[b.dataset.q] = b.dataset.v; const gn = $view.querySelector('#ctxGoalNote'); if (gn) state.goal_note = gn.value; const l = $view.querySelector('#ctxLink'); const n = $view.querySelector('#ctxNotes'); const c = $view.querySelector('#ctxContact'); if (l) state.link = l.value; if (n) state.notes = n.value; if (c) state.contact = c.value; render(); }));
       $view.querySelector('#ctxGo').addEventListener('click', async e => {
         const l = $view.querySelector('#ctxLink'); const n = $view.querySelector('#ctxNotes'); const c = $view.querySelector('#ctxContact');
         const ctx = { horizon: state.horizon, hours: state.hours, goal: state.goal, style: state.style };
+        const gn = $view.querySelector('#ctxGoalNote'); if (gn && gn.value.trim()) { ctx.goal_note = gn.value.trim().slice(0, 120); const num = /(\d[\d,]*)/.exec(ctx.goal_note.replace(/(\d)\s?k\b/i, (m, d) => d + '000')); if (state.goal === 'followers' && num) ctx.goal_target = Number(num[1].replace(/,/g, '')); }
         if (l && l.value.trim()) ctx.link = l.value.trim(); if (n && n.value.trim()) ctx.notes = n.value.trim().slice(0, 140); if (c && c.value.trim()) ctx.contact = c.value.trim();
         sset('sc_plan_context', ctx);
         const b = e.currentTarget; b.disabled = true; b.textContent = 'Saving…';

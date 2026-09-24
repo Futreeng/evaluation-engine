@@ -271,6 +271,14 @@ answers on when to post, Instagram steps that don't exist. Two parts:
 - Not taken from the 1.5.1 doc: renaming fields, per-move regeneration, a model-written
   `when` (the schedule pill covers it), `fix_profile` (needs the profile audit).
 
+### Intake: the goal comes first (24 Sept)
+- The plan intake now opens with "What's the goal for the next 90 days?" (same five keys the
+  generator, Monday move and progress bar switch on), followed by an optional "Say it in your
+  words" line. A number in that line becomes the follower target; the sentence is quoted to
+  the model, which is told the phases should read as steps toward it and the last phase
+  should name it. Constraint questions (horizon, hours, style) follow.
+- One goal field: the report's goal picker and the plan context write the same value.
+
 ## Also fixed along the way
 
 - Stored report bodies carried a provisional `report_id` (share sheet broke).

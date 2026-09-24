@@ -1066,3 +1066,6 @@ button.prow:hover { background: var(--ground); transform: translateX(2px); }
 .pcta .ctabtn { width: 100%; }
 .dimcard .todo { display: inline-block; margin-top: 10px; font-size: 14px; font-weight: 600; color: var(--act); text-decoration: underline; text-underline-offset: 2px; }
 .npost.flash { box-shadow: 0 0 0 3px var(--c2); transition: box-shadow .4s ease; }
+
+.setup .inwords { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.setup .inwords label { font-size: 14px; font-weight: 600; color: var(--ink); }
