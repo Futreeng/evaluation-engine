@@ -78,6 +78,10 @@ const FOUNDERS = {
   growth_monthly: num(process.env.FOUNDERS_GROWTH_MONTHLY, 1200),
   growth_annual: num(process.env.FOUNDERS_GROWTH_ANNUAL, 10800),
 };
+// Move buttons (1.5.1): which action types may render, and what free users see for write_post.
+//   CTA_FLAGS_JSON={"write_post":true,"see_example":true,"fix_profile":false,"mark_done":true}
+//   FREE_CTA_MODE=paywall|hidden   paywall: free users see write_post and land on pricing; hidden: they don't see it
+const CTA = { flags: { write_post: true, see_example: true, fix_profile: false, mark_done: true, ...jsonEnv("CTA_FLAGS_JSON") }, free_mode: process.env.FREE_CTA_MODE === "hidden" ? "hidden" : "paywall" };
 const LEGACY_GROWTH_PRICE_CENTS = num(process.env.LEGACY_GROWTH_PRICE_CENTS, 1200);
 const ONE_TIME_UNLOCK_ENABLED = process.env.ENABLE_ONE_TIME_UNLOCK === "true";
 
@@ -100,4 +104,4 @@ function publicTier(tier, overrides = {}) {
   return { tier: p.tier, name: p.name, description: p.description, monthlyPrice: monthly / 100, annualPrice: annual / 100, popular: !!p.popular, note: p.note, features: p.features, cta: p.cta, limits: LIMITS[tier], has: p.has };
 }
 
-module.exports = { PRICES, LIMITS, TIERS, TIER_ORDER, FOUNDERS, LEGACY_GROWTH_PRICE_CENTS, ONE_TIME_UNLOCK_ENABLED, planFor, priceFor, limitFor, hasFeature, rankOf, upgradeFor, publicTier };
+module.exports = { CTA, PRICES, LIMITS, TIERS, TIER_ORDER, FOUNDERS, LEGACY_GROWTH_PRICE_CENTS, ONE_TIME_UNLOCK_ENABLED, planFor, priceFor, limitFor, hasFeature, rankOf, upgradeFor, publicTier };

@@ -463,7 +463,10 @@ function cleanPlanContext(raw) {
   for (const [k, vals] of Object.entries(CTX_ENUM)) if (vals.includes(raw[k])) out[k] = raw[k];
   if (typeof raw.link === "string" && raw.link.trim()) { const l = raw.link.trim().slice(0, 200); out.link = /^https?:\/\//i.test(l) ? l : `https://${l}`; }
   if (typeof raw.notes === "string" && raw.notes.trim()) out.notes = raw.notes.trim().slice(0, 140);
+  // The goal in their words; a number in it is the follower target when the goal is followers.
+  if (typeof raw.goal_note === "string" && raw.goal_note.trim()) out.goal_note = raw.goal_note.trim().slice(0, 120);
   if (out.goal === "followers" && Number.isFinite(Number(raw.goal_target)) && Number(raw.goal_target) > 0) out.goal_target = Math.round(Number(raw.goal_target));
+  if (out.goal === "followers" && !out.goal_target && out.goal_note) { const m = /(\d[\d,]*)\s*(k)?/i.exec(out.goal_note); if (m) { const n = Number(m[1].replace(/,/g, "")) * (m[2] ? 1000 : 1); if (n > 0) out.goal_target = Math.round(n); } }
   if (typeof raw.contact === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw.contact.trim())) out.contact = raw.contact.trim().slice(0, 120);
   return Object.keys(out).length ? out : null;
 }
@@ -503,7 +506,8 @@ router.post("/reports/:reportId/goal", optionalAuth, async (req, res) => {
     if (!anon && report.accountId !== req.user?.id) return sendError(res, req.user ? 403 : 401, "NOT_YOUR_REPORT", "This report belongs to another account");
     const { goal, target } = cleanGoal(req.body);
     if (!goal) return sendError(res, 400, "INVALID_GOAL", "goal must be one of followers, deals, sell, bookings, consistency");
-    await geDb.patchReportBody(report.reportId, { goal, goal_target: target, goal_set_at: Date.now() });
+    // One answer, two readers: the report's goal and the plan context's goal stay the same field.
+    await geDb.patchReportBody(report.reportId, { goal, goal_target: target, goal_set_at: Date.now(), plan_context: { ...(report.reportBody?.plan_context || {}), goal, ...(target ? { goal_target: target } : {}) } });
     if (!anon) { try { await geDb.setGoal(report.accountId, goal, target); } catch { /* fine */ } }
     events.track("goal_set", { ...events.attribution(req), reportId: report.reportId, props: { goal, target, first: !report.reportBody?.goal } });
     res.json({ goal, goal_target: target });
@@ -1064,7 +1068,7 @@ router.get("/levels", (_req, res) => {
 
 router.get("/billing/pricing", optionalAuth, async (req, res) => {
   try {
-    res.json(await billingManager.getPricingAsync(pricingAB.prices(await variantFor(req))));
+    res.json({ ...(await billingManager.getPricingAsync(pricingAB.prices(await variantFor(req)))), cta: require("../growth_engine_plans").CTA });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

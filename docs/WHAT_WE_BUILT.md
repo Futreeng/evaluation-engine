@@ -258,6 +258,27 @@ answers on when to post, Instagram steps that don't exist. Two parts:
 - Guessed posting days are labelled on the calendar; collapsed calendar weeks show their
   subjects.
 
+### 1.5.1, the parts worth having (24 Sept)
+- **A button on every move**, chosen deterministically after generation (`cta` on each move
+  and opener): `see_example` opens the creator's own post the move cites; `write_post` opens
+  the written post for that day (free users see "Get this post written", which goes to
+  pricing and lands them back on that step once the plan exists); `mark_done` is the
+  fallback (the checkbox / Done). Flags in `CTA_FLAGS_JSON`, free behaviour in
+  `FREE_CTA_MODE=paywall|hidden`, served through `/billing/pricing`. Event `cta_clicked`.
+- **"What to do about this →"** under each dimension jumps to the phase that works on it.
+- **A move's why may only quote the account's numbers.** Sentences with any other number are
+  dropped and the move stays (`report.why_stripped`). Same validator as dimension explanations.
+- Not taken from the 1.5.1 doc: renaming fields, per-move regeneration, a model-written
+  `when` (the schedule pill covers it), `fix_profile` (needs the profile audit).
+
+### Intake: the goal comes first (24 Sept)
+- The plan intake now opens with "What's the goal for the next 90 days?" (same five keys the
+  generator, Monday move and progress bar switch on), followed by an optional "Say it in your
+  words" line. A number in that line becomes the follower target; the sentence is quoted to
+  the model, which is told the phases should read as steps toward it and the last phase
+  should name it. Constraint questions (horizon, hours, style) follow.
+- One goal field: the report's goal picker and the plan context write the same value.
+
 ## Also fixed along the way
 
 - Stored report bodies carried a provisional `report_id` (share sheet broke).

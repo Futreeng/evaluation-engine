@@ -57,7 +57,7 @@
         const st = statusOf(key);
         steps.push({ ...base, key, kind: "move", n, opener: !!opener, title: opener ? (p.label || "First move") : (m.title || ""), action: opener ? (p.visible_action || p.action || "") : (m.action || ""), why: opener ? (p.detail || "") : (m.why || ""),
           how: (opener ? (p.opener && p.opener.how) : m.how) || [], example: (opener ? (p.opener && p.opener.example) : m.example) || null, done_when: (opener ? (p.opener && p.opener.done_when) : m.done_when) || "", time: (opener ? (p.opener && p.opener.time) : m.time) || "",
-          topic: (opener ? (p.opener && p.opener.topic) : m.topic) || null, due: null, status: st, done_at: done[key] || null, skipped: skipped[key] || null, verified: verified[key] || null, live: true });
+          topic: (opener ? (p.opener && p.opener.topic) : m.topic) || null, cta: (opener ? (p.opener && p.opener.cta) : m.cta) || null, due: null, status: st, done_at: done[key] || null, skipped: skipped[key] || null, verified: verified[key] || null, live: true });
       };
       if (p.not_included) { lockedCount += 1 + ((p.locked && p.locked.count) || 4); steps.push({ ...base, key: pk + "m1", kind: "move", n: 1, opener: true, title: p.label || "", action: p.visible_action || "", why: p.detail || "", how: [], example: null, done_when: "", time: "", due: null, status: "locked", live: false }); return; }
       if (!isPaid) {

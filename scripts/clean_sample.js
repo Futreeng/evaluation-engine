@@ -56,8 +56,8 @@ if (r.best_times) {
   r.best_times.note = String(r.best_times.note || "").replace(/at least \d+ posts/, "at least 3 posts");
 }
 // The consistency scorer changed (cadence carries it): re-score that dimension from the
-// same numbers the evidence line quotes, and the overall as the plain average.
-{
+// same numbers the evidence line quotes, and the overall as the plain average. Old samples only.
+if (!r.post_insights?.metric) {
   const cons = r.scores.dimensions.find((d) => /consisten/i.test(d.label));
   const m = cons && /(\d+) posts over (\d+) days \(([\d.]+)\/week.*longest gap (\d+) days; last post (\d+) day/.exec(cons.evidence || "");
   if (m) {
@@ -67,8 +67,9 @@ if (r.best_times) {
     if (nc) { cons.score = nc.score; cons.parts = nc.parts; r.scores.overall = Math.round(r.scores.dimensions.reduce((a, d) => a + d.score, 0) / r.scores.dimensions.length); console.log(`consistency re-scored: ${nc.score} (parts ${JSON.stringify(nc.parts)}), overall ${r.scores.overall}`); }
   }
 }
-// Best/worst posts: re-rank with the current rules (unpinned, against the median).
-{
+// Best/worst posts: re-rank with the current rules — only for a sample produced by the old scorer
+// (a fresh report already ranks this way, and re-ranking would change numbers the plan quotes).
+if (!r.post_insights?.metric) {
   const ranked = scoring.rankPosts((r.posts || []).map((p) => ({ ...p, timestamp: p.posted_at, media_type: String(p.type || "").toUpperCase(), is_reel: /reel/i.test(p.type || ""), like_count: p.likes, comments_count: p.comments, video_view_count: p.views })));
   if (ranked) r.post_insights = { ...ranked, note: r.post_insights?.note || null };
 }

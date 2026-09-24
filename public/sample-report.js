@@ -700,7 +700,13 @@ window.SCALECRAFT_SAMPLE = {
       "example": "PNW: Cape Flattery, Sep 17. Culture: Panama, Apr 2026.",
       "done_when": "Five distinct highlight circles are visible on your profile header.",
       "time": "30 min, once",
-      "topic": "highlight"
+      "topic": "highlight",
+      "cta": {
+       "type": "see_example",
+       "label": "See the post",
+       "url": "https://www.instagram.com/p/DdXhtyWOyLQ/",
+       "post_id": "3987804277031248592"
+      }
      },
      {
       "n": 3,
@@ -715,7 +721,13 @@ window.SCALECRAFT_SAMPLE = {
       "example": null,
       "done_when": "Cape Flattery reel is the first post in your 3x3 grid.",
       "time": "5 min, once",
-      "topic": "pin"
+      "topic": "pin",
+      "cta": {
+       "type": "see_example",
+       "label": "See the post",
+       "url": "https://www.instagram.com/p/DdXhtyWOyLQ/",
+       "post_id": "3987804277031248592"
+      }
      },
      {
       "n": 4,
@@ -732,7 +744,11 @@ window.SCALECRAFT_SAMPLE = {
       "example": null,
       "done_when": "Your profile displays a specific travel-related public category label.",
       "time": "5 min, once",
-      "topic": "other"
+      "topic": "other",
+      "cta": {
+       "type": "mark_done",
+       "label": "Mark done"
+      }
      }
     ],
     "opener": {
@@ -745,7 +761,11 @@ window.SCALECRAFT_SAMPLE = {
      "example": "📍 NY → PNW Travel Creator\n🌍 Nature. Culture. Flight mode!",
      "done_when": "Bio shows niche, media kit link, and email address clearly.",
      "time": "20 min, once",
-     "topic": "bio_link"
+     "topic": "bio_link",
+     "cta": {
+      "type": "mark_done",
+      "label": "Mark done"
+     }
     },
     "calendar_weeks": [
      {
@@ -883,7 +903,12 @@ window.SCALECRAFT_SAMPLE = {
       "example": null,
       "done_when": "Reel appears Monday at 6pm with the hook line as the first caption line.",
       "time": "20 min, once",
-      "topic": "schedule"
+      "topic": "schedule",
+      "cta": {
+       "type": "write_post",
+       "label": "Open the written post",
+       "post_index": 3
+      }
      },
      {
       "n": 7,
@@ -900,7 +925,13 @@ window.SCALECRAFT_SAMPLE = {
       "example": null,
       "done_when": "Reel is live Thursday at 6pm with voiceover and text overlay.",
       "time": "25 min, once",
-      "topic": "schedule"
+      "topic": "schedule",
+      "cta": {
+       "type": "see_example",
+       "label": "See the post",
+       "url": "https://www.instagram.com/p/Db1eRKUp8RM/",
+       "post_id": "3960204568052614220"
+      }
      },
      {
       "n": 8,
@@ -917,7 +948,12 @@ window.SCALECRAFT_SAMPLE = {
       "example": "Gear that never lets me down. 📸🗺️ Save this list for your next adventure!\n#travelgear",
       "done_when": "Gear reel appears Friday at 6pm with the caption and voiceover.",
       "time": "30 min, once",
-      "topic": "format"
+      "topic": "format",
+      "cta": {
+       "type": "write_post",
+       "label": "Open the written post",
+       "post_index": 1
+      }
      },
      {
       "n": 9,
@@ -934,7 +970,12 @@ window.SCALECRAFT_SAMPLE = {
       "example": null,
       "done_when": "Reflective reel posts on the scheduled Monday at 6pm with the new caption.",
       "time": "20 min, once",
-      "topic": "schedule"
+      "topic": "schedule",
+      "cta": {
+       "type": "write_post",
+       "label": "Open the written post",
+       "post_index": 3
+      }
      }
     ],
     "opener": {
@@ -948,7 +989,12 @@ window.SCALECRAFT_SAMPLE = {
      "example": null,
      "done_when": "Three drafts are scheduled for Mon, Thu and Fri at 6pm.",
      "time": "30 min, once",
-     "topic": "schedule"
+     "topic": "schedule",
+     "cta": {
+      "type": "write_post",
+      "label": "Open the written post",
+      "post_index": 3
+     }
     },
     "calendar_weeks": [
      {
@@ -1085,7 +1131,13 @@ window.SCALECRAFT_SAMPLE = {
       "example": "The last few steps in America. 🌊",
       "done_when": "The first frame of the new reel is the ocean cliff, not the path.",
       "time": "20 min, one-time edit",
-      "topic": "repurpose"
+      "topic": "repurpose",
+      "cta": {
+       "type": "see_example",
+       "label": "See the post",
+       "url": "https://www.instagram.com/p/DdXhtyWOyLQ/",
+       "post_id": "3987804277031248592"
+      }
      },
      {
       "n": 11,
@@ -1101,7 +1153,13 @@ window.SCALECRAFT_SAMPLE = {
       "example": "Sol Duc Falls.\nNo crowds. No noise. Just the sound of water.\nThis is why I travel.",
       "done_when": "The video has a fresh voiceover and a question in the caption.",
       "time": "25 min, once",
-      "topic": "format"
+      "topic": "format",
+      "cta": {
+       "type": "see_example",
+       "label": "See the post",
+       "url": "https://www.instagram.com/p/DboLX3Fxg5K/",
+       "post_id": "3956462290857233994"
+      }
      },
      {
       "n": 12,
@@ -1117,7 +1175,12 @@ window.SCALECRAFT_SAMPLE = {
       "example": "NY isn’t just a city… it’s an AURA. 🗽\n\nLink in bio to my full NYC documentary reel.",
       "done_when": "The reel is text-heavy, 15 seconds long, and posted on Monday.",
       "time": "15 min, once",
-      "topic": "format"
+      "topic": "format",
+      "cta": {
+       "type": "write_post",
+       "label": "Open the written post",
+       "post_index": 3
+      }
      },
      {
       "n": 13,
@@ -1133,7 +1196,13 @@ window.SCALECRAFT_SAMPLE = {
       "example": "Who needs to see this? Tag them below. 👇",
       "done_when": "The reel uses carousel images and the caption asks for a tag.",
       "time": "20 min, once",
-      "topic": "repurpose"
+      "topic": "repurpose",
+      "cta": {
+       "type": "see_example",
+       "label": "See the post",
+       "url": "https://www.instagram.com/p/CPTdnrJrQXy/",
+       "post_id": "2581537281155073522"
+      }
      }
     ],
     "opener": {
@@ -1146,7 +1215,12 @@ window.SCALECRAFT_SAMPLE = {
      "example": "Save this reel for your next solo trip.\n\nYour trailhead isn't waiting.",
      "done_when": "Caption ends with the save prompt and intro text is visible.",
      "time": "15 min, one-time edit",
-     "topic": "format"
+     "topic": "format",
+     "cta": {
+      "type": "write_post",
+      "label": "Open the written post",
+      "post_index": 3
+     }
     },
     "calendar_weeks": [
      {
@@ -1263,86 +1337,86 @@ window.SCALECRAFT_SAMPLE = {
  },
  "post_insights": {
   "metric": "median",
-  "sample": 27,
-  "avg_engagement": 188,
+  "sample": 30,
+  "avg_engagement": 190,
   "top": [
    {
-    "date": "2026-09-17T00:11:54.000Z",
+    "date": "2026-09-17",
     "format": "reel",
     "weekday": "Thu",
     "likes": 8523,
     "comments": 318,
     "views": 44914,
     "engagement": 8841,
-    "caption": "The last few steps in America. Cape Flattery, Washington. Sometimes you have to go all the way out there to realize how big this world reall",
-    "url": "https://www.instagram.com/p/DdXhtyWOyLQ/",
+    "caption": "The last few steps in America. Cape Flattery, Washington. Sometimes you have to go all the way out",
+    "url": null,
     "pinned": false,
-    "vs_avg": 47.03
+    "vs_avg": 46.65
    },
    {
-    "date": "2026-09-12T00:01:53.000Z",
+    "date": "2021-05-25",
+    "format": "carousel",
+    "weekday": "Tue",
+    "likes": 373,
+    "comments": 72,
+    "views": 0,
+    "engagement": 445,
+    "caption": "Normalizing black faces in beautiful places! • • • #Yosemite #GlacierPoint #SentinelDome #VernalFa",
+    "url": null,
+    "pinned": false,
+    "vs_avg": 2.35
+   },
+   {
+    "date": "2026-09-12",
     "format": "reel",
     "weekday": "Sat",
     "likes": 363,
     "comments": 60,
     "views": 1830,
     "engagement": 423,
-    "caption": "I used to think you had to do something extraordinary to inspire somebody. Sometimes it’s just seeing someone choose to get outside, chase a",
-    "url": "https://www.instagram.com/p/DdKpXmCuoa9/",
+    "caption": "I used to think you had to do something extraordinary to inspire somebody. Sometimes it’s just seei",
+    "url": null,
     "pinned": false,
-    "vs_avg": 2.25
-   },
-   {
-    "date": "2026-08-13T22:15:27.000Z",
-    "format": "reel",
-    "weekday": "Fri",
-    "likes": 293,
-    "comments": 97,
-    "views": 1728,
-    "engagement": 390,
-    "caption": "On top of the world. 🏔️ . #MountRainier #skylineloop #WashingtonState #NationalParks #hikingadventures",
-    "url": "https://www.instagram.com/p/Db_yENGukK1/",
-    "pinned": false,
-    "vs_avg": 2.07
+    "vs_avg": 2.23
    }
   ],
   "bottom": [
    {
-    "date": "2026-08-04T18:19:54.000Z",
+    "date": "2026-08-04",
     "format": "reel",
     "weekday": "Tue",
     "likes": 0,
     "comments": 20,
     "views": 565,
     "engagement": 20,
-    "caption": "Everything is a win, when the goal is experience! . Sol Duc Falls hands down is my favorite waterfall in the park, and one of its most famou",
-    "url": "https://www.instagram.com/p/DboLX3Fxg5K/",
+    "caption": "Everything is a win, when the goal is experience! . Sol Duc Falls hands down is my favorite waterfa",
+    "url": null,
     "pinned": false,
     "vs_avg": 0.11
    },
    {
-    "date": "2025-04-16T16:45:03.000Z",
+    "date": "2025-04-16",
     "format": "reel",
     "weekday": "Wed",
     "likes": 56,
     "comments": 12,
     "views": 382,
     "engagement": 68,
-    "caption": "I love the grind of chasing an extraordinary life—the challenge, the growth, the purpose. Every step forward is a reminder that I’m not buil",
-    "url": "https://www.instagram.com/p/DIg70zZOi6a/",
+    "caption": "I love the grind of chasing an extraordinary life—the challenge, the growth, the purpose. Every step",
+    "url": null,
     "pinned": false,
     "vs_avg": 0.36
    },
    {
-    "date": "2025-06-18T09:20:00.000Z",
+    "date": "2025-06-18",
     "format": "reel",
     "weekday": "Wed",
     "likes": 83,
     "comments": 4,
     "views": 156,
     "engagement": 87,
-    "caption": "NY summer’s been more rain than sun but being 15 minutes from the ocean is still peace. I guess every season in life can’t be perfect. #newy",
-    "url": "https://www.instagram.com/p/DLCXI8bsN1e/",
+    "caption": "NY summer’s been more rain than sun but being 15 minutes from the ocean is still peace. I guess ever",
+    "url": null,
     "pinned": false,
     "vs_avg": 0.46
    }
@@ -1352,11 +1426,11 @@ window.SCALECRAFT_SAMPLE = {
     "format": "reel",
     "posts": 19,
     "avg_engagement": 668,
-    "vs_avg": 3.55
+    "vs_avg": 3.53
    },
    "best_day": {
     "day": "Thu",
-    "avg_engagement": 3088
+    "avg_engagement": 1698
    },
    "format_avg": {
     "reel": {
@@ -1364,18 +1438,22 @@ window.SCALECRAFT_SAMPLE = {
      "avg_engagement": 668
     },
     "carousel": {
-     "posts": 8,
-     "avg_engagement": 205
+     "posts": 10,
+     "avg_engagement": 227
+    },
+    "static": {
+     "posts": 1,
+     "avg_engagement": 333
     }
    },
    "day_avg": {
-    "Thu": 3088,
-    "Sat": 255,
-    "Wed": 168,
-    "Fri": 318,
-    "Mon": 141,
-    "Tue": 115,
-    "Sun": 256
+    "Thu": 1698,
+    "Sat": 242,
+    "Fri": 258,
+    "Tue": 216,
+    "Sun": 228,
+    "Mon": 145,
+    "Wed": 163
    }
   },
   "note": "The top post is the Sep 17 “Cape Flattery” reel, a Thursday reel with a strong hook; the best three share reel format, travel scenery, Thursday posting and hook‑first captions. The bottom three are also reels but posted on Tue/Wed and start with generic captions, resulting in very low engagement."
@@ -1826,5 +1904,6 @@ window.SCALECRAFT_SAMPLE = {
  "goal_target": null,
  "created_at": 1790224030989,
  "sample": true,
- "sample_cleaned_at": 1790224313036
+ "why_stripped": 0,
+ "sample_cleaned_at": 1790286549112
 };
