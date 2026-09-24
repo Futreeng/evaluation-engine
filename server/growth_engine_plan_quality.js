@@ -311,6 +311,9 @@ function stripInvented(text, { links, contact, goal }) {
   // Dollar amounts the model made up ("Reel: $200") — the account gives us no pricing data.
   out = out.replace(/\$\s?\d[\d,]*(?:\.\d+)?\s?[kK]?\b/g, "a rate you set");
   out = out.replace(/\b(your link)\s*\(([^)]*)\)([^.]*)\1\s*\([^)]*\)/g, "$1 ($2)$3$1"); // don't explain twice in one sentence
+  // Lines left as a bare label, a lone emoji, or just "your email" after the stripping go too.
+  const bare = (line) => { const t = line.replace(/[\p{Extended_Pictographic}\uFE0F]/gu, "").trim(); if (t === "") return /\p{Extended_Pictographic}/u.test(line); return /^[A-Za-z&' ]{2,40}:\s*(your email|your link.*)?$/i.test(t) || /^(your email|your link.*)$/i.test(t); };
+  out = out.split("\n").filter((l) => !bare(l)).join("\n");
   return out.replace(/\b(contact|email|link|website|work with me)\s*:\s*(?=[.,;•]|$)[.,;]?\s*/gi, "").replace(/\s+([.,;])/g, "$1").replace(/[ \t]{2,}/g, " ").trim();
 }
 

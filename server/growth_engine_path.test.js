@@ -284,6 +284,11 @@ t("stripped placeholders leave no debris", () => {
   assert.equal(q.sanitize("Copy formula: [Hook] + [Body] + [5 Hashtags]."), "Copy formula: + [5 Hashtags].".replace("+ [5 Hashtags]", "+ [5 Hashtags]").replace("Copy formula: + ", "Copy formula: ") === "Copy formula: [5 Hashtags]." ? "Copy formula: [5 Hashtags]." : q.sanitize("Copy formula: [Hook] + [Body] + [5 Hashtags]."));
   assert(!/\+\s*\+/.test(q.sanitize("Copy formula: [Hook] + [Body] + [5 Hashtags].")));
 });
+t("bare label lines and lone emoji lines left by a stripped email go", () => {
+  const ctx = { links: new Set(), contact: null, goal: "deals" };
+  assert.equal(q.stripInvented("📍 NY → PNW Travel Creator\n📂 Media Kit & Inquiries: me@x.com\n📩 me@x.com\n🌍 Nature. Culture.", ctx), "📍 NY → PNW Travel Creator\n🌍 Nature. Culture.");
+  assert.equal(q.stripInvented("📍 NY → PNW\n📩 DM for collabs", ctx), "📍 NY → PNW\n📩 DM for collabs");
+});
 t("placeholder handles are stripped from moves and drop a written post", () => {
   assert.equal(q.sanitize("Big thanks to @BrandName for the pack"), "Big thanks to the brand for the pack");
   const b = { business: { handle: "t" }, growth_path: { phases: [] }, calendar: { weeks: [] }, next_posts: [{ n: 1, hook: "Moving to @newhandle", caption: "follow there", script: "" }, { n: 2, hook: "Trail day", caption: "Rain", script: "" }] };
