@@ -29,10 +29,29 @@ const DIM_OF_LABEL = [
   ["profile", /profile|bio|clarity/i], ["consistency", /consisten|cadence|posting|schedule|frequen/i],
   ["content_mix", /content|mix|format|strategy/i], ["engagement", /engage|comment|conversation|reach/i],
 ];
+// A move that is really a sponsor pitch posted to the audience ("DM for collabs" reels).
+const PITCH_RE = /\b(dm (me )?for (brand )?(collabs?|deals?|partnerships?)|partnership potential|let'?s team up|brand collaborations welcome|sponsor(ed)? (q&a|pitch)|pitch reel)\b/i;
+const isPitch = (m) => PITCH_RE.test(`${m?.title || ""} ${m?.action || ""} ${m?.example || ""} ${(m?.how || []).join(" ")}`);
+// What the creator told us they won't do. "behind" = never on camera; "fewer_shoots" = no new footage.
+const ON_CAMERA_RE = /\b(talk(ing)?[- ]to[- ]camera|on[- ]camera|face[- ]to[- ]camera|selfie video|record yourself|film yourself|show your face|piece to camera)\b/i;
+const NEW_FOOTAGE_RE = /\b(record \d+ (new )?clips?|film (new|a|the|\d+)|shoot (new|a|the|\d+)|new footage|new shoot|go (out|to) [^.]{0,40}(record|film|shoot)|walk [^.]{0,40}record)\b/i;
+function violatesContext(move, ctx) {
+  if (!ctx) return null;
+  const blob = `${move?.title || ""} ${move?.action || ""} ${(move?.how || []).join(" ")}`;
+  if (ctx.style === "behind" && ON_CAMERA_RE.test(blob)) return "needs the creator on camera, and they said they stay behind it";
+  if (ctx.horizon === "fewer_shoots" && NEW_FOOTAGE_RE.test(blob)) return "needs new footage, and they said no new shoots this quarter";
+  return null;
+}
 function topicOf(move) {
   const text = `${move?.title || ""} ${move?.action || ""}`;
   for (const t of TOPICS) if (t.re.test(text)) return t.key;
   return "other";
+}
+function openerTopics(ph) {
+  const segs = String(`${ph.visible_action || ""}`).split(/\s*(?:,|;|\band\b|\+|·)\s*/).filter(Boolean);
+  const out = new Set(); for (const seg of segs) { const t = topicOf({ title: "", action: seg }); if (t !== "other") out.add(t); }
+  const whole = topicOf({ title: ph.label, action: ph.visible_action }); if (whole !== "other") out.add(whole);
+  return [...out];
 }
 const topicDef = (key) => TOPICS.find((t) => t.key === key) || { key, dim: null, once: false };
 function dimOfLabel(label) { for (const [k, re] of DIM_OF_LABEL) if (re.test(String(label || ""))) return k; return null; }
@@ -94,6 +113,8 @@ function namePosts(text, idx) {
   s = s.replace(MON_RE, (m, mon, d, y) => { if (!y) return m; const mi = MONTHS.findIndex((x) => x.toLowerCase() === mon.slice(0, 3).toLowerCase()); const p = idx.get(`${y}-${String(mi + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`); return p ? postName(p) : m; });
   // "post the "Cape Flattery" reel (Sep 17) reel" → drop the doubled noun; "reel the ..." → tidy.
   s = s.replace(/(\))\s+(reel|post|carousel)\b/gi, "$1").replace(/\b(reel|post|carousel|video)\s+the "/gi, 'the "');
+  // "the "On top of the world" reel (Aug 13) ('On top of the world')" — the model's own parenthetical after our name.
+  s = s.replace(/("[^"]+" (?:reel|carousel|post) \([^)]+\))\s*\('[^']*'\)/g, "$1");
   return s.replace(/\b(the|The)\s+the\s+"/g, '$1 "');
 }
 
@@ -161,12 +182,13 @@ function deriveSchedule(reportBody, { targetPerWeek = null } = {}) {
   const times = {};
   for (const d of days) { const w = (bt.windows || []).find((x) => x.day === d) || best; times[d] = w ? hourLabel(w.start_hour) : "7pm"; }
   const source = (bt.best_days || []).some((d) => Number(d.n) >= 2) ? "your best days" : "starting points until we have more of your posts";
-  return { days, times, per_week: n, label: days.map((d) => `${d} ${times[d]}`).join(", "), source };
+  const evidence = days.filter((d) => (bt.best_days || []).some((x) => x.day === d && Number(x.n) >= 2) || (bt.windows || []).some((w) => w.day === d));
+  return { days, times, per_week: n, label: days.map((d) => `${d} ${times[d]}`).join(", "), source, evidence, guessed: days.filter((d) => !evidence.includes(d)) };
 }
 
 // ------------------------------------------------------------------ validation and dedupe
 // Problems are strings the retry prompt can quote back to the model.
-function validatePhases(phases, { labels = [], posts = null } = {}) {
+function validatePhases(phases, { labels = [], posts = null, context = null } = {}) {
   // Known posts by name ("Cape Flattery") so mentions count whether the model wrote a date or a name.
   const postNames = posts ? [...posts.entries()].map(([date, p]) => { const n = postName(p) || ""; const q = /"([^"]+)"/.exec(n); return q ? { key: q[1], date } : null; }).filter(Boolean) : [];
   const problems = [];
@@ -174,7 +196,8 @@ function validatePhases(phases, { labels = [], posts = null } = {}) {
   const postCites = new Map(); // date → [moves]
   // Openers come from the free snapshot and can't be rewritten, so every opener's one-off
   // topic is taken before any move is checked — a move may not repeat any phase's opener.
-  phases.forEach((ph, i) => { const t = topicOf({ title: ph.label, action: ph.visible_action }); if (topicDef(t).once && !seenOnce.has(t)) seenOnce.set(t, `phase ${i + 1} first move`); });
+  phases.forEach((ph, i) => { for (const t of openerTopics(ph)) { if (!topicDef(t).once) continue; if (seenOnce.has(t) && !seenOnce.get(t).startsWith(`phase ${i + 1} `)) problems.push({ kind: "opener_repeat", phase: i, topic: t, text: `phase ${i + 1} first move repeats ${seenOnce.get(t)} (both are about ${t.replace("_", " ")}).` }); else if (!seenOnce.has(t)) seenOnce.set(t, `phase ${i + 1} first move`); } });
+  let pitches = 0;
   phases.forEach((ph, i) => {
     const dim = dimOfLabel(labels[i] || ph.label);
     const all = [...(ph.opener ? [{ ...ph.opener, title: ph.first_move_title || ph.label, action: ph.visible_action || "", _opener: true }] : []), ...(ph.moves || [])];
@@ -182,6 +205,8 @@ function validatePhases(phases, { labels = [], posts = null } = {}) {
       const t = topicOf(m); const def = topicDef(t);
       const id = m._opener ? `phase ${i + 1} first move` : `move ${m.n} "${m.title}"`;
       if (m._opener) { /* seeded above */ } else if (def.once) { if (seenOnce.has(t)) problems.push({ kind: "duplicate", phase: i, move: m, topic: t, text: `${id} repeats ${seenOnce.get(t)} (both are about ${t.replace("_", " ")}).` }); else seenOnce.set(t, id); }
+      if (!m._opener && isPitch(m)) { pitches++; if (pitches > 1) problems.push({ kind: "pitch", phase: i, move: m, text: `${id} is another sponsor pitch post; only one move in the plan may pitch brands to the audience — the rest serve the audience.` }); }
+      const cv = !m._opener && violatesContext(m, context); if (cv) problems.push({ kind: "context", phase: i, move: m, text: `${id} ${cv}.` });
       if (dim && def.dim && def.dim !== dim && !m._opener) problems.push({ kind: "off_phase", phase: i, move: m, topic: t, text: `${id} is about ${def.dim.replace("_", " ")}, but phase ${i + 1} is "${labels[i] || ph.label}".` });
       const blob = `${m.title} ${m.action} ${m.why} ${(m.how || []).join(" ")} ${m.example || ""}`;
       const cited = new Set(datesIn(blob));
@@ -194,15 +219,45 @@ function validatePhases(phases, { labels = [], posts = null } = {}) {
 }
 // Drop what the retry didn't fix: later duplicates of one-off topics and
 // off-phase moves that a same-topic move elsewhere already covers.
-function dedupePhases(phases, { labels = [] } = {}) {
-  const seen = new Set(); const dropped = [];
-  for (const ph of phases) { const t = topicOf({ title: ph.label, action: ph.visible_action }); if (topicDef(t).once) seen.add(t); }
+function dedupePhases(phases, { labels = [], context = null } = {}) {
+  const seen = new Set(); const dropped = []; let pitches = 0;
+  // Openers first, in order. A later opener that repeats an earlier phase's one-off action
+  // loses that clause; if nothing is left, its first move becomes the opener.
+  const cutClauses = (text, takenTopics) => {
+    const parts = String(text || "").split(/(\s*(?:,|;|\band\b)\s*)/);
+    const keep = []; for (let k = 0; k < parts.length; k += 2) { const seg = parts[k]; const t = topicOf({ title: "", action: seg }); if (!(topicDef(t).once && takenTopics.has(t))) keep.push(seg.trim()); }
+    return keep.filter(Boolean).join(", ").replace(/^(\w)/, (c) => c.toUpperCase());
+  };
+  phases = phases.map((ph, i) => {
+    const mine = openerTopics(ph).filter((t) => topicDef(t).once);
+    const repeated = mine.filter((t) => seen.has(t));
+    let o = { ...ph };
+    if (repeated.length) {
+      const taken = new Set(repeated);
+      const va = cutClauses(ph.visible_action, taken);
+      if (va && va.length >= 8) { o.visible_action = va; o.detail = ph.detail; if (o.opener) o.opener = { ...o.opener, done_when: cutClauses(o.opener.done_when, taken) || o.opener.done_when }; }
+      else if ((ph.moves || []).length) {
+        // Whole opener already done earlier: the first surviving move takes its place.
+        const first = ph.moves.find((m) => !(topicDef(topicOf(m)).once && seen.has(topicOf(m)))) || ph.moves[0];
+        o.visible_action = first.action || first.title; o.detail = first.why || ""; o.opener = { how: first.how || [], example: first.example ?? null, done_when: first.done_when || "", time: first.time || "" }; o.moves = ph.moves.filter((m) => m !== first); o.promoted_move = first.n;
+        dropped.push({ phase: i, move: { title: ph.visible_action }, reason: "opener_repeat_promoted", topic: repeated.join("+") });
+        if (isPitch(first)) pitches++;
+      }
+    }
+    for (const t of openerTopics(o)) if (topicDef(t).once) seen.add(t);
+    // This phase's moves happen before the next phase's opener, so they count as taken too.
+    for (const m of o.moves || []) { const t = topicOf(m); if (topicDef(t).once) seen.add(t); }
+    return o;
+  });
+  seen.clear(); for (const ph of phases) for (const t of openerTopics(ph)) if (topicDef(t).once) seen.add(t);
   const out = phases.map((ph, i) => {
     const dim = dimOfLabel(labels[i] || ph.label);
     const moves = [];
     for (const m of ph.moves || []) {
       const t = topicOf(m); const def = topicDef(t);
       if (def.once && seen.has(t)) { dropped.push({ phase: i, move: m, reason: "duplicate", topic: t }); continue; }
+      const cv = violatesContext(m, context); if (cv) { dropped.push({ phase: i, move: m, reason: "context", topic: t }); continue; }
+      if (isPitch(m)) { pitches++; if (pitches > 1) { dropped.push({ phase: i, move: m, reason: "pitch", topic: t }); continue; } }
       if (dim && def.dim && def.dim !== dim && def.once && i > 0) { dropped.push({ phase: i, move: m, reason: "off_phase", topic: t }); seen.add(t); continue; }
       if (def.once) seen.add(t);
       moves.push(m);
@@ -252,6 +307,8 @@ function stripInvented(text, { links, contact, goal }) {
   const linkWords = goal === "deals" ? "your link (the page brands should land on — a media kit, or a Linktree that points to it)" : goal === "sell" ? "your link (the page where they buy)" : goal === "bookings" ? "your link (your booking page)" : "your link";
   let out = String(text).replace(URL_RE, (u) => { const k = u.trim().replace(/\/$/, "").toLowerCase(); return [...links].some((l) => k === l || k.endsWith(l) || l.endsWith(k)) ? u : linkWords; });
   out = out.replace(EMAIL_RE, (e) => (contact && e.toLowerCase() === String(contact).toLowerCase() ? e : "your email"));
+  // Dollar amounts the model made up ("Reel: $200") — the account gives us no pricing data.
+  out = out.replace(/\$\s?\d[\d,]*(?:\.\d+)?\s?[kK]?\b/g, "a rate you set");
   out = out.replace(/\b(your link)\s*\(([^)]*)\)([^.]*)\1\s*\([^)]*\)/g, "$1 ($2)$3$1"); // don't explain twice in one sentence
   return out.replace(/\b(contact|email|link|website|work with me)\s*:\s*(?=[.,;•]|$)[.,;]?\s*/gi, "").replace(/\s+([.,;])/g, "$1").replace(/[ \t]{2,}/g, " ").trim();
 }
@@ -331,4 +388,4 @@ function benchmarkText(t) {
   };
 }
 
-module.exports = { titleDay, stripInvented, allowedLinks, applySchedule, TOPICS, topicOf, topicDef, dimOfLabel, datesIn, postName, postIndex, namePosts, sanitize, HOWTO, howFor, deriveSchedule, cadenceFor, validatePhases, dedupePhases, finishPlan, benchmarkText };
+module.exports = { isPitch, violatesContext, openerTopics, titleDay, stripInvented, allowedLinks, applySchedule, TOPICS, topicOf, topicDef, dimOfLabel, datesIn, postName, postIndex, namePosts, sanitize, HOWTO, howFor, deriveSchedule, cadenceFor, validatePhases, dedupePhases, finishPlan, benchmarkText };

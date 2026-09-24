@@ -1056,3 +1056,5 @@ button.prow:hover { background: var(--ground); transform: translateX(2px); }
 .pstep .asklink label { font-size: 13px; font-weight: 600; color: var(--ink); }
 .pstep .asklink .row { display: flex; gap: 8px; flex-wrap: wrap; }
 .pstep .asklink input { flex: 1 1 220px; min-height: 40px; padding: 8px 12px; border: 1px solid var(--line2); border-radius: 10px; font: inherit; background: var(--card); color: var(--ink); }
+
+.week summary .sl em { font-style: normal; color: var(--muted); font-weight: 500; }

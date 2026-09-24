@@ -238,6 +238,48 @@ t("a written post that shouts out an unknown brand handle is dropped", () => {
   q.finishPlan(b);
   assert.deepEqual(b.next_posts.map((p) => p.hook), ["Trail"]);
 });
+t("a later opener that repeats an earlier action loses the clause, or is replaced by its first move", () => {
+  const ph = [
+    { label: "Profile", visible_action: "Rewrite bio, add Linktree, create Work Highlight", opener: { done_when: "Bio shows link; highlight visible" }, moves: [] },
+    { label: "Consistency", visible_action: "Post Mon, Thu and Fri", opener: {}, moves: [] },
+    { label: "Pitch", visible_action: "Pin top Reel, add Media Kit Highlight with contact email", opener: { done_when: "Reel pinned and highlight visible" }, moves: [{ n: 10, title: "Pitch Reel", action: "Repurpose a reel with a voiceover pitch", how: ["a"], example: "DM for collabs", done_when: "posted", time: "15 min" }, { n: 11, title: "Solo tips carousel", action: "Turn the checklist into a carousel", how: [], example: null }] },
+  ];
+  const v = q.validatePhases(ph, { labels: ph.map((p) => p.label) });
+  assert(v.problems.some((p) => p.kind === "opener_repeat"));
+  const d = q.dedupePhases(ph, { labels: ph.map((p) => p.label) });
+  // pin is new (phase 1 opener had no pin) so that clause stays; the highlight clause goes
+  assert.equal(d.phases[2].visible_action, "Pin top Reel");
+  const ph2 = [ph[0], { label: "Pitch", visible_action: "Add a highlight", opener: {}, moves: ph[2].moves }];
+  const d2 = q.dedupePhases(ph2, { labels: ["Profile", "Pitch"] });
+  assert.equal(d2.phases[1].visible_action, "Repurpose a reel with a voiceover pitch"); // promoted
+  assert.equal(d2.phases[1].moves.length, 1);
+});
+t("only one sponsor pitch move per plan; on-camera and new-footage moves drop for that intake", () => {
+  const ctx = { style: "behind", horizon: "fewer_shoots" };
+  const ph = [{ label: "Content", visible_action: "Post reels", opener: {}, moves: [
+    { n: 2, title: "Pitch Reel", action: "Voiceover pitch", example: "DM for collabs", how: [] },
+    { n: 3, title: "Q&A Reel", action: "Answer sponsor questions", example: "Got questions? DM me for brand collabs.", how: [] },
+    { n: 4, title: "Local B-Roll", action: "Record voiceover walks", how: ["Walk 10 mins near apartment, record 3 clips."] },
+    { n: 5, title: "Talk to camera", action: "Film yourself talking to camera about gear", how: [] },
+    { n: 6, title: "Checklist carousel", action: "Turn the checklist into a carousel", how: [] },
+  ] }];
+  const v = q.validatePhases(ph, { labels: ["Content"], context: ctx });
+  assert(v.problems.some((p) => p.kind === "pitch" && p.move.n === 3));
+  assert(v.problems.some((p) => p.kind === "context" && p.move.n === 4));
+  assert(v.problems.some((p) => p.kind === "context" && p.move.n === 5));
+  const d = q.dedupePhases(ph, { labels: ["Content"], context: ctx });
+  assert.deepEqual(d.phases[0].moves.map((m) => m.n), [2, 6]);
+});
+t("invented prices become words; the model's parenthetical after a named post goes", () => {
+  assert.equal(q.stripInvented("Reel Review: $200 | Story Set: $1,500", { links: new Set(), contact: null, goal: null }), "Reel Review: a rate you set | Story Set: a rate you set");
+  const idx = q.postIndex({ posts: [{ caption: "On top of the world.", type: "reel", posted_at: "2026-08-13T22:15:27.000Z" }] });
+  assert.equal(q.namePosts("Open the Aug 13 2026 reel ('On top of the world')", idx), 'Open the "On top of the world" reel (Aug 13)');
+});
+t("schedule says which days are guesses", () => {
+  const r = { plan_context: { hours: "2_5" }, best_times: { windows: [{ day: "Thu", start_hour: 18 }], best_days: [{ day: "Fri", n: 5, vs_avg: 2 }, { day: "Thu", n: 4, vs_avg: 1.5 }] } };
+  const sch = q.deriveSchedule(r, { targetPerWeek: 3.5 });
+  assert.deepEqual(sch.evidence, ["Thu", "Fri"]); assert.deepEqual(sch.guessed, ["Mon"]);
+});
 t("placeholder handles are stripped from moves and drop a written post", () => {
   assert.equal(q.sanitize("Big thanks to @BrandName for the pack"), "Big thanks to the brand for the pack");
   const b = { business: { handle: "t" }, growth_path: { phases: [] }, calendar: { weeks: [] }, next_posts: [{ n: 1, hook: "Moving to @newhandle", caption: "follow there", script: "" }, { n: 2, hook: "Trail day", caption: "Rain", script: "" }] };
