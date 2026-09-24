@@ -95,7 +95,7 @@
   // Goal onboarding (spec 3.3): asked right after the first report, kept on the
   // account (signed in) and the report; the plan, Monday moves and post writing
   // read it through plan_context.
-  const GOALS = [['followers', 'Grow to a follower target', 'a number you want to hit'], ['deals', 'Land brand deals'], ['sell', 'Sell a product or service', 'a guide, coaching, bookings'], ['bookings', 'Bookings or clients'], ['consistency', 'Just grow consistently']];
+  const GOALS = [['followers', 'More followers', 'a number you want to hit'], ['deals', 'Brand deals', 'sponsors and partnerships'], ['sell', 'Sell something', 'a guide, coaching, a product'], ['bookings', 'Bookings or clients', 'people who pay for your time'], ['consistency', 'Just get consistent', 'a cadence you can keep']];
   const goalLabel = g => (GOALS.find(x => x[0] === g) || [])[1] || '';
   const niceTarget = f => { const n = Math.max(100, (Number(f) || 0) * 1.5); const p = Math.pow(10, Math.floor(Math.log10(n))); return Math.ceil(n / p) * p; };
   const knownGoal = report => (report && (report.goal || (report.plan_context && report.plan_context.goal))) || sget('sc_goal', null)?.goal || null;
@@ -890,7 +890,7 @@
             </div>`) : ''}
           </div>
 
-        ${showGoalAsk ? raw(h`<div class="card goalcard ask" id="goalAsk"><div class="eb">ONE QUESTION</div><h2>What do you want from this?</h2><p>The plan, your Monday move and the posts we write all lean toward it. Change it any time on your reports page.</p>${raw(goalPickerHTML(null, null, followers, { first: true }))}</div>`) : ''}
+        ${showGoalAsk ? raw(h`<div class="card goalcard ask" id="goalAsk"><div class="eb">ONE QUESTION</div><h2>What's the goal?</h2><p>The plan, your Monday move and the posts we write all lean toward it. You can change it later.</p>${raw(goalPickerHTML(null, null, followers, { first: true }))}</div>`) : ''}
         <div class="roastwrap" id="roastWrap" hidden></div>
         <div class="statusrow">
         ${goalNow && !showGoalAsk && !isSample ? raw((() => { const gp = goalProgress(goalNow, report.goal_target || sget('sc_goal', null)?.goal_target || null, report); return gp ? h`<div class="goalbar"><div class="t"><span class="l">${goalLabel(goalNow)}</span><span class="v">${gp.label}</span></div><div class="bar"><div class="fill" style="width:${gp.pct}%"></div></div><div class="fine">${gp.sub}</div></div>` : ''; })()) : ''}
