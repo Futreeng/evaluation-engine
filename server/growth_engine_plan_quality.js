@@ -94,7 +94,7 @@ function namePosts(text, idx) {
   s = s.replace(MON_RE, (m, mon, d, y) => { if (!y) return m; const mi = MONTHS.findIndex((x) => x.toLowerCase() === mon.slice(0, 3).toLowerCase()); const p = idx.get(`${y}-${String(mi + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`); return p ? postName(p) : m; });
   // "post the "Cape Flattery" reel (Sep 17) reel" → drop the doubled noun; "reel the ..." → tidy.
   s = s.replace(/(\))\s+(reel|post|carousel)\b/gi, "$1").replace(/\b(reel|post|carousel|video)\s+the "/gi, 'the "');
-  return s;
+  return s.replace(/\b(the|The)\s+the\s+"/g, '$1 "');
 }
 
 // ------------------------------------------------------------------ text hygiene
@@ -109,7 +109,7 @@ function sanitize(text, { name = null } = {}) {
   // Placeholders: the model doesn't know their name; use the handle or drop the phrase.
   s = s.replace(/\[\s*(your )?name\s*\]/gi, name ? `@${name}` : "").replace(/\[\s*(your |insert )?[a-z ]{2,30}\]/gi, "").replace(/\b(I['’]m|I am|it['’]s|this is)\s+([–—-]\s+)/gi, "$1 ").replace(/\b(I['’]m|I am|it['’]s|this is)\s*[.,]/gi, "$1 me,");
   for (const [re, rep] of BANNED) s = s.replace(re, rep);
-  return s.replace(/[ \t]{2,}/g, " ").replace(/\n{3,}/g, "\n\n").replace(/^\s*[-–]\s*$/gm, "").trim();
+  return s.replace(/[ \t]{2,}/g, " ").replace(/\n{3,}/g, "\n\n").replace(/^\s*[-–]\s*$/gm, "").replace(/[\s•·\-–—|]+$/g, "").trim();
 }
 
 // ------------------------------------------------------------------ verified mechanics
@@ -229,6 +229,8 @@ function applySchedule(text, schedule) {
   const short = (d) => String(d).slice(0, 3).toLowerCase();
   out = out.replace(LONE_DAY_RE, (m, w, d) => (schedule.days.some((x) => short(x) === short(d)) ? m : `${w} ${schedule.days[0]}`));
   if (schedule.per_week) out = out.replace(CADENCE_RE, (m) => m.replace(/\d/, String(schedule.per_week)));
+  // Any other weekday that isn't a posting day ("Drafts Tue", "for Tuesday 6pm") → the first posting day.
+  out = out.replace(/\b((?:Mon|Tues?|Wed|Thurs?|Fri|Sat|Sun)(?:day|sday|nesday|rsday|urday)?s?)\b/g, (m) => (schedule.days.some((x) => short(x) === short(m)) ? m : schedule.days[0]));
   if (time) out = out.replace(CLOCK_RE, time);
   return out;
 }
@@ -250,7 +252,8 @@ function stripInvented(text, { links, contact, goal }) {
   const linkWords = goal === "deals" ? "your link (the page brands should land on — a media kit, or a Linktree that points to it)" : goal === "sell" ? "your link (the page where they buy)" : goal === "bookings" ? "your link (your booking page)" : "your link";
   let out = String(text).replace(URL_RE, (u) => { const k = u.trim().replace(/\/$/, "").toLowerCase(); return [...links].some((l) => k === l || k.endsWith(l) || l.endsWith(k)) ? u : linkWords; });
   out = out.replace(EMAIL_RE, (e) => (contact && e.toLowerCase() === String(contact).toLowerCase() ? e : "your email"));
-  return out.replace(/\b(your link)\s*\(([^)]*)\)([^.]*)\1\s*\([^)]*\)/g, "$1 ($2)$3$1"); // don't explain twice in one sentence
+  out = out.replace(/\b(your link)\s*\(([^)]*)\)([^.]*)\1\s*\([^)]*\)/g, "$1 ($2)$3$1"); // don't explain twice in one sentence
+  return out.replace(/\b(contact|email|link|website|work with me)\s*:\s*(?=[.,;•]|$)[.,;]?\s*/gi, "").replace(/\s+([.,;])/g, "$1").replace(/[ \t]{2,}/g, " ").trim();
 }
 
 // "Tuesday Throwback Protocol" when Tuesday isn't a posting day → "Throwback Protocol".
@@ -300,7 +303,10 @@ function finishPlan(reportBody, { platform = reportBody.business?.platform || "i
   if (Array.isArray(reportBody.next_posts)) {
     let pitched = 0;
     const PLACEHOLDER_HANDLE = /@(?:brand|your|new|their|company|partner)[a-z]*(?:name|handle)\b/i;
-    reportBody.next_posts = reportBody.next_posts.filter((p) => !PLACEHOLDER_HANDLE.test(`${p.hook} ${p.caption} ${p.script}`));
+    // Only handles we know: the creator's own, competitors they picked, anyone in their bio. A shout-out to any other @handle is an invented endorsement.
+    const known = new Set([reportBody.business?.handle, ...((reportBody.competitors?.competitors || []).map((c) => c.handle)), ...((String(reportBody.bio || "").match(/@[a-z0-9_.]+/gi) || []).map((h) => h.slice(1)))].filter(Boolean).map((h) => String(h).toLowerCase()));
+    const unknownMention = (t) => (String(t).match(/@[a-z0-9_.]{2,}/gi) || []).some((h) => !known.has(h.slice(1).toLowerCase()));
+    reportBody.next_posts = reportBody.next_posts.filter((p) => { const t = `${p.hook} ${p.caption} ${p.script}`; return !PLACEHOLDER_HANDLE.test(t) && !unknownMention(t); });
     reportBody.next_posts = reportBody.next_posts.map((p) => {
       const o = { ...p };
       for (const k of ["hook", "caption", "script", "why"]) if (o[k]) o[k] = fix(o[k]);

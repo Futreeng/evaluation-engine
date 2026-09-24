@@ -225,6 +225,19 @@ t("moves follow the schedule: off-schedule weekday titles and days", () => {
   assert.equal(b.growth_path.phases[0].moves[0].title, "Grid Proof");
   assert.equal(b.growth_path.phases[0].moves[0].action, "Post a quote card every Mon.");
 });
+t("naming never doubles the article; stripped contacts leave no dangling label; off-schedule day tokens move", () => {
+  const idx = q.postIndex({ posts: [{ caption: "On top of the world. 🏔️", type: "reel", posted_at: "2026-08-13T22:15:27.000Z" }] });
+  assert.equal(q.namePosts("Repurpose the Aug 13 2026 reel", idx), 'Repurpose the "On top of the world" reel (Aug 13)');
+  assert.equal(q.stripInvented("Rates. Contact: me@fake.com. Available Q4.", { links: new Set(), contact: null, goal: null }), "Rates. Contact: your email. Available Q4.");
+  assert.equal(q.stripInvented("Contact: . Available Q4.", { links: new Set(), contact: null, goal: null }), "Available Q4.");
+  const sch = { days: ["Mon", "Thu", "Fri"], times: { Mon: "6pm" }, per_week: 3 };
+  assert.equal(q.applySchedule("Label folders 'Drafts Tue', 'Drafts Thu'. Schedule for Tuesday 6pm.", sch), "Label folders 'Drafts Mon', 'Drafts Thu'. Schedule for Mon 6pm.");
+});
+t("a written post that shouts out an unknown brand handle is dropped", () => {
+  const b = { business: { handle: "talon__wilson" }, bio: "with @mybuddy", growth_path: { phases: [] }, calendar: { weeks: [] }, next_posts: [{ n: 1, hook: "Gear", caption: "Shoutout to @PeakDesign for the bag", script: "" }, { n: 2, hook: "Trail", caption: "Hiking with @mybuddy again", script: "" }] };
+  q.finishPlan(b);
+  assert.deepEqual(b.next_posts.map((p) => p.hook), ["Trail"]);
+});
 t("placeholder handles are stripped from moves and drop a written post", () => {
   assert.equal(q.sanitize("Big thanks to @BrandName for the pack"), "Big thanks to the brand for the pack");
   const b = { business: { handle: "t" }, growth_path: { phases: [] }, calendar: { weeks: [] }, next_posts: [{ n: 1, hook: "Moving to @newhandle", caption: "follow there", script: "" }, { n: 2, hook: "Trail day", caption: "Rain", script: "" }] };

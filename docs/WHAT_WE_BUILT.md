@@ -235,6 +235,17 @@ answers on when to post, Instagram steps that don't exist. Two parts:
   "10 points to Elite".
 - Score box carries the four dimensions, the niche marker and three facts.
 
+### Sample regenerated (24 Sept)
+- After Joe fixed the Groq model list (#8), a full paid run completed. The public sample is
+  now report `rpt_a1f5b80a86f124bf89d22350`, exported with `server/scripts/export_sample_report.js`
+  and finished with `scripts/clean_sample.js`: three phases, 12 weeks, five posts, one schedule,
+  explanations that quote the scorer's targets.
+- Fixed on the way: the merge output budget (6144 → 8192) was truncating the third phase;
+  openers now seed the one-off topics so moves can't repeat them; post names count toward
+  the two-mentions cap; plural and lone weekdays follow the schedule; placeholder or unknown
+  @handles drop the written post; the how-to library only replaces steps where the mechanic
+  is the move or the model's steps are bogus.
+
 ## Also fixed along the way
 
 - Stored report bodies carried a provisional `report_id` (share sheet broke).
