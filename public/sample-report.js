@@ -487,7 +487,12 @@ window.SCALECRAFT_SAMPLE = {
     "label": "Thu 6pm–9pm",
     "n": 3,
     "vs_avg": 1.62,
-    "explanation": "Your Thu 6pm–9pm posts average 1.62× your usual likes and comments (3 posts)."
+    "explanation": "Your Thu 6pm–9pm posts average 1.62× your usual likes and comments (3 posts).",
+    "confidence": {
+     "level": "some",
+     "label": "Some evidence",
+     "n": 3
+    }
    },
    {
     "day": "Fri",
@@ -496,7 +501,12 @@ window.SCALECRAFT_SAMPLE = {
     "label": "Fri 6pm–9pm",
     "n": 4,
     "vs_avg": 1.31,
-    "explanation": "Your Fri 6pm–9pm posts average 1.31× your usual likes and comments (4 posts)."
+    "explanation": "Your Fri 6pm–9pm posts average 1.31× your usual likes and comments (4 posts).",
+    "confidence": {
+     "level": "some",
+     "label": "Some evidence",
+     "n": 4
+    }
    }
   ],
   "best_days": [
@@ -511,7 +521,12 @@ window.SCALECRAFT_SAMPLE = {
     "vs_avg": 1.49
    }
   ],
-  "note": "From your last 20 posts, in America/New York. Windows need at least 3 posts and 1.15× your median to count."
+  "note": "From your last 20 posts, in America/New York. Windows need at least 3 posts and 1.15× your median to count.",
+  "confidence": {
+   "level": "high",
+   "label": "High confidence",
+   "n": 20
+  }
  },
  "data_window": "Based on your last 30 posts. We can't see saves, reach or story views.",
  "plan_context": {
@@ -671,6 +686,11 @@ window.SCALECRAFT_SAMPLE = {
     "min": 85,
     "points_away": 14
    }
+  },
+  "category_confidence": {
+   "level": "low",
+   "label": "Needs more data",
+   "n": 16
   }
  },
  "growth_path": {
@@ -706,6 +726,13 @@ window.SCALECRAFT_SAMPLE = {
        "label": "See the post",
        "url": "https://www.instagram.com/p/DdXhtyWOyLQ/",
        "post_id": "3987804277031248592"
+      },
+      "target": {
+       "dimension": "Profile Clarity",
+       "metric": "score",
+       "from": 25,
+       "to": 60,
+       "unit": ""
       }
      },
      {
@@ -727,6 +754,13 @@ window.SCALECRAFT_SAMPLE = {
        "label": "See the post",
        "url": "https://www.instagram.com/p/DdXhtyWOyLQ/",
        "post_id": "3987804277031248592"
+      },
+      "target": {
+       "dimension": "Profile Clarity",
+       "metric": "score",
+       "from": 25,
+       "to": 60,
+       "unit": ""
       }
      },
      {
@@ -748,7 +782,8 @@ window.SCALECRAFT_SAMPLE = {
       "cta": {
        "type": "mark_done",
        "label": "Mark done"
-      }
+      },
+      "target": null
      }
     ],
     "opener": {
@@ -765,6 +800,13 @@ window.SCALECRAFT_SAMPLE = {
      "cta": {
       "type": "mark_done",
       "label": "Mark done"
+     },
+     "target": {
+      "dimension": "Profile Clarity",
+      "metric": "score",
+      "from": 25,
+      "to": 60,
+      "unit": ""
      }
     },
     "calendar_weeks": [
@@ -908,6 +950,13 @@ window.SCALECRAFT_SAMPLE = {
        "type": "write_post",
        "label": "Open the written post",
        "post_index": 3
+      },
+      "target": {
+       "dimension": "Posting Consistency",
+       "metric": "posts a week",
+       "from": 2.1,
+       "to": 3,
+       "unit": "/week"
       }
      },
      {
@@ -931,6 +980,13 @@ window.SCALECRAFT_SAMPLE = {
        "label": "See the post",
        "url": "https://www.instagram.com/p/Db1eRKUp8RM/",
        "post_id": "3960204568052614220"
+      },
+      "target": {
+       "dimension": "Posting Consistency",
+       "metric": "posts a week",
+       "from": 2.1,
+       "to": 3,
+       "unit": "/week"
       }
      },
      {
@@ -953,6 +1009,13 @@ window.SCALECRAFT_SAMPLE = {
        "type": "write_post",
        "label": "Open the written post",
        "post_index": 1
+      },
+      "target": {
+       "dimension": "Engagement Quality",
+       "metric": "likes + comments on a typical post",
+       "from": 190,
+       "to": 266,
+       "unit": ""
       }
      },
      {
@@ -975,6 +1038,13 @@ window.SCALECRAFT_SAMPLE = {
        "type": "write_post",
        "label": "Open the written post",
        "post_index": 3
+      },
+      "target": {
+       "dimension": "Posting Consistency",
+       "metric": "posts a week",
+       "from": 2.1,
+       "to": 3,
+       "unit": "/week"
       }
      }
     ],
@@ -994,6 +1064,13 @@ window.SCALECRAFT_SAMPLE = {
       "type": "write_post",
       "label": "Open the written post",
       "post_index": 3
+     },
+     "target": {
+      "dimension": "Posting Consistency",
+      "metric": "posts a week",
+      "from": 2.1,
+      "to": 3,
+      "unit": "/week"
      }
     },
     "calendar_weeks": [
@@ -1137,6 +1214,13 @@ window.SCALECRAFT_SAMPLE = {
        "label": "See the post",
        "url": "https://www.instagram.com/p/DdXhtyWOyLQ/",
        "post_id": "3987804277031248592"
+      },
+      "target": {
+       "dimension": "Engagement Quality",
+       "metric": "likes + comments on a typical post",
+       "from": 190,
+       "to": 266,
+       "unit": ""
       }
      },
      {
@@ -1159,6 +1243,13 @@ window.SCALECRAFT_SAMPLE = {
        "label": "See the post",
        "url": "https://www.instagram.com/p/DboLX3Fxg5K/",
        "post_id": "3956462290857233994"
+      },
+      "target": {
+       "dimension": "Engagement Quality",
+       "metric": "likes + comments on a typical post",
+       "from": 190,
+       "to": 266,
+       "unit": ""
       }
      },
      {
@@ -1180,6 +1271,13 @@ window.SCALECRAFT_SAMPLE = {
        "type": "write_post",
        "label": "Open the written post",
        "post_index": 3
+      },
+      "target": {
+       "dimension": "Engagement Quality",
+       "metric": "likes + comments on a typical post",
+       "from": 190,
+       "to": 266,
+       "unit": ""
       }
      },
      {
@@ -1202,6 +1300,13 @@ window.SCALECRAFT_SAMPLE = {
        "label": "See the post",
        "url": "https://www.instagram.com/p/CPTdnrJrQXy/",
        "post_id": "2581537281155073522"
+      },
+      "target": {
+       "dimension": "Engagement Quality",
+       "metric": "likes + comments on a typical post",
+       "from": 190,
+       "to": 266,
+       "unit": ""
       }
      }
     ],
@@ -1220,6 +1325,13 @@ window.SCALECRAFT_SAMPLE = {
       "type": "write_post",
       "label": "Open the written post",
       "post_index": 3
+     },
+     "target": {
+      "dimension": "Engagement Quality",
+      "metric": "likes + comments on a typical post",
+      "from": 190,
+      "to": 266,
+      "unit": ""
      }
     },
     "calendar_weeks": [
@@ -1905,5 +2017,5 @@ window.SCALECRAFT_SAMPLE = {
  "created_at": 1790224030989,
  "sample": true,
  "why_stripped": 0,
- "sample_cleaned_at": 1790286549112
+ "sample_cleaned_at": 1790321372361
 };

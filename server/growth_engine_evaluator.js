@@ -821,8 +821,9 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
         })),
       };
     }
-    // Free report: every phase opener gets its button (1.5.1); posting moves paywall to the plan.
+    // Free report: every phase opener gets its button (1.5.1) and target; posting moves paywall to the plan.
     if (reportBody.growth_path) planQuality.stampFreeCtas(reportBody);
+    planQuality.stampConfidence(reportBody);
     if (postInsights) {
       reportBody.post_insights = {
         ...postInsights,
@@ -1037,6 +1038,7 @@ async function evaluateTier1(accountId, inputParams, onStage = () => {}, { tier:
   reportBody.upsell = { cta_label: "Upgrade to Business Evaluator", target_tier: "business_evaluator", unlock_count: 0 };
   // Names, hygiene and verified how-to steps across moves, calendar and posts.
   planQuality.finishPlan(reportBody, { platform });
+  planQuality.stampConfidence(reportBody);
   return reportBody;
 }
 

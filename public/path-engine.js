@@ -57,7 +57,7 @@
         const st = statusOf(key);
         steps.push({ ...base, key, kind: "move", n, opener: !!opener, title: opener ? (p.label || "First move") : (m.title || ""), action: opener ? (p.visible_action || p.action || "") : (m.action || ""), why: opener ? (p.detail || "") : (m.why || ""),
           how: (opener ? (p.opener && p.opener.how) : m.how) || [], example: (opener ? (p.opener && p.opener.example) : m.example) || null, done_when: (opener ? (p.opener && p.opener.done_when) : m.done_when) || "", time: (opener ? (p.opener && p.opener.time) : m.time) || "",
-          topic: (opener ? (p.opener && p.opener.topic) : m.topic) || null, cta: (opener ? (p.opener && p.opener.cta) : m.cta) || null, due: null, status: st, done_at: done[key] || null, skipped: skipped[key] || null, verified: verified[key] || null, live: true });
+          topic: (opener ? (p.opener && p.opener.topic) : m.topic) || null, cta: (opener ? (p.opener && p.opener.cta) : m.cta) || null, target: (opener ? (p.opener && p.opener.target) : m.target) || null, due: null, status: st, done_at: done[key] || null, skipped: skipped[key] || null, verified: verified[key] || null, live: true });
       };
       if (p.not_included) { lockedCount += 1 + ((p.locked && p.locked.count) || 4); steps.push({ ...base, key: pk + "m1", kind: "move", n: 1, opener: true, title: p.label || "", action: p.visible_action || "", why: p.detail || "", how: [], example: null, done_when: "", time: "", due: null, status: "locked", live: false }); return; }
       if (!isPaid) {
@@ -148,6 +148,18 @@
       else if (s.topic === "highlight") { ok = Number(prof.highlight_count) > Number(base.highlight_count || 0); note = ok ? "A new highlight is on your profile." : "We can't see a new highlight yet."; }
       else continue;
       if (s.status === "done" || ok) out[s.key] = { at: now, ok: !!ok, note };
+    }
+    // Targets: for every done move with a target, say where the number is now.
+    const dims = {}; for (const d of (body.scores && body.scores.dimensions) || []) dims[d.label] = Number(d.score);
+    for (const s of path.steps) {
+      if (!s.live || s.status !== "done" || !s.target) continue;
+      let nowVal = null;
+      if (s.target.metric === "score") nowVal = dims[s.target.dimension];
+      else if (s.target.metric === "posts a week") { const m = /([\d.]+)\/week vs/.exec(((body.scores && body.scores.dimensions) || []).map((d) => d.evidence || "").join(" ")); if (m) nowVal = Number(m[1]); }
+      else if (/typical post/.test(s.target.metric) && body.post_insights) nowVal = Number(body.post_insights.avg_engagement);
+      if (nowVal == null || !Number.isFinite(nowVal)) continue;
+      const hit = nowVal >= s.target.to;
+      out[s.key] = { ...(out[s.key] || { at: now, ok: null, note: "" }), target: { from: s.target.from, to: s.target.to, now: nowVal, hit }, note: `${out[s.key] && out[s.key].note ? out[s.key].note + " " : ""}${s.target.dimension} ${s.target.metric === "score" ? "" : s.target.metric + " "}${s.target.from} → ${nowVal}${hit ? ", target hit." : ` (target ${s.target.to}).`}` };
     }
     return out;
   }
