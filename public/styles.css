@@ -1074,3 +1074,15 @@ button.prow:hover { background: var(--ground); transform: translateX(2px); }
 
 .setup .inwords { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
 .setup .inwords label { font-size: 14px; font-weight: 600; color: var(--ink); }
+
+/* Targets and confidence */
+.mvdetail .target { margin-top: 10px; font-size: 13px; color: var(--body); }
+.mvdetail .target .tl { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 700; margin-right: 6px; }
+.mvdetail .target b { color: var(--ink); }
+.mvdetail.dark .target, .mvdetail.dark .target .tl, .mvdetail.dark .target b { color: var(--on-dark); }
+.weekcard .w.top { margin-top: 10px; font-size: 15px; }
+.weekcard .ctabtn { margin-top: 10px; width: 100%; }
+.conf { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; letter-spacing: .04em; padding: 2px 8px; border-radius: 999px; margin-left: 6px; vertical-align: middle; }
+.conf.high { background: var(--green); color: var(--green-t); }
+.conf.some { background: var(--gold); color: var(--gold-t); }
+.conf.low { background: var(--warm); color: var(--weak); }

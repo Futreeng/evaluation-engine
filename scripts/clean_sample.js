@@ -76,6 +76,7 @@ if (!r.post_insights?.metric) {
 if (r.competitors?.you) r.competitors.you.overall = r.scores.overall;
 r.narrative = String(r.narrative || "").replace(/overall rating is \d+/, `overall rating is ${r.scores.overall}`).replace(/Posting Consistency \(score \d+\)/, `Posting Consistency (score ${r.scores.dimensions.find((d) => /consisten/i.test(d.label)).score})`);
 q.finishPlan(r);
+q.stampConfidence(r);
 r.growth_path.unlocked_steps = r.growth_path.phases.reduce((n, p) => n + 1 + p.moves.length, 0);
 r.growth_path.total_steps = r.growth_path.unlocked_steps;
 r.sample_cleaned_at = Date.now();

@@ -279,6 +279,20 @@ answers on when to post, Instagram steps that don't exist. Two parts:
   should name it. Constraint questions (horizon, hours, style) follow.
 - One goal field: the report's goal picker and the plan context write the same value.
 
+### From the UX redesign spec: opportunity, targets, confidence (25 Sept)
+- **The report opens with the biggest opportunity.** The card beside the score names the
+  weakest dimension, its one-line why, and the next move that works on it, with
+  "Start this move →" into the Path at that step.
+- **Every move has a target** ("How we'll measure it"), computed from the scorer's own
+  numbers: profile moves target the next score band (25 → 60); consistency moves target the
+  plan's posting cadence (2.1 → 3 a week); content and engagement moves target what a
+  typical post earns (188 → 263 likes + comments). At each rescore the Path reports where
+  the number stands against the target for every move marked done.
+- **Confidence labels** on evidence: timing windows and the timing block (by post count),
+  the niche marker (by accounts scored). The niche percentile hides below 25 accounts.
+- Not taken from the spec: experiment objects (a move with a target and a rescore already
+  is one), saves/reach benchmarks (not visible without the API), new positioning copy.
+
 ## Also fixed along the way
 
 - Stored report bodies carried a provisional `report_id` (share sheet broke).

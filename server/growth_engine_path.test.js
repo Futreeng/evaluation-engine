@@ -328,6 +328,21 @@ t("free reports: openers get a button; posting moves paywall", () => {
   assert.deepEqual(r.growth_path.phases[1].opener.cta, { type: "write_post", label: "Get this post written", post_index: 0 });
 });
 
+t("targets: score band for profile, posts a week for consistency, typical post for content; confidence from sample size", () => {
+  const r = { scores: { dimensions: [{ label: "Profile Clarity", score: 25 }, { label: "Posting Consistency", score: 61, evidence: "16 posts over 53 days (2.1/week vs 3.5/week target)" }, { label: "Content Mix", score: 97 }, { label: "Engagement Quality", score: 100 }] }, calendar: { schedule: { per_week: 3 } }, post_insights: { avg_engagement: 188 } };
+  assert.deepEqual(q.targetFor({ title: "Add link", action: "Add a link to your bio", topic: "bio_link" }, r), { dimension: "Profile Clarity", metric: "score", from: 25, to: 60, unit: "" });
+  assert.deepEqual(q.targetFor({ title: "Batch", action: "Post Mon, Thu, Fri", topic: "schedule" }, r), { dimension: "Posting Consistency", metric: "posts a week", from: 2.1, to: 3, unit: "/week" });
+  assert.deepEqual(q.targetFor({ title: "Re-cut", action: "Re-cut the reel", topic: "repurpose" }, r), { dimension: "Engagement Quality", metric: "likes + comments on a typical post", from: 188, to: 263, unit: "" });
+  assert.equal(q.targetFor({ title: "Category", action: "Set your category", topic: "other" }, r), null);
+  assert.equal(q.confidence(27, { high: 20, some: 12 }).level, "high"); assert.equal(q.confidence(3, { high: 6, some: 3 }).level, "some"); assert.equal(q.confidence(2, { high: 6, some: 3 }).label, "Needs more data");
+});
+t("rescore reports where a done move's target stands", () => {
+  const start = new Date("2026-09-21T12:00:00Z").setHours(0, 0, 0, 0);
+  const b = { tier: "growth_plan", plan_started_at: start, scores: { dimensions: [{ label: "Profile Clarity", score: 41 }] }, growth_path: { phases: [{ range: "1-30", label: "Profile", visible_action: "Add a link", opener: { topic: "bio_link", target: { dimension: "Profile Clarity", metric: "score", from: 25, to: 60 } }, moves: [] }] }, moves_done: { p1m1: 1 }, profile: { external_url: "https://x" }, posts: [] };
+  const v = P.verify(b, { external_url: null }, { now: start + 7 * DAY });
+  assert.equal(v.p1m1.ok, true); assert.equal(v.p1m1.target.now, 41); assert.equal(v.p1m1.target.hit, false); assert(/25 → 41 \(target 60\)/.test(v.p1m1.note));
+});
+
 // ---- data layer (crash report follow-ups): median, unpinned, recent
 const scoring = require("./growth_engine_scoring");
 const { calculateMetrics } = require("./instagram_fetcher");

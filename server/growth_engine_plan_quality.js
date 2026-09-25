@@ -375,8 +375,40 @@ function ctaFor(move, r, idx, postNames, { free = false } = {}) {
 function stampFreeCtas(reportBody) {
   const idx = postIndex(reportBody);
   const postNames = [...idx.entries()].map(([date, p]) => { const n = postName(p) || ""; const q = /"([^"]+)"/.exec(n); return q ? { key: q[1], date } : null; }).filter(Boolean);
-  for (const ph of reportBody.growth_path?.phases || []) ph.opener = { ...(ph.opener || {}), cta: ctaFor({ title: ph.label, action: ph.visible_action, why: ph.detail, how: [], example: null }, reportBody, idx, postNames, { free: true }) };
+  for (const ph of reportBody.growth_path?.phases || []) { const om = { title: ph.label, action: ph.visible_action, why: ph.detail, how: [], example: null }; ph.opener = { ...(ph.opener || {}), cta: ctaFor(om, reportBody, idx, postNames, { free: true }), target: targetFor(om, reportBody) }; }
   return reportBody;
+}
+
+// ------------------------------------------------------------------ targets + confidence
+// "How we'll measure it": every move names the number it is trying to move and where to,
+// from the scorer's own figures. Deterministic — the rescore can say whether it happened.
+const DIM_LABEL = { profile: "Profile Clarity", consistency: "Posting Consistency", content_mix: "Content Mix", engagement: "Engagement Quality" };
+const nextBand = (score) => (score < 50 ? 60 : score < 70 ? 80 : Math.min(100, score + 10));
+function targetFor(move, r) {
+  const topic = move.topic || topicOf(move);
+  const dimKey = topicDef(topic).dim || (/bio|link|highlight|pin|profile/i.test(`${move.title} ${move.action}`) ? "profile" : null);
+  if (!dimKey) return null;
+  const dim = (r.scores?.dimensions || []).find((d) => d.label === DIM_LABEL[dimKey]);
+  if (!dim || !Number.isFinite(Number(dim.score))) return null;
+  const score = Number(dim.score);
+  if (dimKey === "consistency") {
+    const m = /([\d.]+)\/week vs ([\d.]+)\/week/.exec(dim.evidence || "");
+    const per = r.calendar?.schedule?.per_week;
+    if (m) return { dimension: dim.label, metric: "posts a week", from: Number(m[1]), to: per || Number(m[2]), unit: "/week" };
+  }
+  // Content and engagement moves are measured on what a typical post earns, not a band score.
+  if ((dimKey === "engagement" || dimKey === "content_mix") && Number.isFinite(Number(r.post_insights?.avg_engagement))) {
+    const med = Number(r.post_insights.avg_engagement);
+    const eng = (r.scores?.dimensions || []).find((d) => /engagement/i.test(d.label));
+    return { dimension: eng ? eng.label : dim.label, metric: "likes + comments on a typical post", from: med, to: Math.round(med * 1.4), unit: "" };
+  }
+  if (score >= 100) return null;
+  return { dimension: dim.label, metric: "score", from: score, to: nextBand(score), unit: "" };
+}
+// How much to trust a number, from its sample size. Shown next to the number.
+function confidence(n, { high = 12, some = 4 } = {}) {
+  n = Number(n) || 0;
+  return n >= high ? { level: "high", label: "High confidence", n } : n >= some ? { level: "some", label: "Some evidence", n } : { level: "low", label: "Needs more data", n };
 }
 
 // ------------------------------------------------------------------ finish
@@ -421,8 +453,8 @@ function finishPlan(reportBody, { platform = reportBody.business?.platform || "i
     const postNames = [...idx.entries()].map(([date, p]) => { const n = postName(p) || ""; const q = /"([^"]+)"/.exec(n); return q ? { key: q[1], date } : null; }).filter(Boolean);
     for (const ph of reportBody.growth_path?.phases || []) {
       if (ph.detail) { const c = checkWhy(ph.detail, allowed); ph.detail = c.text; stripped += c.stripped; }
-      if (ph.opener) ph.opener = { ...ph.opener, cta: ctaFor({ title: ph.label, action: ph.visible_action, why: ph.detail, how: ph.opener.how, example: ph.opener.example, topic: ph.opener.topic }, reportBody, idx, postNames) };
-      ph.moves = (ph.moves || []).map((m) => { const c = checkWhy(m.why, allowed); stripped += c.stripped; const o = { ...m, why: c.text }; return { ...o, cta: ctaFor(o, reportBody, idx, postNames) }; });
+      if (ph.opener) { const om = { title: ph.label, action: ph.visible_action, why: ph.detail, how: ph.opener.how, example: ph.opener.example, topic: ph.opener.topic }; ph.opener = { ...ph.opener, cta: ctaFor(om, reportBody, idx, postNames), target: targetFor(om, reportBody) }; }
+      ph.moves = (ph.moves || []).map((m) => { const c = checkWhy(m.why, allowed); stripped += c.stripped; const o = { ...m, why: c.text }; return { ...o, cta: ctaFor(o, reportBody, idx, postNames), target: targetFor(o, reportBody) }; });
     }
     reportBody.why_stripped = stripped; }
   if (Array.isArray(reportBody.next_posts)) {
@@ -446,6 +478,14 @@ function finishPlan(reportBody, { platform = reportBody.business?.platform || "i
 
 // Benchmark text from the scorer's own numbers, so the model's explanation
 // and the evidence line quote the same target.
+// Stamp confidence on the timing block (per window and overall) and on the niche marker.
+function stampConfidence(reportBody) {
+  const bt = reportBody.best_times;
+  if (bt) { bt.confidence = confidence(bt.sample, { high: 20, some: 12 }); for (const w of bt.windows || []) w.confidence = confidence(w.n, { high: 6, some: 3 }); }
+  const n = reportBody.scores?.category_sample_size;
+  if (reportBody.scores && n != null) reportBody.scores.category_confidence = confidence(n, { high: 100, some: 25 });
+  return reportBody;
+}
 function benchmarkText(t) {
   if (!t) return null;
   return {
@@ -456,4 +496,4 @@ function benchmarkText(t) {
   };
 }
 
-module.exports = { stampFreeCtas, numbersInReport, checkWhy, ctaFor, isPitch, violatesContext, openerTopics, titleDay, stripInvented, allowedLinks, applySchedule, TOPICS, topicOf, topicDef, dimOfLabel, datesIn, postName, postIndex, namePosts, sanitize, HOWTO, howFor, deriveSchedule, cadenceFor, validatePhases, dedupePhases, finishPlan, benchmarkText };
+module.exports = { targetFor, confidence, stampConfidence, stampFreeCtas, numbersInReport, checkWhy, ctaFor, isPitch, violatesContext, openerTopics, titleDay, stripInvented, allowedLinks, applySchedule, TOPICS, topicOf, topicDef, dimOfLabel, datesIn, postName, postIndex, namePosts, sanitize, HOWTO, howFor, deriveSchedule, cadenceFor, validatePhases, dedupePhases, finishPlan, benchmarkText };

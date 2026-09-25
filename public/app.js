@@ -873,21 +873,31 @@
                 ${raw((() => { const facts = []; const cons = (s.dimensions || []).find(d => /consisten/i.test(d.label)); const ppw = cons && /([\d.]+)\/week/.exec(cons.evidence || ''); if (ppw) facts.push([ppw[1], 'posts a week']); if (pi && pi.avg_engagement) facts.push([fmtN(pi.avg_engagement), pi.metric === 'median' ? 'likes + comments on a typical post' : 'likes + comments per post']); const w = report.best_times && report.best_times.confident && report.best_times.windows && report.best_times.windows[0]; if (w) facts.push([w.label, 'your best window']); return facts.length ? h`<div class="facts">${raw(facts.map(([v, l]) => h`<div class="fact"><b>${v}</b><span>${l}</span></div>`).join(''))}</div>` : ''; })())}
                 <div class="fine">${(s.dimensions || []).some(d => d.category_avg != null) ? `Marker = ${niche} average.` : ''} Each dimension is explained below.</div>
               </div>`) : ''}
-              ${s.category_percentile ? raw(h`<div class="pct">Scores higher than <b>${s.category_percentile.beats_pct}%</b> of ${niche} accounts we've scored (${fmtN(s.category_percentile.n)}).</div>`) : ''}
+              ${s.category_percentile && s.category_percentile.n >= 25 ? raw(h`<div class="pct">Scores higher than <b>${s.category_percentile.beats_pct}%</b> of ${niche} accounts we've scored ${raw(confPill(s.category_confidence))}</div>`) : ''}
               ${raw(historyChartHTML(hist))}
               ${(report.badges || []).length ? raw(h`<div class="badges">${raw(report.badges.map(b => h`<span class="badge" title="Earned ${fmtDate(b.earned_at)}">🏅 ${b.title}</span>`).join(''))}</div>`) : ''}
             </div>
-            ${thisWeek ? raw(h`<div class="weekcard">
-              <div class="eb"><span>This week</span><span>${thisWeek.days} · ${thisWeek.label}</span></div>
-              <div class="mv">MOVE 01</div>
-              <p class="a">${thisWeek.action}</p>
-              ${thisWeek.detail ? raw(h`<p class="w">${thisWeek.detail}</p>`) : ''}
-              ${paid && thisWeek.opener ? raw(moveDetailHTML(thisWeek.opener, true)) : ''}
-              ${paid || isSample ? raw(h`<a class="btn light block starthere" href="#/path/${report.report_id}">${Object.keys(done).length ? 'Continue your path →' : 'Start here →'}</a><div class="next">${Object.keys(done).length ? `${Object.keys(done).length} step${Object.keys(done).length === 1 ? '' : 's'} done. ` : ''}One step at a time — moves, post days and written posts in order.</div>`)
-              : raw(h`<button class="done ${isDone('p1m1') ? 'on' : ''}" data-move="p1m1" aria-pressed="${isDone('p1m1') ? 'true' : 'false'}"><span class="box" aria-hidden="true">${isDone('p1m1') ? '✓' : ''}</span>Mark this move done</button>
+            ${thisWeek ? raw((() => {
+              // The card beside the score answers "what's holding me back, and what do I do first".
+              const weakest = [...(s.dimensions || [])].sort((a, b) => a.score - b.score)[0] || null;
+              const opp = (weakest && phaseForDim(weakest.label, phases)) || thisWeek;
+              const oppKey = opp.key + 'm1';
+              const oppMove = opp.opener || null;
+              const why = weakest ? String(weakest.explanation || '').split(/(?<=[.!?])\s+/)[0] : '';
+              const tgt = (oppMove && oppMove.target) || null;
+              return h`<div class="weekcard">
+              <div class="eb"><span>Your biggest opportunity</span><span>${weakest ? `${weakest.label} · ${clamp(weakest.score, 0, 100)}` : opp.days}</span></div>
+              ${weakest && why ? raw(h`<p class="w top">${why}</p>`) : ''}
+              <div class="mv">YOUR NEXT MOVE · ${opp.days}</div>
+              <p class="a">${opp.action}</p>
+              ${opp.detail ? raw(h`<p class="w">${opp.detail}</p>`) : ''}
+              ${paid && oppMove ? raw(moveDetailHTML(oppMove, true)) : raw(targetLine(tgt) ? h`<div class="mvdetail dark">${raw(targetLine(tgt))}</div>` : '')}
+              ${paid || isSample ? raw(h`<a class="btn light block starthere" href="#/path/${report.report_id}?open=${oppKey}">${isDone(oppKey) ? 'Continue your path →' : 'Start this move →'}</a><div class="next">${Object.keys(done).length ? `${Object.keys(done).length} step${Object.keys(done).length === 1 ? '' : 's'} done. ` : ''}One step at a time — moves, post days and written posts in order.</div>`)
+              : raw(h`<button class="done ${isDone(oppKey) ? 'on' : ''}" data-move="${oppKey}" aria-pressed="${isDone(oppKey) ? 'true' : 'false'}"><span class="box" aria-hidden="true">${isDone(oppKey) ? '✓' : ''}</span>Mark this move done</button>
               <a class="btn light block starthere" href="#/path/${report.report_id}">See your path →</a>`)}
-              ${nextPhase ? raw(h`<div class="next">Next: Day 31 — ${nextPhase.label}</div>`) : ''}
-            </div>`) : ''}
+              ${raw(ctaHTML(oppMove && oppMove.cta, { paid, moveKey: oppKey, dark: true }))}
+              ${nextPhase && opp === thisWeek ? raw(h`<div class="next">Next: Day 31 — ${nextPhase.label}</div>`) : ''}
+            </div>`; })()) : ''}
           </div>
 
         ${showGoalAsk ? raw(h`<div class="card goalcard ask" id="goalAsk"><div class="eb">ONE QUESTION</div><h2>What's the goal?</h2><p>The plan, your Monday move and the posts we write all lean toward it. You can change it later.</p>${raw(goalPickerHTML(null, null, followers, { first: true }))}</div>`) : ''}
@@ -912,7 +922,7 @@
                 return h`<div class="dimcard bd${hue}"><div class="top"><span class="n">${d.label}</span><span class="s hue${hue}">${sc} · ${g}${dd && dd.delta ? raw(h`<span class="dd g-${dd.delta > 0 ? 'strong' : 'weak'}">${dd.delta > 0 ? '+' : ''}${dd.delta}</span>`) : ''}</span></div>
                   <div class="bar in"><div class="fill bg${hue}" style="width:${sc}%"></div>${d.category_avg != null ? raw(h`<div class="mark" style="left:${clamp(d.category_avg, 0, 100)}%"></div>`) : ''}</div>
                   <p>${d.explanation || ''}</p>${raw(checklistHTML(d.evidence))}${raw(evidenceHTML(d.evidence_posts))}${(() => { const ph = phaseForDim(d.label, phases); return ph ? raw(h`<a class="todo" href="#" data-dim-fix="${ph.key}m1">What to do about this →</a>`) : ''; })()}</div>`; }).join(''))}
-              <div class="fine">${s.category_avg != null ? `The marker is your ${niche} average (${fmtN(s.category_sample_size)} accounts scored so far).` : pending ? `The marker is your niche average. Your ${niche} average appears once ${pending.min_n} accounts are scored — ${pending.n} so far.` : nicheKnown ? 'The marker is your niche average.' : `Scored against all creators — we don't have enough ${niche} accounts yet.`}</div>
+              <div class="fine">${s.category_avg != null ? raw(h`The marker is your ${niche} average. ${raw(confPill(s.category_confidence || { level: s.category_sample_size >= 100 ? 'high' : s.category_sample_size >= 25 ? 'some' : 'low', label: s.category_sample_size >= 100 ? 'High confidence' : s.category_sample_size >= 25 ? 'Some evidence' : 'Needs more data', n: s.category_sample_size }))}`) : pending ? `The marker is your niche average. Your ${niche} average appears once ${pending.min_n} accounts are scored — ${pending.n} so far.` : nicheKnown ? 'The marker is your niche average.' : `Scored against all creators — we don't have enough ${niche} accounts yet.`}</div>
             </div>
           </details>
 
@@ -928,9 +938,9 @@
           </details>`) : ''}
 
           ${report.best_times ? raw(h`<details class="card acc" open>
-            <summary>Best times to post${report.best_times.confident ? '' : raw(h`<span class="tag fair" style="margin-left:10px">STARTING POINT</span>`)}</summary>
+            <summary>Best times to post${report.best_times.confident ? raw(h` ${raw(confPill(report.best_times.confidence))}`) : raw(h`<span class="tag fair" style="margin-left:10px">STARTING POINT</span>`)}</summary>
             <div class="body">
-              <div class="windows">${raw((report.best_times.windows || []).map((w, i) => h`<div class="window bd${(i % 4) + 1}"><div class="d">${w.label}</div>${w.vs_avg ? raw(h`<div class="x">${w.vs_avg}× your usual</div>`) : raw('<div class="x muted">common window</div>')}<p>${w.explanation}</p></div>`).join(''))}</div>
+              <div class="windows">${raw((report.best_times.windows || []).map((w, i) => h`<div class="window bd${(i % 4) + 1}"><div class="d">${w.label}${raw(confPill(w.confidence))}</div>${w.vs_avg ? raw(h`<div class="x">${w.vs_avg}× your usual</div>`) : raw('<div class="x muted">common window</div>')}<p>${w.explanation}</p></div>`).join(''))}</div>
               ${(report.best_times.best_days || []).length ? raw(h`<div class="fine">Strongest days overall: ${report.best_times.best_days.map(d => `${d.day} (${d.vs_avg}× over ${d.n} posts)`).join(' · ')}.</div>`) : ''}
               <div class="fine">${report.best_times.note}</div>
             </div>
@@ -1177,12 +1187,15 @@
       }
     }));
   }
+  const targetLine = t => t ? h`<div class="target"><span class="tl">Target</span> ${t.dimension}${t.metric === 'score' ? '' : ' · ' + t.metric}: <b>${t.from}${t.unit || ''} → ${t.to}${t.unit || ''}</b></div>` : '';
+  const confPill = c => c ? h`<span class="conf ${c.level}" title="${c.n} in the sample">${c.label} · ${c.n}</span>` : '';
   function moveDetailHTML(d, dark) {
-    if (!d || (!(d.how || []).length && !d.example && !d.done_when)) return '';
+    if (!d || (!(d.how || []).length && !d.example && !d.done_when && !d.target)) return '';
     return h`<div class="mvdetail ${dark ? 'dark' : ''}">
       ${(d.how || []).length ? raw(h`<ol class="how">${raw(d.how.map(x => h`<li>${x}</li>`).join(''))}</ol>`) : ''}
       ${d.example ? raw(h`<div class="ex"><div class="exl">Starting point — make it yours</div><div class="ext">${d.example}</div></div>`) : ''}
       <div class="dw">${d.done_when ? raw(h`<span><b>Done when:</b> ${d.done_when}</span>`) : ''}${d.time ? raw(h`<span class="tm">${d.time}</span>`) : ''}</div>
+      ${raw(targetLine(d.target))}
     </div>`;
   }
   // "has: a, b; missing: c, d" (profile clarity's evidence line) → a checklist, so the
@@ -1753,7 +1766,7 @@
         <div class="fld"><div class="fl">Suggested caption <button class="copy" data-copy="caption">Copy</button></div><p class="txt">${post.caption}</p></div>
         ${post.script ? raw(h`<div class="fld"><div class="fl">${/reel|video/.test(post.format) ? 'Suggested script' : /carousel/.test(post.format) ? 'Suggested slides' : 'Suggested shot'} <button class="copy" data-copy="script">Copy</button></div><p class="txt script">${post.script}</p></div>`) : ''}
         ${post.why ? raw(h`<p class="w">Why this post: ${post.why}</p>`) : ''}<p class="fine">A suggestion in your voice, not a script to follow word for word. Change anything that doesn't sound like you.</p></div>`)
-      : raw(moveDetailHTML({ how: s.how, example: s.example, done_when: s.done_when, time: s.time }))}
+      : raw(moveDetailHTML({ how: s.how, example: s.example, done_when: s.done_when, time: s.time, target: s.target }))}
       ${s.kind === 'move' && s.topic === 'bio_link' && !(report.plan_context && report.plan_context.link) ? raw(h`<div class="asklink"><label for="askLink">Which link? Paste the page you want people to land on and we'll write it into this step.</label><div class="row"><input id="askLink" type="url" placeholder="https://…" autocomplete="url"><button class="btn dark sm" data-save-link>Use this link</button></div><div class="fine">No link yet? A free Linktree or a one-page media kit works. This is the one thing we can't write for you.</div></div>`) : ''}
       ${s.kind === 'slot' && !post ? raw(h`<div class="dw"><span><b>Done when:</b> ${s.done_when}</span><span class="tm">${s.time}</span></div>`) : ''}
       ${s.kind === 'move' && s.cta ? raw(h`<div class="pcta">${raw(ctaHTML(s.cta, { paid: !path.free, moveKey: s.key }))}</div>`) : ''}
