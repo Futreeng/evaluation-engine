@@ -1086,3 +1086,37 @@ button.prow:hover { background: var(--ground); transform: translateX(2px); }
 .conf.high { background: var(--green); color: var(--green-t); }
 .conf.some { background: var(--gold); color: var(--gold-t); }
 .conf.low { background: var(--warm); color: var(--weak); }
+
+/* Two-step landing form */
+.darkform .steps2 { display: flex; gap: 6px; }
+.darkform .steps2 span { width: 22px; height: 4px; border-radius: 2px; background: var(--dark-line); }
+.darkform .steps2 span.on { background: var(--on-dark); }
+.darkform .bizcheck { display: flex; align-items: flex-start; gap: 10px; font-size: 14px; color: var(--on-dark-muted); cursor: pointer; }
+.darkform .bizcheck input { width: 18px; height: 18px; min-height: 0; padding: 0; margin-top: 2px; flex: none; border-radius: 4px; background: var(--dark-inset); accent-color: var(--act); }
+.darkform .bizcheck .hint { display: inline; }
+.darkform .btn.ghost.light { color: var(--on-dark); border-color: var(--dark-line); background: transparent; }
+/* Empty states */
+.empty { padding: 28px 24px; text-align: left; display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.empty .eb { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+.empty h1, .empty h2 { font-family: var(--display); font-size: 24px; line-height: 1.15; }
+.empty p { color: var(--body); max-width: 52ch; }
+/* Progress */
+.progress { display: flex; flex-direction: column; gap: 14px; padding-block: 18px 40px; }
+.progress .ph h1 { font-family: var(--display); font-size: clamp(26px, 5vw, 36px); line-height: 1.05; margin-top: 6px; }
+.progress .ph .eb { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+.progress .card { padding: 22px; }
+.progress .bigrow { display: flex; align-items: center; gap: 18px; }
+.progress .bignum { font-family: var(--display); font-size: 72px; line-height: 1; font-weight: 800; letter-spacing: -.03em; }
+.progress .meta { display: flex; flex-direction: column; gap: 8px; }
+.progress .dims { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
+.progress .dims .dd { margin-top: -6px; }
+.progress .facts3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+.progress .fact { padding: 10px 12px; border-radius: 12px; background: var(--ground); display: flex; flex-direction: column; gap: 2px; }
+.progress .fact b { font-family: var(--display); font-size: 22px; line-height: 1.1; }
+.progress .fact span { font-size: 12px; color: var(--muted2); }
+.progress .targets { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+.progress .targets li { display: flex; gap: 8px; align-items: baseline; color: var(--body); }
+.progress .targets li span { font-weight: 700; color: var(--muted); }
+.progress .targets li.hit span { color: var(--strong); }
+.progress .acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+.progress .goalbar { margin-top: 14px; }
