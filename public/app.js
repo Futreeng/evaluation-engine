@@ -192,11 +192,9 @@
       <div class="wrap"><div class="topbar">
         <a class="brand" href="#/">Scalecraft</a>
         <nav class="nav">
-          <a href="#/pricing" class="${kind === 'pricing' ? 'strong' : ''}">Pricing</a>
-          <a href="#/business">For businesses</a>
           ${token()
-            ? raw(h`${lget('sc_path_home', null) ? raw(h`<a href="#/path/${lget('sc_path_home', '')}" class="${kind === 'path' ? 'strong' : ''}">Your path</a>`) : ''}<a href="#/reports" class="${kind === 'reports' ? 'strong' : ''}">Reports</a>${lget('sc_admin', false) ? raw(h`<a href="#/admin" class="${kind === 'admin' ? 'strong' : ''}">Admin</a>`) : ''}<a href="#" data-action="signout">Sign out</a>`)
-            : raw(h`<a href="#/signin" class="strong">Sign in</a>`)}
+            ? raw(h`${lget('sc_path_home', null) ? raw(h`<a href="#/path/${lget('sc_path_home', '')}" class="${kind === 'path' ? 'strong' : ''}">Path</a>`) : ''}<a href="#/reports" class="${kind === 'reports' ? 'strong' : ''}">Reports</a><a href="#/progress" class="${kind === 'progress' ? 'strong' : ''}">Progress</a>${lget('sc_admin', false) ? raw(h`<a href="#/admin" class="${kind === 'admin' ? 'strong' : ''}">Admin</a>`) : ''}<a href="#" data-action="signout">Sign out</a>`)
+            : raw(h`${SHIPPED ? raw(h`<a href="#/report/sample" class="${kind === 'sample' ? 'strong' : ''}">Example</a>`) : ''}<a href="#/how" class="${kind === 'how' ? 'strong' : ''}">How it works</a><a href="#/pricing" class="${kind === 'pricing' ? 'strong' : ''}">Pricing</a><a href="#/signin" class="strong">Sign in</a>`)}
         </nav>
       </div></div>`;
   }
@@ -264,28 +262,32 @@
             <p class="sub">Growth is a system, not luck. Scalecraft scores your account out of 100 from what you actually post, shows exactly where the points went, and writes the next 90 days — move by move, week by week.</p>
             <form class="darkform" id="evalForm" novalidate>
               <div class="ql formlead">Score your account. See exactly why. Get the plan.</div>
+              <div class="steps2" aria-hidden="true"><span class="on"></span><span></span></div>
+              <div data-step="1">
               <div class="row">
                 <div class="field"><label class="flabel" for="evHandle">Your handle</label><div class="handle"><span>@</span><input id="evHandle" type="text" name="handle" placeholder="yourhandle" autocomplete="off" autocapitalize="none" spellcheck="false" value="${CFG.useMock && !last.handle ? 'humansofny' : (last.handle || '')}" aria-label="Your handle"></div></div>
-                <div class="field selwrap"><label class="flabel" for="evNiche">Your niche</label><select id="evNiche" name="category" aria-label="Niche">${raw(NICHES.map(([k, n]) => h`<option value="${k}" ${k === niche ? 'selected' : ''}>${n}</option>`).join(''))}</select></div>
               </div>
-              <div class="field" id="otherWrap" ${niche === 'other' ? '' : 'hidden'}><input type="text" name="other" placeholder="Your niche, in a word or two" value="${last.other || ''}" aria-label="Your niche"></div>
-              <div class="optq bizq"><div class="ql">Is this a business account?</div>
-                <div class="chips" role="radiogroup" aria-label="Business account"><button type="button" class="chip ${last.is_business ? '' : 'on'}" data-biz="no" role="radio" aria-checked="${!last.is_business}">No — I'm a creator</button><button type="button" class="chip ${last.is_business ? 'on' : ''}" data-biz="yes" role="radio" aria-checked="${!!last.is_business}">Yes</button></div>
-                <div class="hint" id="bizHint" ${last.is_business ? '' : 'hidden'}>Business plans are coming — you'll get the creator scoring today and a note when the business version is ready.</div></div>
               <div class="chips" role="radiogroup" aria-label="Platform">
                 ${raw(LIVE.map(([k, n]) => h`<button type="button" class="chip ${k === platform ? 'on' : ''}" data-platform="${k}" role="radio" aria-checked="${k === platform}">${n}</button>`).join(''))}
                 <button type="button" class="chip soon more" data-soon-more aria-expanded="false">More platforms · soon</button>
                 <span class="soonlist" hidden>${raw(SOON.map(([k, n]) => h`<button type="button" class="chip soon" data-soon="${k}">${n} · soon</button>`).join(''))}</span>
               </div>
               <div id="waitSlot"></div>
-              <div class="optq"><div class="ql">Your next 90 days <span>optional</span></div>
-                <div class="chips" role="radiogroup" aria-label="Your next 90 days">${raw([['usual', 'Business as usual'], ['fewer_shoots', 'Fewer new shoots'], ['launch', 'Something launching']].map(([k, n]) => h`<button type="button" class="chip ${last.horizon === k ? 'on' : ''}" data-horizon="${k}" role="radio" aria-checked="${last.horizon === k}">${n}</button>`).join(''))}</div>
-                <div class="hint">Shapes your first three moves. The Growth Plan asks four more so the whole plan fits.</div></div>
-              <div class="field"><label class="flabel" for="evEmail">Email — where we send the report</label><input id="evEmail" type="email" name="email" placeholder="you@email.com" autocomplete="email" value="${last.email || ''}" aria-label="Email"></div>
+              <div class="cta"><button class="btn" type="button" data-next-step>Find my next move →</button><div class="reassure">Free · Public posts only · No card</div></div>
+              </div>
+              <div data-step="2" hidden>
+              <div class="row">
+                <div class="field selwrap"><label class="flabel" for="evNiche">Your niche</label><select id="evNiche" name="category" aria-label="Niche">${raw(NICHES.map(([k, n]) => h`<option value="${k}" ${k === niche ? 'selected' : ''}>${n}</option>`).join(''))}</select></div>
+                <div class="field"><label class="flabel" for="evEmail">Email — where the report goes</label><input id="evEmail" type="email" name="email" placeholder="you@email.com" autocomplete="email" value="${last.email || ''}" aria-label="Email"></div>
+              </div>
+              <div class="field" id="otherWrap" ${niche === 'other' ? '' : 'hidden'}><input type="text" name="other" placeholder="Your niche, in a word or two" value="${last.other || ''}" aria-label="Your niche"></div>
+              <label class="bizcheck"><input type="checkbox" id="evBiz" ${last.is_business ? 'checked' : ''}> This is a business account <span class="hint" id="bizHint" ${last.is_business ? '' : 'hidden'}>— you get the creator scoring today and a note when the business version is ready</span></label>
               <div class="form-error" id="formError" hidden></div>
               <div class="cta">
                 <button class="btn" type="submit">Score my account — free</button>
-                <div class="reassure">About a minute · Public posts only · No card</div>
+                <button class="btn ghost light sm" type="button" data-prev-step>Back</button>
+                <div class="reassure">A few minutes · We email you when it's ready</div>
+              </div>
               </div>
             </form>
           </div>
@@ -321,15 +323,12 @@
     let chosenPlatform = platform;
     let chosenHorizon = last.horizon || null;
     let chosenBiz = !!last.is_business;
-    form.querySelectorAll('[data-biz]').forEach(b => b.addEventListener('click', () => {
-      chosenBiz = b.dataset.biz === 'yes';
-      form.querySelectorAll('[data-biz]').forEach(x => { const on = (x.dataset.biz === 'yes') === chosenBiz; x.classList.toggle('on', on); x.setAttribute('aria-checked', on); });
-      const hint = form.querySelector('#bizHint'); if (hint) hint.hidden = !chosenBiz;
-    }));
-    form.querySelectorAll('[data-horizon]').forEach(b => b.addEventListener('click', () => {
-      chosenHorizon = chosenHorizon === b.dataset.horizon ? null : b.dataset.horizon; // tap again to clear
-      form.querySelectorAll('[data-horizon]').forEach(x => { const on = x.dataset.horizon === chosenHorizon; x.classList.toggle('on', on); x.setAttribute('aria-checked', on); });
-    }));
+    form.querySelector('#evBiz')?.addEventListener('change', e => { chosenBiz = e.target.checked; const hint = form.querySelector('#bizHint'); if (hint) hint.hidden = !chosenBiz; });
+    // Two steps: handle + platform first, then niche + email. The handle is the only thing we can't infer.
+    const stepTo = n => { form.querySelectorAll('[data-step]').forEach(el => { el.hidden = el.dataset.step !== String(n); }); form.querySelectorAll('.steps2 span').forEach((d, i) => d.classList.toggle('on', i < n)); if (n === 2) form.querySelector('#evNiche')?.focus(); else form.querySelector('#evHandle')?.focus(); };
+    form.querySelector('[data-next-step]')?.addEventListener('click', () => { if (!form.handle.value.trim()) { form.handle.focus(); toast('Add your handle first.'); return; } stepTo(2); track('form_step2', { platform: chosenPlatform }); });
+    form.querySelector('[data-prev-step]')?.addEventListener('click', () => stepTo(1));
+    form.handle.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); form.querySelector('[data-next-step]')?.click(); } });
     form.querySelectorAll('[data-platform]').forEach(b => b.addEventListener('click', () => {
       chosenPlatform = b.dataset.platform;
       form.querySelectorAll('[data-platform]').forEach(x => { x.classList.toggle('on', x === b); x.setAttribute('aria-checked', x === b); });
@@ -852,7 +851,7 @@
         ${isSample ? raw(h`<div class="samplebar"><b>Sample report.</b> A real Growth Plan for a real account, scored ${fmtDate(report.created_at)}. Yours is written from your own posts. <a href="#/" data-scroll="evalForm">Score my account →</a></div>`) : ''}
         <div class="rhead">
           <div class="l"><h1 class="h">@${biz.handle || ''}</h1><span class="ctx">${platName(biz.platform)} · ${niche} · ${fmtDate(report.created_at)}</span>${paid ? raw(h`<span class="tag dark">${once ? '60-DAY PLAN' : 'GROWTH PLAN'}</span>`) : ''}</div>
-          <div class="r">${isSample ? '' : raw(h`<button class="btn ghost sm" data-action="email-report">Email me this report</button>`)}${isSample || !CFG.roast ? '' : raw(h`<button class="btn sm roastbtn" data-action="roast">${report.roast ? 'See my roast' : 'Roast me'} 🔥</button>`)}<button class="btn dark sm" data-action="share">${isSample ? 'Share this sample' : 'Share my score'}</button></div>
+          <div class="r">${isSample ? '' : raw(h`<button class="btn ghost sm" data-action="email-report">Email me this report</button>`)}${isSample || !CFG.roast ? '' : raw(h`<button class="btn sm roastbtn" data-action="roast">${report.roast ? 'See my roast' : 'Roast me'} 🔥</button>`)}<button class="btn ghost sm" data-action="share">${isSample ? 'Share this sample' : 'Share my score'}</button></div>
         </div>
         ${paid ? raw(h`<div class="ctxrow">${ctx ? raw(contextChips(ctx) + (ctx.notes ? h`<span class="chip note">“${ctx.notes}”</span>` : '')) : raw(h`<span class="chip empty">Written without your answers</span>`)}${isSample ? '' : once ? '' : raw(h`<a class="edit" href="#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=edit">${ctx ? 'Plans changed? Update' : 'Tell us about your next 90 days'} →</a>`)}</div>`)
         : raw(h`<div class="ctxrow free">${ctx && ctx.horizon ? raw(h`<span class="chip">${ctxLabel('horizon', ctx.horizon)}</span><span class="ex">Your three first moves were written around this. The Growth Plan asks four more — time, goal, how you make content — so every move and calendar slot fits.</span>`) : raw(h`<span class="chip empty">Written as business as usual</span><span class="ex">The Growth Plan asks four short questions — your next 90 days, time, goal, how you make content — so every move and calendar slot fits your life.</span>`)}</div>`)}
@@ -1441,7 +1440,7 @@
       const downg = subn.status === 'downgrade_pending';
       return h`<div class="card plancard ${pending ? 'pending' : ''}"><div class="t"><div class="n">Your plan${subn.founder ? raw(h` <span class="tag act founder">FOUNDER</span>`) : ''}</div><h2>${subn.tier_name || 'Free Snapshot'}${free ? '' : raw(h` <span class="pr">· $${shown}${subn.billing_cycle === 'annual' ? '/yr' : '/mo'}${subn.founder ? ' locked' : ''}</span>`)}</h2>${downg ? raw(h`<p class="fine">Moving to ${subn.pending_tier === 'maintenance' ? 'Maintenance' : subn.pending_tier === 'growth_plan' ? 'Growth' : subn.pending_tier} on ${fmtDate(subn.pending_tier_at)} — everything you have stays until then, and Pro data is kept if you come back.</p>`) : ''}
         <p>${free ? 'One free Snapshot per handle. The Growth Plan writes the whole 90 days and re-scores you every week.' : paused ? `Paused until ${fmtDate(subn.paused_until)}. Nothing is charged, nothing runs, and your history and streak are kept exactly as they are. Resume any time.` : maint ? 'Weekly rescore and score history only. Switch back whenever you want the plan, Monday moves and post writing again.' : pending ? `Cancelled. You keep everything until ${fmtDate(subn.cancel_at)}, then the weekly refresh stops. Your reports stay.` : subn.billing_period_end ? `Renews ${fmtDate(subn.billing_period_end)}. Cancel any time — you keep the plan to the end of the period and every report after.` : 'Cancel any time — you keep the plan to the end of the period and every report after.'}</p></div>
-        <div class="acts">${free ? raw(h`<a class="btn" href="#/pricing">See the plan</a>`) : paused ? raw(h`<button type="button" class="btn green" data-action="unpause-plan">Resume now</button>`) : pending ? raw(h`<button type="button" class="btn green" data-action="resume-plan">Resume the plan</button>`) : downg ? raw(h`<button type="button" class="btn green" data-action="keep-plan">Keep ${subn.tier_name || 'my plan'}</button><button type="button" class="btn ghost" data-action="cancel-plan">Cancel plan</button>`) : maint ? raw(h`<button type="button" class="btn" data-action="switch-growth">Back to the Growth Plan</button><button type="button" class="btn ghost" data-action="cancel-plan">Cancel</button>`) : raw(h`<button type="button" class="btn ghost" data-action="cancel-plan">Cancel plan</button>`)}</div>
+        <div class="acts">${free ? raw(h`<a class="btn ghost" href="#/pricing">See the plan</a>`) : paused ? raw(h`<button type="button" class="btn green" data-action="unpause-plan">Resume now</button>`) : pending ? raw(h`<button type="button" class="btn green" data-action="resume-plan">Resume the plan</button>`) : downg ? raw(h`<button type="button" class="btn green" data-action="keep-plan">Keep ${subn.tier_name || 'my plan'}</button><button type="button" class="btn ghost" data-action="cancel-plan">Cancel plan</button>`) : maint ? raw(h`<button type="button" class="btn" data-action="switch-growth">Back to the Growth Plan</button><button type="button" class="btn ghost" data-action="cancel-plan">Cancel</button>`) : raw(h`<button type="button" class="btn ghost" data-action="cancel-plan">Cancel plan</button>`)}</div>
         ${raw(emailPrefsHTML(subn.email_prefs))}</div>`;
     };
     const reports = (list.reports || []).map(r => ({ id: r.reportId || r.report_id, tier: r.tier, at: r.generatedAt || r.generated_at, handle: r.business?.handle, platform: r.business?.platform, category: r.business?.category, overall: r.reportBody?.scores?.overall ?? null, known: r.reportBody?.scores?.niche_known !== false })).sort((a, b) => b.at - a.at);
@@ -1467,7 +1466,7 @@
           <div class="runs">${raw(rs.map((r, i) => { const prev = rs[i + 1]; const d = prev && r.overall != null && prev.overall != null ? r.overall - prev.overall : null;
             return h`<a class="run" href="#/report/${r.id}"><span>${fmtDate(r.at)}</span><span class="t">${r.tier === 'social_snapshot' ? 'Free Snapshot' : 'Growth Plan'}</span><span class="n">${r.overall ?? '—'} · ${!prev ? 'first run' : d === 0 ? 'unchanged' : (d > 0 ? '+' : '') + d}</span><span class="o">Open</span></a>`; }).join(''))}</div>
         </details>`; }).join(''))
-      : raw('<div class="center-msg"><h2>No reports yet.</h2>Run an evaluation while signed in and it will show up here.</div>')}
+      : raw(h`<div class="empty card"><div class="eb">NOTHING HERE YET</div><h2>Your first evaluation creates your path.</h2><p>Score an account while signed in and the report, the plan and your progress all land here.</p><a class="btn" href="#/" data-scroll="evalForm">Score my account →</a></div>`)}
       ${unknownNiches.length ? raw(h`<div class="fine">Scored against all creators — we don't have enough ${unknownNiches.join(' / ')} accounts yet.</div>`) : ''}
       ${refs && refs.ref_code ? raw(h`<div class="card refcard"><div class="n">Your referrals</div>
         <div class="refrow"><div class="stat"><div class="n">${refs.signed_up}</div><div class="l">signed up</div></div><div class="stat"><div class="n">${refs.paid}</div><div class="l">started a plan</div></div>
@@ -1887,6 +1886,34 @@
     if (!isSample && !sget('sc_path_viewed_' + report.report_id, false)) { sset('sc_path_viewed_' + report.report_id, true); track('path_viewed', { paid }, report.report_id); }
   }
 
+  // Progress: "Am I improving?" — the history, the streak, the moves and their targets, in one place.
+  async function viewProgress() {
+    renderHeader('progress');
+    if (!token()) { sset('sc_next', '#/progress'); go('#/signin'); return; }
+    $view.innerHTML = h`<div class="center-msg">Loading…</div>`;
+    let id = lget('sc_path_home', null);
+    if (!id) { try { const l = await api('/account/reports'); const paid = (l.reports || []).find(r => r.tier && r.tier !== 'social_snapshot'); id = paid ? (paid.reportId || paid.report_id) : null; } catch (e) { if (e.status === 401) return; } }
+    const empty = (title, line) => { $view.innerHTML = h`<div class="wrap narrow"><div class="empty card"><div class="eb">NOTHING HERE YET</div><h1>${title}</h1><p>${line}</p><a class="btn" href="#/" data-scroll="evalForm">Score my account →</a></div></div>${raw(footer())}`; };
+    if (!id) return empty('Your progress starts with a plan.', 'The first Growth Plan creates your path; every weekly rescore after that lands here.');
+    let r = sget('sc_report_' + id, null);
+    if (!r) { try { r = normalizeReport(await api('/reports/' + encodeURIComponent(id)), id); sset('sc_report_' + id, r); } catch (e) { if (e.status === 401) return; return empty('That report is gone.', 'Run a fresh evaluation and your progress picks up from there.'); } }
+    const hist = r.history || null; const done = r.moves_done || {}; const skipped = r.moves_skipped || {}; const ver = r.moves_verified || {};
+    const verified = Object.values(ver).filter(v => v && v.ok).length;
+    const targets = Object.entries(ver).filter(([, v]) => v && v.target);
+    const dims = (r.scores?.dimensions || []).map(d => ({ label: d.label, score: d.score, delta: hist?.delta_dimensions?.find(x => x.label === d.label)?.delta ?? null }));
+    const streak = r.streak && r.streak.visible ? r.streak : null;
+    const goalNow = knownGoal(r); const gp = goalNow ? goalProgress(goalNow, r.goal_target || sget('sc_goal', null)?.goal_target || null, r) : null;
+    $view.innerHTML = h`<div class="wrap narrow"><div class="progress">
+      <div class="ph"><div class="eb">@${r.business?.handle || ''} · ${hist ? `run ${hist.runs}` : 'first run'}</div><h1>${hist && hist.delta_overall != null ? (hist.delta_overall > 0 ? `Up ${hist.delta_overall} point${hist.delta_overall === 1 ? '' : 's'}.` : hist.delta_overall < 0 ? `Down ${-hist.delta_overall} point${hist.delta_overall === -1 ? '' : 's'}.` : 'Holding steady.') : 'Your trend starts at the first rescore.'}</h1></div>
+      <div class="card"><div class="bigrow"><span class="bignum">${r.scores?.overall ?? '—'}</span><div class="meta"><span class="fine">${hist ? `was ${hist.previous.overall} on ${fmtShort(hist.previous.generated_at)}` : 'scored ' + fmtDate(r.generated_at)}</span>${streak ? raw(h`<span class="streak ${streak.weeks ? 'on' : ''}">${streak.weeks ? `🔥 ${streak.weeks}-week streak` : 'Streak starts this week'}</span>`) : ''}</div></div>
+        ${raw(historyChartHTML(hist))}${!hist || !(hist.series || []).length ? raw('<div class="fine">The chart appears after your first weekly rescore.</div>') : ''}
+        <div class="dims">${raw(dims.map(d => dimRow({ label: d.label, score: d.score }, null) + (d.delta != null ? h`<div class="fine dd">${d.delta > 0 ? '+' : ''}${d.delta} since last time</div>` : '')).join(''))}</div></div>
+      <div class="card"><div class="eb">MOVES</div><div class="facts3"><div class="fact"><b>${Object.keys(done).length}</b><span>done</span></div><div class="fact"><b>${verified}</b><span>seen on your profile</span></div><div class="fact"><b>${Object.keys(skipped).length}</b><span>skipped</span></div></div>
+        ${targets.length ? raw(h`<div class="eb" style="margin-top:14px">TARGETS</div><ul class="targets">${raw(targets.map(([k, v]) => h`<li class="${v.target.hit ? 'hit' : ''}"><span aria-hidden="true">${v.target.hit ? '✓' : '→'}</span>${v.note}</li>`).join(''))}</ul>`) : raw('<p class="fine">Targets are checked at your next weekly rescore.</p>')}
+        ${gp ? raw(h`<div class="goalbar"><div class="t"><span class="l">${goalLabel(goalNow)}</span><span class="v">${gp.label}</span></div><div class="bar"><div class="fill" style="width:${gp.pct}%"></div></div><div class="fine">${gp.sub}</div></div>`) : ''}
+        <div class="acts"><a class="btn" href="#/path/${id}">Open your path →</a><a class="btn ghost" href="#/report/${id}">Latest report</a></div></div>
+    </div></div>${raw(footer())}`;
+  }
   function viewHow() {
     renderHeader('how');
     const minN = (LEVELS && LEVELS.min_n) || 10;
@@ -1975,6 +2002,7 @@
     if (parts[0] === 'evaluating' && parts[1]) return viewEvaluating(decodeURIComponent(parts[1]));
     if (parts[0] === 'report' && parts[1]) return viewReport(decodeURIComponent(parts[1]));
     if (parts[0] === 'path' && parts[1]) return viewPath(decodeURIComponent(parts[1]));
+    if (parts[0] === 'progress') return viewProgress();
     if (parts[0] === 'pricing') return viewPricing();
     if (parts[0] === 'plan-setup') return viewPlanSetup();
     if (parts[0] === 'business') return viewBusiness();

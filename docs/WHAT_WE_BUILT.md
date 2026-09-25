@@ -293,6 +293,19 @@ answers on when to post, Instagram steps that don't exist. Two parts:
 - Not taken from the spec: experiment objects (a move with a target and a rescore already
   is one), saves/reach benchmarks (not visible without the API), new positioning copy.
 
+### Funnel and navigation (25 Sept, items 4–7 from the UX spec)
+- **Landing form in two steps.** Handle and platform, then "Find my next move →" reveals niche
+  and email. The business flag is a checkbox; the horizon chips are gone (the intake asks).
+  Event `form_step2`.
+- **Navigation.** Public: Example · How it works · Pricing · Sign in. Signed in: Path ·
+  Reports · Progress · Sign out.
+- **Progress screen** (`#/progress`): score with delta, history chart, per-dimension change,
+  streak, moves done / seen on the profile / skipped, target outcomes from the last rescore,
+  goal progress. Empty state when there's no plan yet.
+- **Empty states** with one next action (reports page, progress).
+- **One primary button per screen**: Share and Roast are secondary on the report, "See the
+  plan" is secondary on the reports page, the opportunity card's Start this move is primary.
+
 ## Also fixed along the way
 
 - Stored report bodies carried a provisional `report_id` (share sheet broke).
