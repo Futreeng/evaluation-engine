@@ -1151,17 +1151,22 @@ button.prow:hover { background: var(--ground); transform: translateX(2px); }
 .feedgrid { display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; margin-top: 14px; }
 .feedgrid .cell { position: relative; aspect-ratio: 1; border-radius: 6px; overflow: hidden; background: var(--track); display: flex; align-items: center; justify-content: center; color: var(--muted); text-decoration: none; isolation: isolate; }
 .feedgrid .cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.feedgrid .cell::after { content: ''; position: absolute; inset: 0; background: var(--their, var(--act)); opacity: 0; mix-blend-mode: multiply; transition: opacity .3s ease; }
-.feedgrid .cell.hot::after { opacity: .55; } .feedgrid .cell.warm::after { opacity: .28; } .feedgrid .cell.cold::after { background: var(--ink); opacity: .45; mix-blend-mode: normal; }
-.feedgrid .cell.cold img { filter: saturate(.3); }
+/* performance as a frame, never a wash over their photo */
+.feedgrid .cell { border: 2px solid transparent; border-radius: 8px; }
+.feedgrid .cell.hot { border-color: var(--their-deep, var(--act)); box-shadow: 0 0 0 1px var(--their-deep, var(--act)); }
+.feedgrid .cell.warm { border-color: var(--their, var(--act)); border-style: dashed; }
+.feedgrid .cell.cold { border-color: var(--ink); opacity: .78; }
 .feedgrid .cell .ph { font-size: 18px; }
-.feedgrid .cell .x { position: absolute; left: 4px; bottom: 3px; z-index: 1; font-size: 11px; font-weight: 800; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.6); }
+.feedgrid .cell .x { position: absolute; left: 3px; bottom: 3px; z-index: 1; display: inline-flex; align-items: center; gap: 2px; font-size: 10px; font-weight: 800; padding: 1px 5px; border-radius: 6px; background: rgba(255,246,233,.94); color: var(--ink); }
+.feedgrid .cell .x.hot { color: var(--their-deep, var(--act)); } .feedgrid .cell .x.cold { color: var(--ink); }
+.feedgrid .cell .x i { font-style: normal; font-size: 8px; }
 .feedgrid .cell .mk { position: absolute; right: 3px; top: 3px; z-index: 1; font-size: 9px; font-weight: 800; letter-spacing: .06em; padding: 2px 5px; border-radius: 6px; background: var(--ink); color: var(--on-dark); }
 .feedgrid .cell .mk.pinned { background: rgba(255,246,233,.9); color: var(--ink); }
 .feedgrid .cell:hover { outline: 2px solid var(--ink); outline-offset: 1px; }
 .feedcard .fl { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 10px; font-size: 12px; color: var(--muted2); }
 .feedcard .sw { width: 12px; height: 12px; border-radius: 3px; background: var(--track); display: inline-block; }
-.feedcard .sw.hot { background: var(--their-deep, var(--act)); } .feedcard .sw.warm { background: var(--their, var(--act)); opacity: .6; } .feedcard .sw.cold { background: var(--ink); opacity: .5; }
+.feedcard .sw { background: transparent; border: 2px solid var(--line3); }
+.feedcard .sw.hot { border-color: var(--their-deep, var(--act)); box-shadow: 0 0 0 1px var(--their-deep, var(--act)); } .feedcard .sw.warm { border-color: var(--their, var(--act)); border-style: dashed; } .feedcard .sw.cold { border-color: var(--ink); opacity: .78; } .feedcard .sw.even { border-color: var(--line3); }
 @media (max-width: 720px) { .feedgrid { grid-template-columns: repeat(6, 1fr); gap: 3px; } .feedgrid .cell .x { font-size: 10px; } }
 @media (max-width: 420px) { .feedgrid { grid-template-columns: repeat(5, 1fr); } }
 /* the trail */

@@ -1264,16 +1264,16 @@
       const title = `${fmtShort(p.posted_at)} · ${String(p.type || 'post')} · ${hidden ? 'likes hidden' : fmtN(p.likes) + ' likes'} · ${fmtN(p.comments)} comments${p.views ? ' · ' + fmtN(p.views) + ' views' : ''} · ${r.toFixed(1)}× your typical post`;
       const inner = p.thumbnail_url ? h`<img src="${p.thumbnail_url}" alt="" loading="lazy">` : h`<span class="ph">${fmt}</span>`;
       const badge = marks[p.id] ? h`<span class="mk">${marks[p.id]}</span>` : (p.is_pinned ? h`<span class="mk pinned">PINNED</span>` : '');
-      const x = heat === 'hot' || heat === 'cold' ? h`<span class="x">${r >= 10 ? Math.round(r) : r.toFixed(1)}×</span>` : '';
+      const x = heat === 'hot' || heat === 'cold' ? h`<span class="x ${heat}"><i aria-hidden="true">${heat === 'hot' ? '▲' : '▼'}</i>${r >= 10 ? Math.round(r) : r.toFixed(1)}×</span>` : '';
       const tag = p.permalink ? 'a' : 'span';
       return `<${tag} class="cell ${heat}" ${p.permalink ? `href="${esc(p.permalink)}" target="_blank" rel="noopener"` : ''} title="${esc(title)}" aria-label="${esc(title)}">${inner}${x}${badge}</${tag}>`;
     }).join('');
     const top = posts.reduce((a, p) => (eng(p) > eng(a) ? p : a), posts[0]); const topR = med > 0 ? eng(top) / med : 0;
     const marked = Object.keys(marks).length;
     return h`<div class="card feedcard">
-      <div class="fh"><h2>Your feed, annotated</h2><span class="fine">${posts.length} posts · tinted by likes + comments against your typical post (${fmtN(med)})</span></div>
+      <div class="fh"><h2>Your feed, annotated</h2><span class="fine">${posts.length} posts · framed by likes + comments against your typical post (${fmtN(med)})</span></div>
       <div class="feedgrid">${raw(cells)}</div>
-      <div class="fl"><span class="sw hot"></span> 2× or more <span class="sw warm"></span> above typical <span class="sw even"></span> typical <span class="sw cold"></span> under half${marked ? raw(h` · <b>${marked}</b> post${marked === 1 ? '' : 's'} the plan uses, marked`) : ''}</div>
+      <div class="fl"><span class="sw hot"></span> ▲ 2× or more <span class="sw warm"></span> above typical <span class="sw even"></span> typical <span class="sw cold"></span> ▼ under half${marked ? raw(h` · <b>${marked}</b> post${marked === 1 ? '' : 's'} the plan uses, marked`) : ''}</div>
       ${topR >= 3 ? raw(h`<p class="marg">↑ One post did ${topR >= 10 ? Math.round(topR) : topR.toFixed(1)}× your typical. The plan re-cuts it, it doesn't chase it.</p>`) : ''}
     </div>`;
   }
