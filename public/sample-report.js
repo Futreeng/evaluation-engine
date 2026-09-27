@@ -717,7 +717,7 @@ window.SCALECRAFT_SAMPLE = {
        "On the story, tap Highlight → New → name it → Add.",
        "On your profile, press and hold the highlight → Edit highlight → set the cover."
       ],
-      "example": "PNW: Cape Flattery, Sep 17. Culture: Panama, Apr 2026.",
+      "example": "PNW: Cape Flattery, Sep 16. Culture: Panama, Apr 2026.",
       "done_when": "Five distinct highlight circles are visible on your profile header.",
       "time": "30 min, once",
       "topic": "highlight",
@@ -738,7 +738,7 @@ window.SCALECRAFT_SAMPLE = {
      {
       "n": 3,
       "title": "Pin Viral Proof",
-      "action": "Pin the Sep 17 Cape Flattery reel to the top of your profile as your primary proof of reach.",
+      "action": "Pin the Sep 16 Cape Flattery reel to the top of your profile as your primary proof of reach.",
       "why": "This reel has 44.9k views and 8,523 likes, representing the highest engagement rate (46.65x) in your recent archive for brands to see.",
       "how": [
        "Open the post from your profile grid.",
@@ -1197,10 +1197,10 @@ window.SCALECRAFT_SAMPLE = {
      {
       "n": 10,
       "title": "Cape Flattery Hook Re-cut",
-      "action": "Re-cut the Sep 17 reel to open on the cliff edge, not the walk up.",
-      "why": "The Sep 17 post hit 46.65x average engagement; the new hook targets the 13.46% engagement rate.",
+      "action": "Re-cut the Sep 16 reel to open on the cliff edge, not the walk up.",
+      "why": "The Sep 16 post hit 46.65x average engagement; the new hook targets the 13.46% engagement rate.",
       "how": [
-       "Open the Sep 17 'Cape Flattery' reel in Instagram.",
+       "Open the Sep 16 'Cape Flattery' reel in Instagram.",
        "Trim the first 3 seconds to start directly on the ocean view.",
        "Add trending audio that matches the 'wandering' vibe.",
        "Post as a new reel on the next Thursday 6pm slot."
@@ -1455,7 +1455,7 @@ window.SCALECRAFT_SAMPLE = {
    {
     "date": "2026-09-17",
     "format": "reel",
-    "weekday": "Thu",
+    "weekday": "Wed",
     "likes": 8523,
     "comments": 318,
     "views": 44914,
@@ -1468,7 +1468,7 @@ window.SCALECRAFT_SAMPLE = {
    {
     "date": "2021-05-25",
     "format": "carousel",
-    "weekday": "Tue",
+    "weekday": "Mon",
     "likes": 373,
     "comments": 72,
     "views": 0,
@@ -1481,7 +1481,7 @@ window.SCALECRAFT_SAMPLE = {
    {
     "date": "2026-09-12",
     "format": "reel",
-    "weekday": "Sat",
+    "weekday": "Fri",
     "likes": 363,
     "comments": 60,
     "views": 1830,
@@ -1496,7 +1496,7 @@ window.SCALECRAFT_SAMPLE = {
    {
     "date": "2026-08-04",
     "format": "reel",
-    "weekday": "Tue",
+    "weekday": "Mon",
     "likes": 0,
     "comments": 20,
     "views": 565,
@@ -1509,7 +1509,7 @@ window.SCALECRAFT_SAMPLE = {
    {
     "date": "2025-04-16",
     "format": "reel",
-    "weekday": "Wed",
+    "weekday": "Tue",
     "likes": 56,
     "comments": 12,
     "views": 382,
@@ -1522,7 +1522,7 @@ window.SCALECRAFT_SAMPLE = {
    {
     "date": "2025-06-18",
     "format": "reel",
-    "weekday": "Wed",
+    "weekday": "Tue",
     "likes": 83,
     "comments": 4,
     "views": 156,
@@ -2018,5 +2018,5 @@ window.SCALECRAFT_SAMPLE = {
  "created_at": 1790224030989,
  "sample": true,
  "why_stripped": 0,
- "sample_cleaned_at": 1790540002768
+ "sample_cleaned_at": 1790549899959
 };

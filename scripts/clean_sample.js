@@ -70,11 +70,25 @@ if (!r.post_insights?.metric) {
 // Best/worst posts: re-rank with the current rules — only for a sample produced by the old scorer
 // (a fresh report already ranks this way, and re-ranking would change numbers the plan quotes).
 if (!r.post_insights?.metric) {
-  const ranked = scoring.rankPosts((r.posts || []).map((p) => ({ ...p, timestamp: p.posted_at, media_type: String(p.type || "").toUpperCase(), is_reel: /reel/i.test(p.type || ""), like_count: p.likes, comments_count: p.comments, video_view_count: p.views })));
+  const ranked = scoring.rankPosts((r.posts || []).map((p) => ({ ...p, timestamp: p.posted_at, media_type: String(p.type || "").toUpperCase(), is_reel: /reel/i.test(p.type || ""), like_count: p.likes, comments_count: p.comments, video_view_count: p.views })), { tz: r.tz || "UTC" });
   if (ranked) r.post_insights = { ...ranked, note: r.post_insights?.note || null };
 }
 if (r.competitors?.you) r.competitors.you.overall = r.scores.overall;
 r.narrative = String(r.narrative || "").replace(/overall rating is \d+/, `overall rating is ${r.scores.overall}`).replace(/Posting Consistency \(score \d+\)/, `Posting Consistency (score ${r.scores.dimensions.find((d) => /consisten/i.test(d.label)).score})`);
+// The model saw UTC dates when this sample was written; the plan says "Sep 17" for a post that
+// went up on the evening of the 16th in New York. Rewrite bare "Mon D" mentions of posts whose
+// local day differs, and the weekday in post_insights, so every date on the page is local.
+{
+  const tz = r.tz || "UTC"; const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const shifts = [];
+  for (const p of r.posts || []) { const d = new Date(p.posted_at); const u = `${MON[d.getUTCMonth()]} ${d.getUTCDate()}`; const z = q.zoned(p.posted_at, tz); const l = `${MON[z.m - 1]} ${z.d}`; if (u !== l) shifts.push([u, l]); }
+  const fix = (t) => { let s = String(t || ""); for (const [u, l] of shifts) s = s.replace(new RegExp(`\\b${u}\\b(?!,? 20\\d\\d)`, "g"), l); return s; };
+  const walk = (o) => { if (Array.isArray(o)) return o.map(walk); if (o && typeof o === "object") { for (const k of Object.keys(o)) o[k] = walk(o[k]); return o; } return typeof o === "string" ? fix(o) : o; };
+  walk(r.growth_path); walk(r.next_posts); walk(r.calendar); r.narrative = fix(r.narrative);
+  for (const d of r.scores?.dimensions || []) d.explanation = fix(d.explanation);
+  if (r.post_insights) { for (const list of [r.post_insights.top, r.post_insights.bottom]) for (const p of list || []) { try { p.weekday = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short" }).format(new Date(p.date)); } catch { } } r.post_insights.note = fix(r.post_insights.note); }
+  console.log(`local-day rewrites: ${shifts.map(([u, l]) => `${u}→${l}`).join(", ") || "none"}`);
+}
 q.finishPlan(r);
 q.stampConfidence(r);
 r.growth_path.unlocked_steps = r.growth_path.phases.reduce((n, p) => n + 1 + p.moves.length, 0);

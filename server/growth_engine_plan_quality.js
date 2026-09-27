@@ -70,7 +70,14 @@ function datesIn(text) {
 
 // ------------------------------------------------------------------ post names
 // "the Cape Flattery reel (Sep 17)". Built from the caption's first real words.
-function postName(post) {
+// Calendar parts of an instant in a zone (the account's), falling back to UTC.
+function zoned(iso, tz) {
+  const d = new Date(iso); if (!Number.isFinite(+d)) return null;
+  try { const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: tz || "UTC", year: "numeric", month: "numeric", day: "numeric" }).formatToParts(d).map((x) => [x.type, x.value])); return { y: Number(p.year), m: Number(p.month), d: Number(p.day) }; }
+  catch { return { y: d.getUTCFullYear(), m: d.getUTCMonth() + 1, d: d.getUTCDate() }; }
+}
+const zonedKey = (iso, tz) => { const z = zoned(iso, tz); return z ? `${z.y}-${String(z.m).padStart(2, "0")}-${String(z.d).padStart(2, "0")}` : null; };
+function postName(post, tz = "UTC") {
   if (!post) return null;
   const raw = String(post.caption || post.caption_preview || "").replace(/[#@]\S+/g, " ").replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, " ");
   const lines = raw.split(/\n+/).map((l) => l.replace(/\s+/g, " ").trim()).filter((l) => /\p{L}/u.test(l));
@@ -92,14 +99,14 @@ function postName(post) {
     title = words.slice(0, 6).join(" ") + (words.length > 6 ? "…" : "");
   }
   const type = /reel|video/i.test(post.type || post.format || post.media_type || "") ? "reel" : /carousel|sidecar/i.test(post.type || post.format || post.media_type || "") ? "carousel" : "post";
-  const d = new Date(post.posted_at || post.date || post.timestamp);
-  const when = Number.isFinite(+d) ? `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}` : "";
+  const z = zoned(post.posted_at || post.date || post.timestamp, tz);
+  const when = z ? `${MONTHS[z.m - 1]} ${z.d}` : "";
   return title ? `the "${title}" ${type}${when ? ` (${when})` : ""}` : `the ${type}${when ? ` from ${when}` : ""}`;
 }
 // Index every post the report knows about by ISO date.
-function postIndex(reportBody) {
-  const idx = new Map();
-  const add = (p, key) => { const d = new Date(key); if (!Number.isFinite(+d)) return; const k = d.toISOString().slice(0, 10); if (!idx.has(k)) idx.set(k, p); };
+function postIndex(reportBody, tz = reportBody.tz || reportBody.best_times?.tz || "UTC") {
+  const idx = new Map(); idx.tz = tz;
+  const add = (p, key) => { const k = zonedKey(key, tz); if (k && !idx.has(k)) idx.set(k, p); };
   for (const p of reportBody.posts || []) add(p, p.posted_at || p.timestamp);
   for (const list of [reportBody.post_insights?.top, reportBody.post_insights?.bottom]) for (const p of list || []) add({ caption: p.caption, type: p.format, posted_at: p.date }, p.date);
   for (const d of reportBody.scores?.dimensions || []) for (const p of d.evidence_posts || []) add(p, p.posted_at);
@@ -109,8 +116,11 @@ function postIndex(reportBody) {
 function namePosts(text, idx) {
   let s = String(text || "");
   if (!s) return s;
-  s = s.replace(DATE_RE, (m, y, mo, d) => { const p = idx.get(`${y}-${mo}-${d}`); return p ? postName(p) : m; });
-  s = s.replace(MON_RE, (m, mon, d, y) => { if (!y) return m; const mi = MONTHS.findIndex((x) => x.toLowerCase() === mon.slice(0, 3).toLowerCase()); const p = idx.get(`${y}-${String(mi + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`); return p ? postName(p) : m; });
+  const tz = idx.tz || "UTC";
+  s = s.replace(DATE_RE, (m, y, mo, d) => { const p = idx.get(`${y}-${mo}-${d}`); return p ? postName(p, tz) : m; });
+  s = s.replace(MON_RE, (m, mon, d, y) => { if (!y) return m; const mi = MONTHS.findIndex((x) => x.toLowerCase() === mon.slice(0, 3).toLowerCase()); const p = idx.get(`${y}-${String(mi + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`); return p ? postName(p, tz) : m; });
+  // An already-named post keeps its title but its date follows the zone ("(Sep 17)" → "(Sep 16)").
+  for (const p of idx.values()) { const n = postName(p, tz); const q = /^the "([^"]+)" (reel|carousel|post) \(([^)]+)\)$/.exec(n || ""); if (!q) continue; const re = new RegExp(`the "${q[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}" ${q[2]} \\((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \\d{1,2}\\)`, "g"); s = s.replace(re, n); }
   // "post the "Cape Flattery" reel (Sep 17) reel" → drop the doubled noun; "reel the ..." → tidy.
   s = s.replace(/(\))\s+(reel|post|carousel)\b/gi, "$1").replace(/\b(reel|post|carousel|video)\s+the "/gi, 'the "');
   // "the "On top of the world" reel (Aug 13) ('On top of the world')" — the model's own parenthetical after our name.
@@ -191,7 +201,7 @@ function deriveSchedule(reportBody, { targetPerWeek = null } = {}) {
 // Problems are strings the retry prompt can quote back to the model.
 function validatePhases(phases, { labels = [], posts = null, context = null } = {}) {
   // Known posts by name ("Cape Flattery") so mentions count whether the model wrote a date or a name.
-  const postNames = posts ? [...posts.entries()].map(([date, p]) => { const n = postName(p) || ""; const q = /"([^"]+)"/.exec(n); return q ? { key: q[1], date } : null; }).filter(Boolean) : [];
+  const postNames = posts ? [...posts.entries()].map(([date, p]) => { const n = postName(p, posts.tz) || ""; const q = /"([^"]+)"/.exec(n); return q ? { key: q[1], date } : null; }).filter(Boolean) : [];
   const problems = [];
   const seenOnce = new Map(); // topic → "phase i move n"
   const postCites = new Map(); // date → [moves]
@@ -352,7 +362,7 @@ function checkWhy(text, allowed) {
 //   mark_done:   everything else (the Path and the report already have the checkbox)
 function ctaFor(move, r, idx, postNames, { free = false } = {}) {
   const blob = `${move.title || ""} ${move.action || ""} ${move.why || ""} ${(move.how || []).join(" ")} ${move.example || ""}`;
-  const byDate = new Map(); for (const p of r.posts || []) { const d = new Date(p.posted_at || p.timestamp); if (Number.isFinite(+d)) byDate.set(d.toISOString().slice(0, 10), p); }
+  const byDate = new Map(); for (const p of r.posts || []) { const k = zonedKey(p.posted_at || p.timestamp, idx.tz || "UTC"); if (k) byDate.set(k, p); }
   let hit = null;
   for (const nm of postNames) if (blob.includes(nm.key)) { hit = byDate.get(nm.date) || idx.get(nm.date); if (hit) break; }
   if (!hit) for (const d of datesIn(blob)) { hit = byDate.get(d); if (hit) break; }
@@ -375,7 +385,7 @@ function ctaFor(move, r, idx, postNames, { free = false } = {}) {
 // Free snapshot: only the phase openers exist; give each its button (paywall for posting moves).
 function stampFreeCtas(reportBody) {
   const idx = postIndex(reportBody);
-  const postNames = [...idx.entries()].map(([date, p]) => { const n = postName(p) || ""; const q = /"([^"]+)"/.exec(n); return q ? { key: q[1], date } : null; }).filter(Boolean);
+  const postNames = [...idx.entries()].map(([date, p]) => { const n = postName(p, idx.tz) || ""; const q = /"([^"]+)"/.exec(n); return q ? { key: q[1], date } : null; }).filter(Boolean);
   for (const ph of reportBody.growth_path?.phases || []) { const om = { title: ph.label, action: ph.visible_action, why: ph.detail, how: [], example: null }; ph.opener = { ...(ph.opener || {}), cta: ctaFor(om, reportBody, idx, postNames, { free: true }), target: targetFor(om, reportBody) }; }
   return reportBody;
 }
@@ -451,7 +461,7 @@ function finishPlan(reportBody, { platform = reportBody.business?.platform || "i
   for (const w of reportBody.calendar?.weeks || []) for (const s of w.slots || []) { s.angle = fix(s.angle); s.prompt = fix(s.prompt); }
   // Why-lines only quote the account's numbers; every move gets its button.
   { const allowed = numbersInReport(reportBody); let stripped = 0;
-    const postNames = [...idx.entries()].map(([date, p]) => { const n = postName(p) || ""; const q = /"([^"]+)"/.exec(n); return q ? { key: q[1], date } : null; }).filter(Boolean);
+    const postNames = [...idx.entries()].map(([date, p]) => { const n = postName(p, idx.tz) || ""; const q = /"([^"]+)"/.exec(n); return q ? { key: q[1], date } : null; }).filter(Boolean);
     for (const ph of reportBody.growth_path?.phases || []) {
       if (ph.detail) { const c = checkWhy(ph.detail, allowed); ph.detail = c.text; stripped += c.stripped; }
       if (ph.opener) { const om = { title: ph.label, action: ph.visible_action, why: ph.detail, how: ph.opener.how, example: ph.opener.example, topic: ph.opener.topic }; ph.opener = { ...ph.opener, cta: ctaFor(om, reportBody, idx, postNames), target: targetFor(om, reportBody) }; }
@@ -497,4 +507,4 @@ function benchmarkText(t) {
   };
 }
 
-module.exports = { targetFor, confidence, stampConfidence, stampFreeCtas, numbersInReport, checkWhy, ctaFor, isPitch, violatesContext, openerTopics, titleDay, stripInvented, allowedLinks, applySchedule, TOPICS, topicOf, topicDef, dimOfLabel, datesIn, postName, postIndex, namePosts, sanitize, HOWTO, howFor, deriveSchedule, cadenceFor, validatePhases, dedupePhases, finishPlan, benchmarkText };
+module.exports = { zoned, zonedKey, targetFor, confidence, stampConfidence, stampFreeCtas, numbersInReport, checkWhy, ctaFor, isPitch, violatesContext, openerTopics, titleDay, stripInvented, allowedLinks, applySchedule, TOPICS, topicOf, topicDef, dimOfLabel, datesIn, postName, postIndex, namePosts, sanitize, HOWTO, howFor, deriveSchedule, cadenceFor, validatePhases, dedupePhases, finishPlan, benchmarkText };

@@ -60,6 +60,9 @@
   const fmtDate = d => new Date(d || Date.now()).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
   const fmtShort = d => new Date(d || Date.now()).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
   const fmtN = n => Number(n || 0).toLocaleString();
+  // Post dates in the account's own time zone, never the viewer's: the same day everywhere on the page.
+  const zoneOf = report => (report && (report.tz || (report.best_times && report.best_times.tz))) || 'UTC';
+  const postDay = (report, iso, opts = {}) => { try { return new Date(iso).toLocaleDateString('en-GB', { timeZone: zoneOf(report), day: 'numeric', month: 'short', ...opts }); } catch { return fmtShort(iso); } };
   const ordinal = n => ['1st', '2nd', '3rd', '4th', '5th'][n - 1] || (n + 'th');
   const sget = (k, d) => { try { const v = sessionStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
   const sset = (k, v) => { try { sessionStorage.setItem(k, JSON.stringify(v)); } catch { } };
@@ -913,7 +916,7 @@
         </div>
         <div class="brief" id="briefWrap" hidden></div>
         ${paid && !isSample && (report.post_reviews || []).length ? raw(h`<details class="card acc reviews"><summary>Your posts, 48 hours in <span class="fine">${report.post_reviews.length} reviewed</span></summary>
-          <div class="rlist">${raw(report.post_reviews.map(r => h`<div class="rv" id="rv-${r.post_id}"><div class="h"><span class="when">${fmtDate(r.posted_at)} · ${String(r.type || '').toUpperCase()}</span><span class="vs ${r.metrics?.vs_avg >= 1.05 ? 'up' : r.metrics?.vs_avg < 0.8 ? 'down' : ''}">${r.metrics?.vs_avg != null ? `${r.metrics.vs_avg}× your average` : ''}</span></div>
+          <div class="rlist">${raw(report.post_reviews.map(r => h`<div class="rv" id="rv-${r.post_id}"><div class="h"><span class="when">${postDay(report, r.posted_at, { year: 'numeric' })} · ${String(r.type || '').toUpperCase()}</span><span class="vs ${r.metrics?.vs_avg >= 1.05 ? 'up' : r.metrics?.vs_avg < 0.8 ? 'down' : ''}">${r.metrics?.vs_avg != null ? `${r.metrics.vs_avg}× your average` : ''}</span></div>
             ${r.caption ? raw(h`<div class="cap">“${r.caption.slice(0, 120)}${r.caption.length > 120 ? '…' : ''}”</div>`) : ''}
             <p><b>How it did.</b> ${r.review?.performance || ''}</p><p><b>Likely why.</b> ${r.review?.likely_reason || ''}</p><p><b>Next post.</b> ${r.review?.next || ''}</p>
             <div class="fine">${fmtN(r.metrics?.likes)} likes · ${fmtN(r.metrics?.comments)} comments${r.metrics?.views ? ` · ${fmtN(r.metrics.views)} views` : ''}${r.permalink ? raw(h` · <a href="${r.permalink}" target="_blank" rel="noopener">Open the post</a>`) : ''}</div></div>`).join(''))}</div>
@@ -936,7 +939,7 @@
             <div class="body">
               <div class="postmeta"><span class="pill tone">${pi.metric === 'median' ? 'MEDIAN' : 'AVG'} ${fmtN(pi.avg_engagement)} per post</span>${pi.patterns?.best_format ? raw(h`<span class="pill tone">${String(pi.patterns.best_format.format).toUpperCase()}S ${pi.patterns.best_format.vs_avg}×</span>`) : ''}${pi.patterns?.best_day ? raw(h`<span class="pill green">${String(pi.patterns.best_day.day).toUpperCase()} IS YOUR STRONGEST DAY</span>`) : ''}</div>
               <div class="posts">${raw([...pi.top.map(p => [p, 'top']), ...pi.bottom.map(p => [p, 'low'])].map(([p, k]) => h`<div class="post ${k}">
-                <div class="k"><div class="x ${k === 'top' ? 'g-strong' : 'g-weak'}">${p.vs_avg}×</div><div class="t">${k === 'top' ? 'TOP' : 'LOW'} · ${String(p.format).toUpperCase()}</div><div class="d">${p.weekday ? p.weekday + ' ' : ''}${p.date ? fmtShort(p.date) : ''}</div></div>
+                <div class="k"><div class="x ${k === 'top' ? 'g-strong' : 'g-weak'}">${p.vs_avg}×</div><div class="t">${k === 'top' ? 'TOP' : 'LOW'} · ${String(p.format).toUpperCase()}</div><div class="d">${p.weekday ? p.weekday + ' ' : ''}${p.date ? postDay(report, p.date) : ''}</div></div>
                 <div class="c"><p>“${p.caption || 'no caption'}”</p><div class="n">${p.likes === 0 && (p.comments > 5 || p.views > 100) ? 'likes hidden' : fmtN(p.likes) + ' likes'} · ${fmtN(p.comments)} comments${p.views ? ` · ${fmtN(p.views)} views` : ''}${p.url ? raw(h` · <a href="${p.url}" target="_blank" rel="noopener">open</a>`) : ''}</div></div></div>`).join(''))}</div>
               ${pi.note ? raw(h`<p class="postnote">${pi.note}</p>`) : ''}
             </div>
@@ -1278,7 +1281,7 @@
       const fmt = /reel|video/i.test(p.type) ? '▶' : /carousel/i.test(p.type) ? '▤' : '▪';
       const perf = p === best && r >= 1.5 ? 'best' : r >= 2 ? 'hot' : r < 0.5 ? 'cold' : '';
       const plan = icons[p.id] || (p.is_pinned ? 'pinned' : null);
-      const title = `${fmtShort(p.posted_at)} · ${String(p.type || 'post')} · ${hidden ? 'likes hidden' : fmtN(p.likes) + ' likes'} · ${fmtN(p.comments)} comments${p.views ? ' · ' + fmtN(p.views) + ' views' : ''} · ${mult(r)} your typical post${perf === 'best' ? ' · your best' : ''}${plan ? ' · ' + MARK_TITLE[plan] : ''}`;
+      const title = `${postDay(report, p.posted_at)} · ${String(p.type || 'post')} · ${hidden ? 'likes hidden' : fmtN(p.likes) + ' likes'} · ${fmtN(p.comments)} comments${p.views ? ' · ' + fmtN(p.views) + ' views' : ''} · ${mult(r)} your typical post${perf === 'best' ? ' · your best' : ''}${plan ? ' · ' + MARK_TITLE[plan] : ''}`;
       const inner = p.thumbnail_url ? h`<img src="${p.thumbnail_url}" alt="" loading="lazy">` : h`<span class="ph">${fmt}</span>`;
       // One mark per tile, always bottom-left. The plan's instruction wins over the flame
       // (a re-cut implies it did well); the flame shows on winners the plan leaves alone;
