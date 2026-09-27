@@ -1030,6 +1030,7 @@
       $view.querySelectorAll('.phase').forEach((ph, i) => { const p = phases[i]; if (!p || !paid) return; const total = 1 + p.moves.length; const dn = (isDone(p.key + 'm1') ? 1 : 0) + p.moves.filter(m => isDone(p.key + 'm' + m.n)).length; const el = ph.querySelector('.prog'); if (el) el.textContent = `${dn} of ${total} done`; });
     }));
     tintFor(report).then(t => { applyTint($view.querySelector('.report'), t); setFaviconShape(s.dimensions, t); }).catch(() => { });
+    bindFeedHover($view);
     bindCta($view, { paid, reportId: report.report_id, openPost: i => { const det = $view.querySelector('#nextPosts')?.closest('details'); if (det) det.open = true; const art = $view.querySelector(`#nextPosts [data-post="${i}"]`); if (art) { art.scrollIntoView({ behavior: 'smooth', block: 'center' }); art.classList.add('flash'); setTimeout(() => art.classList.remove('flash'), 1600); } else toast('Your written posts arrive with the plan.'); } });
     $view.querySelectorAll('[data-dim-fix]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); const row = $view.querySelector(`[data-row="${a.dataset.dimFix}"]`); const det = row?.closest('details'); if (det) det.open = true; if (row) { row.classList.add('open'); row.scrollIntoView({ behavior: 'smooth', block: 'center' }); } }));
     $view.querySelector('[data-action=share]').addEventListener('click', () => { if (!isSample) track('share_clicked', { overall }, report.report_id); openShareSheet(report); });
@@ -1249,7 +1250,9 @@
   }
   // Your feed, annotated: the last 30 posts as a grid, tinted by how each did against the typical post,
   // with a mark on every post the plan uses.
+  const FEED_INFO = new Map(); // post id → what the hover card says
   function feedGridHTML(report, phases) {
+    FEED_INFO.clear();
     const posts = [...(report.posts || [])].filter(p => p.posted_at).sort((a, b) => +new Date(b.posted_at) - +new Date(a.posted_at)).slice(0, 30);
     if (posts.length < 6) return '';
     const eng = p => (Number(p.likes) || 0) + (Number(p.comments) || 0);
@@ -1264,7 +1267,10 @@
     const MARK_ICON = { pin: 'pin', highlight: 'ring', repurpose: 'cut', format: 'cut', schedule: 'cal', bio_link: 'link', bio_cta: 'link', bio_rewrite: 'link', media_kit: 'link' };
     const MARK_TITLE = { pin: 'the plan pins this', ring: 'the plan puts this in a highlight', cut: 'the plan re-cuts this', cal: 'the plan schedules a post from this', link: 'a bio move cites this', pinned: 'pinned on your profile today' };
     const icons = {};
-    for (const ph of phases || []) for (const m of [ph.opener ? { ...ph.opener, topic: ph.opener.topic } : null, ...(ph.moves || [])]) { if (m && m.cta && m.cta.type === 'see_example' && m.cta.post_id && !icons[m.cta.post_id]) icons[m.cta.post_id] = MARK_ICON[m.topic] || 'cut'; }
+    const moveOf = {};
+    for (const ph of phases || []) { const list = [ph.opener ? { ...ph.opener, topic: ph.opener.topic, title: ph.label, action: ph.action, key: ph.key + 'm1', n: 1 } : null, ...(ph.moves || []).map(m => ({ ...m, key: ph.key + 'm' + m.n }))]; for (const m of list) { if (m && m.cta && m.cta.type === 'see_example' && m.cta.post_id && !icons[m.cta.post_id]) { icons[m.cta.post_id] = MARK_ICON[m.topic] || 'cut'; moveOf[m.cta.post_id] = m; } } }
+    const windows = (report.best_times && report.best_times.confident ? report.best_times.windows : []) || [];
+    const fmtAvg = report.post_insights?.patterns?.format_avg || {};
     const mult = r => (r >= 10 ? Math.round(r) : r.toFixed(1)) + '×';
     const use = (id, cls = '') => `<span class="disc ${cls}"><svg aria-hidden="true"><use href="#fm-${id}"/></svg></span>`;
     const cells = posts.map(p => {
@@ -1278,8 +1284,28 @@
       // (a re-cut implies it did well); the flame shows on winners the plan leaves alone;
       // the snowflake on flops; the outline pin only when nothing else applies.
       const mark = plan && plan !== 'pinned' ? use(plan, 'bl') : perf === 'best' ? use('flame', 'bl lg') : perf === 'hot' ? use('flame', 'bl') : perf === 'cold' ? use('snow', 'bl') : plan === 'pinned' ? use('pin-o', 'bl') : '';
+      // What the hover card says about this tile.
+      { const d = new Date(p.posted_at); const tz = report.tz || report.best_times?.tz || 'UTC';
+        // Day and hour in the account's own time zone — the same one the best windows use.
+        const parts = (() => { try { return Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short', hour: 'numeric', hour12: false }).formatToParts(d).map(x => [x.type, x.value])); } catch { return { weekday: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()], hour: String(d.getHours()) }; } })();
+        const day = parts.weekday; const hr = Number(parts.hour) % 24;
+        const inWin = windows.find(w => w.day === day && hr >= w.start_hour && hr < w.end_hour);
+        const fmtKey = /reel|video/i.test(p.type) ? 'reel' : /carousel/i.test(p.type) ? 'carousel' : 'static';
+        const others = Object.entries(fmtAvg).filter(([k]) => k !== fmtKey && fmtAvg[k] && fmtAvg[k].posts >= 2);
+        const mine = fmtAvg[fmtKey];
+        const lines = [];
+        lines.push({ k: 'result', v: `${hidden ? 'Likes hidden' : fmtN(p.likes) + ' likes'} · ${fmtN(p.comments)} comments${p.views ? ' · ' + fmtN(p.views) + ' views' : ''}`, s: r >= 2 ? `${mult(r)} your typical post${perf === 'best' ? ' — your best of the 30' : ''}` : r < 0.5 ? `${mult(r)} your typical post — under half` : `${mult(r)} your typical post` });
+        const when = (() => { try { return d.toLocaleString('en-GB', { timeZone: tz, weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }); } catch { return d.toLocaleString('en-GB'); } })();
+        lines.push({ k: 'timing', v: when, s: windows.length ? (inWin ? `in your best window (${inWin.label})` : `outside your best windows (${windows.map(w => w.label).join(', ')})`) : '' });
+        if (mine && others.length) { const best = others.sort((a, b) => b[1].avg_engagement - a[1].avg_engagement)[0]; const ratio = best[1].avg_engagement ? mine.avg_engagement / best[1].avg_engagement : null; lines.push({ k: 'format', v: fmtKey === 'static' ? 'Photo' : fmtKey.charAt(0).toUpperCase() + fmtKey.slice(1), s: ratio ? `your ${fmtKey === 'static' ? 'photos' : fmtKey + 's'} average ${fmtN(mine.avg_engagement)} vs ${fmtN(best[1].avg_engagement)} for ${best[0] === 'static' ? 'photos' : best[0] + 's'}` : '' }); }
+        const mv = moveOf[p.id];
+        if (mv) lines.push({ k: 'plan', v: MARK_TITLE[icons[p.id]].replace(/^the plan /, 'The plan '), s: mv.title || '', link: `#/path/${report.report_id}?open=${mv.key}`, cta: 'Open the move →' });
+        else if (p.is_pinned) lines.push({ k: 'plan', v: 'Pinned on your profile today', s: '' });
+        else if (perf === 'hot' || perf === 'best') lines.push({ k: 'plan', v: 'Not in the plan yet', s: 'the plan re-cuts winners it can build on; this one stands on its own' });
+        else if (perf === 'cold') lines.push({ k: 'plan', v: 'Not in the plan', s: 'the plan leaves flops alone rather than fixing them' });
+        FEED_INFO.set(String(p.id), { lines, url: p.permalink || null, thumb: p.thumbnail_url || null }); }
       const tag = p.permalink ? 'a' : 'span';
-      return `<${tag} class="cell" ${p.permalink ? `href="${esc(p.permalink)}" target="_blank" rel="noopener"` : ''} title="${esc(title)}" aria-label="${esc(title)}">${inner}${mark}</${tag}>`;
+      return `<${tag} class="cell" data-pid="${esc(String(p.id))}" ${p.permalink ? `href="${esc(p.permalink)}" target="_blank" rel="noopener"` : ''} aria-label="${esc(title)}">${inner}${mark}</${tag}>`;
     }).join('');
     const topR = best ? ratio(best) : 0;
     const marked = Object.keys(icons).length;
@@ -1289,6 +1315,33 @@
       <div class="feedgrid">${raw(cells)}</div>
       ${topR >= 3 ? raw(h`<p class="marg">↑ One post did ${mult(topR)} your typical. The plan re-cuts it, it doesn't chase it.</p>`) : ''}
     </div>`;
+  }
+  // The hover card (tap on touch): what this post did, when, in what format, and what the plan does with it.
+  function bindFeedHover(root) {
+    const grid = root.querySelector('.feedgrid'); if (!grid) return;
+    let card = null, current = null, touch = false;
+    const hide = () => { if (card) card.remove(); card = null; current = null; };
+    const show = (cell) => {
+      const info = FEED_INFO.get(cell.dataset.pid); if (!info) return;
+      hide(); current = cell;
+      card = document.createElement('div'); card.className = 'hovercard'; card.setAttribute('role', 'tooltip');
+      card.innerHTML = h`${info.thumb ? raw(h`<img src="${info.thumb}" alt="">`) : ''}<div class="hc">${raw(info.lines.map(l => h`<div class="ln ${l.k}"><b>${l.v}</b>${l.s ? raw(h`<span>${l.s}</span>`) : ''}${l.link ? raw(h`<a href="${l.link}">${l.cta}</a>`) : ''}</div>`).join(''))}${info.url && touch ? raw(h`<a class="open" href="${info.url}" target="_blank" rel="noopener">Open on Instagram ↗</a>`) : ''}</div>`;
+      document.body.appendChild(card);
+      const r = cell.getBoundingClientRect(); const cw = card.offsetWidth, ch = card.offsetHeight;
+      let x = r.left + r.width / 2 - cw / 2; x = Math.max(8, Math.min(window.innerWidth - cw - 8, x));
+      let y = r.top - ch - 10; if (y < 8) y = r.bottom + 10;
+      card.style.left = x + window.scrollX + 'px'; card.style.top = y + window.scrollY + 'px';
+    };
+    grid.querySelectorAll('.cell').forEach(cell => {
+      cell.addEventListener('mouseenter', () => { if (!touch) show(cell); });
+      cell.addEventListener('mouseleave', () => { if (!touch) hide(); });
+      cell.addEventListener('focus', () => show(cell)); cell.addEventListener('blur', hide);
+      cell.addEventListener('touchstart', () => { touch = true; }, { passive: true });
+      cell.addEventListener('click', e => { if (touch) { e.preventDefault(); if (current === cell) hide(); else show(cell); } });
+    });
+    document.addEventListener('scroll', hide, { passive: true });
+    document.addEventListener('click', e => { if (card && !card.contains(e.target) && !e.target.closest('.feedgrid .cell')) hide(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') hide(); });
   }
   // The feed marks, drawn once per page on a 16px grid, 1.75px stroke.
   const FEED_SYMBOLS = `<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>

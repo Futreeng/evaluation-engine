@@ -1192,3 +1192,15 @@ body.focus .sigshape .now { fill: var(--on-dark); stroke: var(--on-dark); }
 
 .feedcard.locked p { margin-top: 8px; font-size: 14px; color: var(--body); max-width: 60ch; }
 .feedcard.locked .btn { margin-top: 12px; }
+
+/* feed hover card */
+.hovercard { position: absolute; z-index: 60; width: 300px; max-width: calc(100vw - 16px); background: var(--card); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 12px 32px rgba(42,33,24,.18); overflow: hidden; animation: rise .18s ease-out both; }
+.hovercard img { width: 100%; height: 120px; object-fit: cover; display: block; }
+.hovercard .hc { padding: 12px 14px; display: flex; flex-direction: column; gap: 9px; }
+.hovercard .ln { display: flex; flex-direction: column; gap: 1px; font-size: 13px; line-height: 1.35; }
+.hovercard .ln b { color: var(--ink); font-weight: 700; }
+.hovercard .ln span { color: var(--muted2); }
+.hovercard .ln.plan { padding-top: 9px; border-top: 1px dashed var(--line2); }
+.hovercard .ln.plan b { color: var(--their-deep, var(--act)); }
+.hovercard .ln a, .hovercard .open { font-size: 13px; font-weight: 700; color: var(--act); text-decoration: underline; text-underline-offset: 2px; margin-top: 2px; }
+.feedgrid .cell:focus-visible { outline: 3px solid var(--act); outline-offset: 2px; }
