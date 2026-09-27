@@ -1144,27 +1144,22 @@ button.prow:hover { background: var(--ground); transform: translateX(2px); }
 .marginalia li { position: relative; padding-left: 18px; font-size: 13px; line-height: 1.45; font-style: italic; color: var(--muted2); }
 .marginalia li::before { content: '→'; position: absolute; left: 0; top: 0; font-style: normal; color: var(--their-deep, var(--act)); }
 .feedcard .marg { margin: 10px 0 0; font-size: 13px; font-style: italic; color: var(--muted2); }
-/* your feed, annotated: winners big and first, flops ribboned, everything else just the photo */
+/* your feed, annotated: the photos untouched, one mark per corner, all in their colour on cream */
 .feedcard { padding: 22px 24px; margin-top: 16px; }
 .feedcard .fh { display: flex; flex-direction: column; gap: 4px; }
 .feedcard .fh h2 { font-family: var(--display); font-size: 20px; }
-.feedcard .fh .fine { max-width: 70ch; }
-.feedgrid { display: grid; grid-template-columns: repeat(13, 1fr); grid-auto-rows: 1fr; grid-auto-flow: dense; gap: 5px; margin-top: 14px; }
+.feedcard .fh .fine { max-width: 72ch; }
+.feedgrid { display: grid; grid-template-columns: repeat(10, 1fr); gap: 5px; margin-top: 14px; }
 .feedgrid .cell { position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; background: var(--track); display: flex; align-items: center; justify-content: center; color: var(--muted); text-decoration: none; isolation: isolate; }
-.feedgrid .cell.win { grid-column: span 2; grid-row: span 2; border-radius: 12px; }
 .feedgrid .cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .feedgrid .cell .ph { font-size: 18px; }
-.feedgrid .cell .rb { position: absolute; left: 0; bottom: 0; z-index: 1; display: inline-flex; align-items: center; gap: 4px; padding: 4px 9px; border-top-right-radius: 10px; font-size: 12px; font-weight: 800; letter-spacing: .02em; }
-.feedgrid .cell.win .rb { font-size: 16px; padding: 6px 12px; border-top-right-radius: 12px; }
-.feedgrid .cell .rb.top { background: var(--their-deep, var(--act)); color: #FFF6E9; }
-.feedgrid .cell .rb.low { background: var(--ink); color: var(--on-dark); }
-.feedgrid .cell .rb i { font-style: normal; font-size: .75em; }
-.feedgrid .cell .mk { position: absolute; right: 4px; top: 4px; z-index: 1; font-size: 9px; font-weight: 800; letter-spacing: .06em; padding: 2px 6px; border-radius: 6px; background: var(--ink); color: var(--on-dark); }
-.feedgrid .cell.win .mk { font-size: 11px; padding: 3px 8px; }
-.feedgrid .cell .mk.pinned { background: rgba(255,246,233,.92); color: var(--ink); }
+.feedgrid .disc { position: absolute; z-index: 1; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: #FFF6E9; color: var(--their-deep, var(--act)); box-shadow: 0 1px 2px rgba(0,0,0,.28); }
+.feedgrid .disc svg { width: 14px; height: 14px; }
+.feedgrid .disc.lg { width: 27px; height: 27px; } .feedgrid .disc.lg svg { width: 18px; height: 18px; }
+.feedgrid .disc.bl { left: 4px; bottom: 4px; } .feedgrid .disc.tr { right: 4px; top: 4px; }
 .feedgrid .cell:hover { outline: 2px solid var(--ink); outline-offset: 1px; }
 .feedcard .marg { margin: 10px 0 0; font-size: 13px; font-style: italic; color: var(--muted2); }
-@media (max-width: 720px) { .feedgrid { grid-template-columns: repeat(6, 1fr); gap: 4px; } .feedgrid .cell.win .rb { font-size: 13px; padding: 4px 9px; } }
+@media (max-width: 720px) { .feedgrid { grid-template-columns: repeat(6, 1fr); gap: 4px; } .feedgrid .disc { width: 20px; height: 20px; } .feedgrid .disc svg { width: 13px; height: 13px; } }
 @media (max-width: 420px) { .feedgrid { grid-template-columns: repeat(5, 1fr); } }
 /* the trail */
 .trail { position: relative; padding-left: 22px; }

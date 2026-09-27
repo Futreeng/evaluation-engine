@@ -1257,32 +1257,48 @@
     const marks = {};
     const MARK = { pin: 'PIN', highlight: 'HL', repurpose: 'CUT', format: 'CUT', schedule: 'POST', bio_link: 'BIO', bio_cta: 'BIO', bio_rewrite: 'BIO', media_kit: 'KIT', other: 'PLAN' };
     for (const ph of phases || []) for (const m of [ph.opener ? { ...ph.opener, topic: ph.opener.topic } : null, ...(ph.moves || [])]) { if (m && m.cta && m.cta.type === 'see_example' && m.cta.post_id) marks[m.cta.post_id] = MARK[m.topic] || 'PLAN'; }
-    // One rule anyone can read without a legend: the winners are big and grouped first,
-    // the flops carry a dark ribbon, everything else is just their photo.
+    // Marks, not tints: a flame on what did well, a snowflake on what didn't, and the plan's
+    // instruction on the posts it uses. All drawn in their colour on a cream disc.
     const ratio = p => (med > 0 ? eng(p) / med : 1);
-    const winners = [...posts].sort((a, b) => ratio(b) - ratio(a)).slice(0, 3).filter(p => ratio(p) >= 1.5);
-    const flops = new Set([...posts].filter(p => !winners.includes(p) && ratio(p) < 0.5).sort((a, b) => ratio(a) - ratio(b)).slice(0, 3).map(p => p.id));
-    const ordered = [...winners, ...posts.filter(p => !winners.includes(p))];
+    const best = [...posts].sort((a, b) => ratio(b) - ratio(a))[0];
+    const MARK_ICON = { pin: 'pin', highlight: 'ring', repurpose: 'cut', format: 'cut', schedule: 'cal', bio_link: 'link', bio_cta: 'link', bio_rewrite: 'link', media_kit: 'link' };
+    const MARK_TITLE = { pin: 'the plan pins this', ring: 'the plan puts this in a highlight', cut: 'the plan re-cuts this', cal: 'the plan schedules a post from this', link: 'a bio move cites this', pinned: 'pinned on your profile today' };
+    const icons = {};
+    for (const ph of phases || []) for (const m of [ph.opener ? { ...ph.opener, topic: ph.opener.topic } : null, ...(ph.moves || [])]) { if (m && m.cta && m.cta.type === 'see_example' && m.cta.post_id && !icons[m.cta.post_id]) icons[m.cta.post_id] = MARK_ICON[m.topic] || 'cut'; }
     const mult = r => (r >= 10 ? Math.round(r) : r.toFixed(1)) + '×';
-    const cells = ordered.map(p => {
+    const use = (id, cls = '') => `<span class="disc ${cls}"><svg aria-hidden="true"><use href="#fm-${id}"/></svg></span>`;
+    const cells = posts.map(p => {
       const r = ratio(p); const hidden = Number(p.likes) === 0 && (Number(p.comments) > 5 || Number(p.views) > 100);
-      const isWin = winners.includes(p), isFlop = flops.has(p.id);
       const fmt = /reel|video/i.test(p.type) ? '▶' : /carousel/i.test(p.type) ? '▤' : '▪';
-      const title = `${fmtShort(p.posted_at)} · ${String(p.type || 'post')} · ${hidden ? 'likes hidden' : fmtN(p.likes) + ' likes'} · ${fmtN(p.comments)} comments${p.views ? ' · ' + fmtN(p.views) + ' views' : ''} · ${r.toFixed(1)}× your typical post`;
+      const perf = p === best && r >= 1.5 ? 'best' : r >= 2 ? 'hot' : r < 0.5 ? 'cold' : '';
+      const plan = icons[p.id] || (p.is_pinned ? 'pinned' : null);
+      const title = `${fmtShort(p.posted_at)} · ${String(p.type || 'post')} · ${hidden ? 'likes hidden' : fmtN(p.likes) + ' likes'} · ${fmtN(p.comments)} comments${p.views ? ' · ' + fmtN(p.views) + ' views' : ''} · ${mult(r)} your typical post${perf === 'best' ? ' · your best' : ''}${plan ? ' · ' + MARK_TITLE[plan] : ''}`;
       const inner = p.thumbnail_url ? h`<img src="${p.thumbnail_url}" alt="" loading="lazy">` : h`<span class="ph">${fmt}</span>`;
-      const badge = marks[p.id] ? h`<span class="mk">${marks[p.id]}</span>` : (p.is_pinned ? h`<span class="mk pinned">PINNED</span>` : '');
-      const ribbon = isWin ? h`<span class="rb top"><i aria-hidden="true">▲</i>${mult(r)}</span>` : isFlop ? h`<span class="rb low"><i aria-hidden="true">▼</i>${mult(r)}</span>` : '';
+      const perfMark = perf === 'best' ? use('flame', 'bl lg') : perf === 'hot' ? use('flame', 'bl') : perf === 'cold' ? use('snow', 'bl') : '';
+      const planMark = plan === 'pinned' ? use('pin-o', 'tr') : plan ? use(plan, 'tr') : '';
       const tag = p.permalink ? 'a' : 'span';
-      return `<${tag} class="cell ${isWin ? 'win' : ''} ${isFlop ? 'flop' : ''}" ${p.permalink ? `href="${esc(p.permalink)}" target="_blank" rel="noopener"` : ''} title="${esc(title)}" aria-label="${esc(title)}">${inner}${ribbon}${badge}</${tag}>`;
+      return `<${tag} class="cell" ${p.permalink ? `href="${esc(p.permalink)}" target="_blank" rel="noopener"` : ''} title="${esc(title)}" aria-label="${esc(title)}">${inner}${perfMark}${planMark}</${tag}>`;
     }).join('');
-    const top = winners[0] || posts[0]; const topR = ratio(top);
-    const marked = Object.keys(marks).length;
+    const topR = best ? ratio(best) : 0;
+    const marked = Object.keys(icons).length;
     return h`<div class="card feedcard">
-      <div class="fh"><h2>Your feed, annotated</h2><span class="fine">Your ${posts.length} latest posts. The biggest tiles are the ones that beat your typical post (${fmtN(med)} likes + comments) by the most.${marked ? ` ${marked} post${marked === 1 ? '' : 's'} the plan uses, marked.` : ''}</span></div>
+      ${raw(FEED_SYMBOLS)}
+      <div class="fh"><h2>Your feed, annotated</h2><span class="fine">Your ${posts.length} latest posts. A flame on the ones that beat your typical post (${fmtN(med)} likes + comments) by 2× or more, a snowflake on the ones under half.${marked ? ` The plan's marks sit on the ${marked} post${marked === 1 ? '' : 's'} it uses.` : ''}</span></div>
       <div class="feedgrid">${raw(cells)}</div>
       ${topR >= 3 ? raw(h`<p class="marg">↑ One post did ${mult(topR)} your typical. The plan re-cuts it, it doesn't chase it.</p>`) : ''}
     </div>`;
   }
+  // The feed marks, drawn once per page on a 16px grid, 1.75px stroke.
+  const FEED_SYMBOLS = `<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+    <symbol id="fm-flame" viewBox="0 0 16 16"><path fill="currentColor" fill-rule="evenodd" d="M9.6 1.2c.2 1.9-.7 3-1.8 4.1-.6-.9-.7-1.9-.3-2.9C5.1 3.8 3.6 6 3.8 8.6c.2 3.2 2.3 5.4 4.7 5.9 2.6.5 5.1-1.4 5.3-4.3.2-2.3-1-4.1-2.3-5.5-.3.9-.8 1.5-1.5 1.9.1-1.9-.1-3.9-.4-5.4zM8.2 8.1c1.1 1 1.8 2 1.6 3.3-.1.8-.7 1.4-1.5 1.5-1 .1-1.9-.6-2-1.7-.1-1.3.9-2.2 1.9-3.1z"/></symbol>
+    <symbol id="fm-snow" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 1.8v12.4M2.6 4.9l10.8 6.2M2.6 11.1l10.8-6.2"/><path d="M6.4 3.2L8 4.4l1.6-1.2M6.4 12.8L8 11.6l1.6 1.2M3.2 7.1l1.9.5.5-1.9M12.8 8.9l-1.9-.5-.5 1.9M3.2 8.9l1.9-.5.5 1.9M12.8 7.1l-1.9.5-.5-1.9"/></g></symbol>
+    <symbol id="fm-cut" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="4.5" cy="4.5" r="2.2"/><circle cx="4.5" cy="11.5" r="2.2"/><path d="M6.3 5.8L14 12M6.3 10.2L14 4"/></g></symbol>
+    <symbol id="fm-pin" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9.8 1.8l4.4 4.4-1.6 1.6-.6-.6-3 3 .3 2.4-1.6 1.6L4.9 11.4 2 14.3M4.9 11.4l-2.9-2.9 1.6-1.6 2.4.3 3-3-.6-.6z"/></g></symbol>
+    <symbol id="fm-pin-o" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" opacity=".8"><path d="M9.8 1.8l4.4 4.4-1.6 1.6-.6-.6-3 3 .3 2.4-1.6 1.6L4.9 11.4 2 14.3M4.9 11.4l-2.9-2.9 1.6-1.6 2.4.3 3-3-.6-.6z"/></g></symbol>
+    <symbol id="fm-ring" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.75"><circle cx="8" cy="8" r="6"/><circle cx="8" cy="8" r="2.4" fill="currentColor" stroke="none"/></g></symbol>
+    <symbol id="fm-cal" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="2" y="3" width="12" height="11" rx="2"/><path d="M2 7h12M6 1.5v3M10 1.5v3"/><circle cx="8" cy="10.5" r="1.1" fill="currentColor" stroke="none"/></g></symbol>
+    <symbol id="fm-link" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M6.8 9.2a3 3 0 004.2 0l2-2a3 3 0 00-4.2-4.2l-1 1"/><path d="M9.2 6.8a3 3 0 00-4.2 0l-2 2a3 3 0 004.2 4.2l1-1"/></g></symbol>
+  </defs></svg>`;
   // Marginalia: short pointer notes under the score box, from the data.
   function marginaliaHTML(report) {
     const s = report.scores || {}; const notes = [];
