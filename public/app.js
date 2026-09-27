@@ -1274,16 +1274,18 @@
       const plan = icons[p.id] || (p.is_pinned ? 'pinned' : null);
       const title = `${fmtShort(p.posted_at)} · ${String(p.type || 'post')} · ${hidden ? 'likes hidden' : fmtN(p.likes) + ' likes'} · ${fmtN(p.comments)} comments${p.views ? ' · ' + fmtN(p.views) + ' views' : ''} · ${mult(r)} your typical post${perf === 'best' ? ' · your best' : ''}${plan ? ' · ' + MARK_TITLE[plan] : ''}`;
       const inner = p.thumbnail_url ? h`<img src="${p.thumbnail_url}" alt="" loading="lazy">` : h`<span class="ph">${fmt}</span>`;
-      const perfMark = perf === 'best' ? use('flame', 'bl lg') : perf === 'hot' ? use('flame', 'bl') : perf === 'cold' ? use('snow', 'bl') : '';
-      const planMark = plan === 'pinned' ? use('pin-o', 'tr') : plan ? use(plan, 'tr') : '';
+      // One mark per tile, always bottom-left. The plan's instruction wins over the flame
+      // (a re-cut implies it did well); the flame shows on winners the plan leaves alone;
+      // the snowflake on flops; the outline pin only when nothing else applies.
+      const mark = plan && plan !== 'pinned' ? use(plan, 'bl') : perf === 'best' ? use('flame', 'bl lg') : perf === 'hot' ? use('flame', 'bl') : perf === 'cold' ? use('snow', 'bl') : plan === 'pinned' ? use('pin-o', 'bl') : '';
       const tag = p.permalink ? 'a' : 'span';
-      return `<${tag} class="cell" ${p.permalink ? `href="${esc(p.permalink)}" target="_blank" rel="noopener"` : ''} title="${esc(title)}" aria-label="${esc(title)}">${inner}${perfMark}${planMark}</${tag}>`;
+      return `<${tag} class="cell" ${p.permalink ? `href="${esc(p.permalink)}" target="_blank" rel="noopener"` : ''} title="${esc(title)}" aria-label="${esc(title)}">${inner}${mark}</${tag}>`;
     }).join('');
     const topR = best ? ratio(best) : 0;
     const marked = Object.keys(icons).length;
     return h`<div class="card feedcard">
       ${raw(FEED_SYMBOLS)}
-      <div class="fh"><h2>Your feed, annotated</h2><span class="fine">Your ${posts.length} latest posts. A flame on the ones that beat your typical post (${fmtN(med)} likes + comments) by 2× or more, a snowflake on the ones under half.${marked ? ` The plan's marks sit on the ${marked} post${marked === 1 ? '' : 's'} it uses.` : ''}</span></div>
+      <div class="fh"><h2>Your feed, annotated</h2><span class="fine">Your ${posts.length} latest posts. One mark per post: a flame on the ones that beat your typical post (${fmtN(med)} likes + comments) by 2× or more, a snowflake on the ones under half${marked ? `, and the plan's own mark on the ${marked} post${marked === 1 ? '' : 's'} it uses` : ''}.</span></div>
       <div class="feedgrid">${raw(cells)}</div>
       ${topR >= 3 ? raw(h`<p class="marg">↑ One post did ${mult(topR)} your typical. The plan re-cuts it, it doesn't chase it.</p>`) : ''}
     </div>`;
