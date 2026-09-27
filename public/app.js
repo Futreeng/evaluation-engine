@@ -1257,24 +1257,30 @@
     const marks = {};
     const MARK = { pin: 'PIN', highlight: 'HL', repurpose: 'CUT', format: 'CUT', schedule: 'POST', bio_link: 'BIO', bio_cta: 'BIO', bio_rewrite: 'BIO', media_kit: 'KIT', other: 'PLAN' };
     for (const ph of phases || []) for (const m of [ph.opener ? { ...ph.opener, topic: ph.opener.topic } : null, ...(ph.moves || [])]) { if (m && m.cta && m.cta.type === 'see_example' && m.cta.post_id) marks[m.cta.post_id] = MARK[m.topic] || 'PLAN'; }
-    const cells = posts.map(p => {
-      const r = med > 0 ? eng(p) / med : 1; const hidden = Number(p.likes) === 0 && (Number(p.comments) > 5 || Number(p.views) > 100);
-      const heat = r >= 2 ? 'hot' : r >= 1.2 ? 'warm' : r < 0.5 ? 'cold' : 'even';
+    // One rule anyone can read without a legend: the winners are big and grouped first,
+    // the flops carry a dark ribbon, everything else is just their photo.
+    const ratio = p => (med > 0 ? eng(p) / med : 1);
+    const winners = [...posts].sort((a, b) => ratio(b) - ratio(a)).slice(0, 3).filter(p => ratio(p) >= 1.5);
+    const flops = new Set([...posts].filter(p => !winners.includes(p) && ratio(p) < 0.5).sort((a, b) => ratio(a) - ratio(b)).slice(0, 3).map(p => p.id));
+    const ordered = [...winners, ...posts.filter(p => !winners.includes(p))];
+    const mult = r => (r >= 10 ? Math.round(r) : r.toFixed(1)) + '×';
+    const cells = ordered.map(p => {
+      const r = ratio(p); const hidden = Number(p.likes) === 0 && (Number(p.comments) > 5 || Number(p.views) > 100);
+      const isWin = winners.includes(p), isFlop = flops.has(p.id);
       const fmt = /reel|video/i.test(p.type) ? '▶' : /carousel/i.test(p.type) ? '▤' : '▪';
       const title = `${fmtShort(p.posted_at)} · ${String(p.type || 'post')} · ${hidden ? 'likes hidden' : fmtN(p.likes) + ' likes'} · ${fmtN(p.comments)} comments${p.views ? ' · ' + fmtN(p.views) + ' views' : ''} · ${r.toFixed(1)}× your typical post`;
       const inner = p.thumbnail_url ? h`<img src="${p.thumbnail_url}" alt="" loading="lazy">` : h`<span class="ph">${fmt}</span>`;
       const badge = marks[p.id] ? h`<span class="mk">${marks[p.id]}</span>` : (p.is_pinned ? h`<span class="mk pinned">PINNED</span>` : '');
-      const x = heat === 'hot' || heat === 'cold' ? h`<span class="x ${heat}"><i aria-hidden="true">${heat === 'hot' ? '▲' : '▼'}</i>${r >= 10 ? Math.round(r) : r.toFixed(1)}×</span>` : '';
+      const ribbon = isWin ? h`<span class="rb top"><i aria-hidden="true">▲</i>${mult(r)}</span>` : isFlop ? h`<span class="rb low"><i aria-hidden="true">▼</i>${mult(r)}</span>` : '';
       const tag = p.permalink ? 'a' : 'span';
-      return `<${tag} class="cell ${heat}" ${p.permalink ? `href="${esc(p.permalink)}" target="_blank" rel="noopener"` : ''} title="${esc(title)}" aria-label="${esc(title)}">${inner}${x}${badge}</${tag}>`;
+      return `<${tag} class="cell ${isWin ? 'win' : ''} ${isFlop ? 'flop' : ''}" ${p.permalink ? `href="${esc(p.permalink)}" target="_blank" rel="noopener"` : ''} title="${esc(title)}" aria-label="${esc(title)}">${inner}${ribbon}${badge}</${tag}>`;
     }).join('');
-    const top = posts.reduce((a, p) => (eng(p) > eng(a) ? p : a), posts[0]); const topR = med > 0 ? eng(top) / med : 0;
+    const top = winners[0] || posts[0]; const topR = ratio(top);
     const marked = Object.keys(marks).length;
     return h`<div class="card feedcard">
-      <div class="fh"><h2>Your feed, annotated</h2><span class="fine">${posts.length} posts · framed by likes + comments against your typical post (${fmtN(med)})</span></div>
+      <div class="fh"><h2>Your feed, annotated</h2><span class="fine">Your ${posts.length} latest posts. The biggest tiles are the ones that beat your typical post (${fmtN(med)} likes + comments) by the most.${marked ? ` ${marked} post${marked === 1 ? '' : 's'} the plan uses, marked.` : ''}</span></div>
       <div class="feedgrid">${raw(cells)}</div>
-      <div class="fl"><span class="sw hot"></span> ▲ 2× or more <span class="sw warm"></span> above typical <span class="sw even"></span> typical <span class="sw cold"></span> ▼ under half${marked ? raw(h` · <b>${marked}</b> post${marked === 1 ? '' : 's'} the plan uses, marked`) : ''}</div>
-      ${topR >= 3 ? raw(h`<p class="marg">↑ One post did ${topR >= 10 ? Math.round(topR) : topR.toFixed(1)}× your typical. The plan re-cuts it, it doesn't chase it.</p>`) : ''}
+      ${topR >= 3 ? raw(h`<p class="marg">↑ One post did ${mult(topR)} your typical. The plan re-cuts it, it doesn't chase it.</p>`) : ''}
     </div>`;
   }
   // Marginalia: short pointer notes under the score box, from the data.
