@@ -1192,3 +1192,6 @@ body.focus .pprog .bar { background: var(--dark-inset); }
 body.focus .phead .btn.ghost { color: var(--on-dark); border-color: var(--dark-line); }
 body.focus .sigshape .now { fill: var(--on-dark); stroke: var(--on-dark); }
 @media (prefers-reduced-motion: reduce) { .pstep.leaving, .bar .mark, .pstep .eb > span:first-child::before { animation: none; } }
+
+.feedcard.locked p { margin-top: 8px; font-size: 14px; color: var(--body); max-width: 60ch; }
+.feedcard.locked .btn { margin-top: 12px; }

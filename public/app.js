@@ -903,7 +903,7 @@
               ${nextPhase && opp === thisWeek ? raw(h`<div class="next">Next: Day 31 — ${nextPhase.label}</div>`) : ''}
             </div>`; })()) : ''}
           </div>
-          ${raw(feedGridHTML(report, phases))}
+          ${paid || isSample ? raw(feedGridHTML(report, phases)) : (report.posts || []).length >= 6 ? raw(h`<div class="card feedcard locked"><div class="fh"><h2>Your feed, annotated</h2><span class="fine">Growth Plan</span></div><p>Your last ${(report.posts || []).length} posts as a grid, tinted by how each did against your typical post, with the plan's moves marked on the posts they use.</p><button type="button" class="btn ghost sm" data-action="unlock">See it with the plan →</button></div>`) : ''}
 
         ${showGoalAsk ? raw(h`<div class="card goalcard ask" id="goalAsk"><div class="eb">ONE QUESTION</div><h2>What's the goal?</h2><p>The plan, your Monday move and the posts we write all lean toward it. You can change it later.</p>${raw(goalPickerHTML(null, null, followers, { first: true }))}</div>`) : ''}
         <div class="roastwrap" id="roastWrap" hidden></div>
@@ -1098,7 +1098,7 @@
       if (new URLSearchParams(location.hash.split('?')[1] || '').get('roast') === '1') { if (report.roast) reveal(report.roast); else pick(); }
     }
     // Both paid paths go through the 60-second intake first.
-    $view.querySelector('[data-action=unlock]')?.addEventListener('click', () => { sset('sc_intent_tier', 'growth_plan'); sset('sc_form', { handle: biz.handle, platform: biz.platform, category: biz.category, email: sget('sc_form', {}).email || report.email || '' }); go(`#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=subscribe`); });
+    $view.querySelectorAll('[data-action=unlock]').forEach(b => b.addEventListener('click', () => { sset('sc_intent_tier', 'growth_plan'); sset('sc_form', { handle: biz.handle, platform: biz.platform, category: biz.category, email: sget('sc_form', {}).email || report.email || '' }); go(`#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=subscribe`); }));
     $view.querySelector('[data-action=unlock-once]')?.addEventListener('click', () => { sset('sc_once_price', oneTime); go(`#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=once`); });
     // Check-in "nothing changed" and nudge answers
     const answer = async (b, body, doneMsg) => {
