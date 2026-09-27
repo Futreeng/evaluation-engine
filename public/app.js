@@ -210,7 +210,7 @@
   function dimRow(d, avg, label) {
     const sc = clamp(d.score, 0, 100); const gl = label || grade(sc)[0]; const hue = hueOf(d.label);
     return h`<div class="dimrow">
-      <div class="lbl"><span class="hue${hue}">${d.label}</span><b>${sc} · ${gl}</b></div>
+      <div class="lbl"><span class="hue${hue}">${raw(glyph(d.label))}${d.label}</span><b>${sc} · ${gl}</b></div>
       <div class="bar"><div class="fill bg${hue}" style="width:${sc}%"></div>${avg != null ? raw(h`<div class="mark" style="left:${clamp(avg, 0, 100)}%"></div>`) : ''}</div>
     </div>`;
   }
@@ -548,8 +548,10 @@
     canvas.width = W; canvas.height = H;
     const ctx = canvas.getContext('2d');
     const P = 84;
-    ctx.fillStyle = '#D2603A'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = opts.tint || '#D2603A'; ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = '#FFF6E9';
+    // Their shape, top right.
+    { const order = [/consisten/i, /mix|content/i, /engage/i, /profile/i]; const cx = W - 84 - 110, cy = 84 + 110, R = 110; ctx.save(); ctx.globalAlpha = .35; ctx.strokeStyle = '#FFF6E9'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = .9; ctx.beginPath(); order.forEach((re, i) => { const d = (s.dims || []).find(x => re.test(x.label)); const v = d ? clamp(d.score, 0, 100) / 100 : 0; const r = R * Math.max(v, 0.06); const a = -Math.PI / 2 + i * Math.PI / 2; const x = cx + r * Math.cos(a), y = cy + r * Math.sin(a); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.closePath(); ctx.fillStyle = 'rgba(255,246,233,.28)'; ctx.fill(); ctx.strokeStyle = '#FFF6E9'; ctx.lineWidth = 5; ctx.stroke(); ctx.restore(); ctx.fillStyle = '#FFF6E9'; }
     const dsp = w => `700 ${w}px "Bricolage Grotesque", "Instrument Sans", system-ui, sans-serif`;
     const sans = (w, wt = 500) => `${wt} ${w}px "Instrument Sans", system-ui, sans-serif`;
     ctx.textBaseline = 'top';
@@ -645,10 +647,11 @@
     const thenNowOn = () => { const tn = el.querySelector('#thenNow'); return !!(tn && tn.checked); };
     const makeShare = async () => {
       if (CFG.useMock || isSample) return null;
-      try { return await api('/reports/' + encodeURIComponent(report.report_id) + '/share', { method: 'POST', body: JSON.stringify(moment ? (moment.kind === 'roast' ? { kind: 'roast' } : { kind: 'moment', moment_key: moment.key }) : { kind: 'score', then_now: thenNowOn() }) }, { allow401: true }); } catch (e) { console.warn('[share] card unavailable:', e && e.message); return null; }
+      try { return await api('/reports/' + encodeURIComponent(report.report_id) + '/share', { method: 'POST', body: JSON.stringify(moment ? (moment.kind === 'roast' ? { kind: 'roast' } : { kind: 'moment', moment_key: moment.key }) : { kind: 'score', then_now: thenNowOn(), tint: (sget('sc_tint_' + report.report_id, null) || {}).hex || undefined }) }, { allow401: true }); } catch (e) { console.warn('[share] card unavailable:', e && e.message); return null; }
     };
     const redraw = async () => {
-      if (moment) drawMomentCard(canvas, s, size, moment); else drawShareCard(canvas, s, size, thenNowOn() ? { prev, span: report.history?.previous?.generated_at ? 'since ' + fmtShort(report.history.previous.generated_at) : 'in six weeks' } : {});
+      const tint = sget('sc_tint_' + report.report_id, null);
+      if (moment) drawMomentCard(canvas, s, size, moment); else drawShareCard(canvas, s, size, { tint: tint ? tint.hex : null, ...(thenNowOn() ? { prev, span: report.history?.previous?.generated_at ? 'since ' + fmtShort(report.history.previous.generated_at) : 'in six weeks' } : {}) });
       if (!share) { share = await makeShare(); if (share) el.dataset.share = share.share_id; }
       if (share) { const img = new Image(); img.onload = () => { const ctx = canvas.getContext('2d'); canvas.width = img.width; canvas.height = img.height; ctx.drawImage(img, 0, 0); }; img.src = share.png[size] + '&t=' + Date.now(); }
     };
@@ -863,6 +866,7 @@
             <div class="card scorebox">
               ${hist && hist.delta_overall != null ? raw(h`<div class="trend ${hist.delta_overall > 0 ? 'up' : hist.delta_overall < 0 ? 'down' : 'flat'}"><b>${hist.delta_overall > 0 ? `Up ${hist.delta_overall} point${hist.delta_overall === 1 ? '' : 's'}` : hist.delta_overall < 0 ? `Down ${-hist.delta_overall} point${hist.delta_overall === -1 ? '' : 's'}` : 'Unchanged'}</b> since ${fmtShort(hist.previous.generated_at)}${hist.runs ? raw(h` · run ${hist.runs}`) : ''}${hist.delta_followers != null && hist.delta_followers !== 0 ? raw(h` · ${hist.delta_followers > 0 ? '+' : ''}${fmtN(hist.delta_followers)} followers`) : ''}</div>`) : paid && !isSample ? raw(h`<div class="trend first">Your first score — the plan rescores you weekly, so this line becomes your own trend.</div>`) : ''}
               <div class="bigrow"><span class="bignum">${overall}</span>
+                ${raw(shapeSVG(s.dimensions, hist && hist.delta_dimensions ? (s.dimensions || []).map(d => ({ label: d.label, score: clamp(d.score - (hist.delta_dimensions.find(x => x.label === d.label)?.delta || 0), 0, 100) })) : null, { size: 84, cls: 'inbox' }))}
                 <div class="meta"><span class="tag ${gc}">${gl.toUpperCase()}</span>${lvl ? raw(h`<span class="lvl" title="Rank ${lvl.rank} of ${lvl.of}">${lvl.name.toUpperCase()}${lvl.next ? raw(h`<em>· ${lvl.next.points_away} points to ${lvl.next.name}</em>`) : raw('<em>· top band</em>')}</span>`) : ''}${report.streak && report.streak.visible ? raw(h`<span class="streak ${report.streak.weeks ? 'on' : ''}" title="An on-plan week means you posted on at least ${report.streak.planned_days} days. A freeze covers a missed week.">${report.streak.weeks ? `🔥 ${report.streak.weeks}-week streak` : 'New streak starts this week'}${report.streak.freezes ? raw(h`<em>· ${report.streak.freezes} freeze${report.streak.freezes === 1 ? '' : 's'}</em>`) : ''}</span>`) : ''}
                   ${followers ? raw(h`<span class="f">${fmtN(followers)} followers</span>`) : ''}
                 </div></div>
@@ -871,6 +875,7 @@
                 <div class="dims">${raw((s.dimensions || []).map(d => dimRow({ label: d.label, score: d.score }, d.category_avg, gradeIn({ score: clamp(d.score, 0, 100), label: d.label }, s.summary)[0])).join(''))}</div>
                 ${raw((() => { const facts = []; const cons = (s.dimensions || []).find(d => /consisten/i.test(d.label)); const ppw = cons && /([\d.]+)\/week/.exec(cons.evidence || ''); if (ppw) facts.push([ppw[1], 'posts a week']); if (pi && pi.avg_engagement) facts.push([fmtN(pi.avg_engagement), pi.metric === 'median' ? 'likes + comments on a typical post' : 'likes + comments per post']); const w = report.best_times && report.best_times.confident && report.best_times.windows && report.best_times.windows[0]; if (w) facts.push([w.label, 'your best window']); return facts.length ? h`<div class="facts">${raw(facts.map(([v, l]) => h`<div class="fact"><b>${v}</b><span>${l}</span></div>`).join(''))}</div>` : ''; })())}
                 <div class="fine">${(s.dimensions || []).some(d => d.category_avg != null) ? `Marker = ${niche} average.` : ''} Each dimension is explained below.</div>
+                ${raw(marginaliaHTML(report))}
               </div>`) : ''}
               ${s.category_percentile && s.category_percentile.n >= 25 ? raw(h`<div class="pct">Scores higher than <b>${s.category_percentile.beats_pct}%</b> of ${niche} accounts we've scored ${raw(confPill(s.category_confidence))}</div>`) : ''}
               ${raw(historyChartHTML(hist))}
@@ -898,6 +903,7 @@
               ${nextPhase && opp === thisWeek ? raw(h`<div class="next">Next: Day 31 — ${nextPhase.label}</div>`) : ''}
             </div>`; })()) : ''}
           </div>
+          ${raw(feedGridHTML(report, phases))}
 
         ${showGoalAsk ? raw(h`<div class="card goalcard ask" id="goalAsk"><div class="eb">ONE QUESTION</div><h2>What's the goal?</h2><p>The plan, your Monday move and the posts we write all lean toward it. You can change it later.</p>${raw(goalPickerHTML(null, null, followers, { first: true }))}</div>`) : ''}
         <div class="roastwrap" id="roastWrap" hidden></div>
@@ -918,7 +924,7 @@
             <summary>The four dimensions</summary>
             <div class="body">
               ${raw((s.dimensions || []).map(d => { const sc = clamp(d.score, 0, 100); const [g, gcc] = gradeIn({ score: sc, label: d.label }, s.summary); const hue = hueOf(d.label); const dd = hist?.delta_dimensions?.find(x => x.label === d.label);
-                return h`<div class="dimcard bd${hue}"><div class="top"><span class="n">${d.label}</span><span class="s hue${hue}">${sc} · ${g}${dd && dd.delta ? raw(h`<span class="dd g-${dd.delta > 0 ? 'strong' : 'weak'}">${dd.delta > 0 ? '+' : ''}${dd.delta}</span>`) : ''}</span></div>
+                return h`<div class="dimcard bd${hue}"><div class="top"><span class="n">${raw(glyph(d.label))}${d.label}</span><span class="s hue${hue}">${sc} · ${g}${dd && dd.delta ? raw(h`<span class="dd g-${dd.delta > 0 ? 'strong' : 'weak'}">${dd.delta > 0 ? '+' : ''}${dd.delta}</span>`) : ''}</span></div>
                   <div class="bar in"><div class="fill bg${hue}" style="width:${sc}%"></div>${d.category_avg != null ? raw(h`<div class="mark" style="left:${clamp(d.category_avg, 0, 100)}%"></div>`) : ''}</div>
                   <p>${d.explanation || ''}</p>${raw(checklistHTML(d.evidence))}${raw(evidenceHTML(d.evidence_posts))}${(() => { const ph = phaseForDim(d.label, phases); return ph ? raw(h`<a class="todo" href="#" data-dim-fix="${ph.key}m1">What to do about this →</a>`) : ''; })()}</div>`; }).join(''))}
               <div class="fine">${s.category_avg != null ? raw(h`The marker is your ${niche} average. ${raw(confPill(s.category_confidence || { level: s.category_sample_size >= 100 ? 'high' : s.category_sample_size >= 25 ? 'some' : 'low', label: s.category_sample_size >= 100 ? 'High confidence' : s.category_sample_size >= 25 ? 'Some evidence' : 'Needs more data', n: s.category_sample_size }))}`) : pending ? `The marker is your niche average. Your ${niche} average appears once ${pending.min_n} accounts are scored — ${pending.n} so far.` : nicheKnown ? 'The marker is your niche average.' : `Scored against all creators — we don't have enough ${niche} accounts yet.`}</div>
@@ -1023,6 +1029,7 @@
       if (!isSample) { report.moves_done = done; sset('sc_report_' + report.report_id, report); }
       $view.querySelectorAll('.phase').forEach((ph, i) => { const p = phases[i]; if (!p || !paid) return; const total = 1 + p.moves.length; const dn = (isDone(p.key + 'm1') ? 1 : 0) + p.moves.filter(m => isDone(p.key + 'm' + m.n)).length; const el = ph.querySelector('.prog'); if (el) el.textContent = `${dn} of ${total} done`; });
     }));
+    tintFor(report).then(t => { applyTint($view.querySelector('.report'), t); setFaviconShape(s.dimensions, t); }).catch(() => { });
     bindCta($view, { paid, reportId: report.report_id, openPost: i => { const det = $view.querySelector('#nextPosts')?.closest('details'); if (det) det.open = true; const art = $view.querySelector(`#nextPosts [data-post="${i}"]`); if (art) { art.scrollIntoView({ behavior: 'smooth', block: 'center' }); art.classList.add('flash'); setTimeout(() => art.classList.remove('flash'), 1600); } else toast('Your written posts arrive with the plan.'); } });
     $view.querySelectorAll('[data-dim-fix]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); const row = $view.querySelector(`[data-row="${a.dataset.dimFix}"]`); const det = row?.closest('details'); if (det) det.open = true; if (row) { row.classList.add('open'); row.scrollIntoView({ behavior: 'smooth', block: 'center' }); } }));
     $view.querySelector('[data-action=share]').addEventListener('click', () => { if (!isSample) track('share_clicked', { overall }, report.report_id); openShareSheet(report); });
@@ -1185,6 +1192,99 @@
         openPost(Number(b.dataset.post) || 0);
       }
     }));
+  }
+  // ---- visual identity: dimension glyphs, the signature shape, their colour, the annotated feed
+  const DIM_GLYPHS = {
+    consistency: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M2 7h12M6 1.5v3M10 1.5v3" stroke="currentColor" stroke-width="1.6"/></svg>',
+    mix: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2l6 3-6 3-6-3 6-3z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M2 8l6 3 6-3M2 11l6 3 6-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>',
+    engagement: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3h10a1 1 0 011 1v6a1 1 0 01-1 1H7l-3 3v-3H3a1 1 0 01-1-1V4a1 1 0 011-1z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>',
+    profile: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="5.5" r="2.8" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M2.5 14c.8-3 3-4.5 5.5-4.5s4.7 1.5 5.5 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>',
+  };
+  const dimKind = l => /consisten/i.test(l) ? 'consistency' : /mix|content/i.test(l) ? 'mix' : /engage/i.test(l) ? 'engagement' : /profile/i.test(l) ? 'profile' : null;
+  const glyph = l => { const k = dimKind(l); return k ? `<span class="glyph g-${k}">${DIM_GLYPHS[k]}</span>` : ''; };
+  // The signature shape: four dimensions as a kite — consistency up, mix right, engagement down, profile left.
+  // With a previous score the old shape sits as a ghost and the new one draws itself from it.
+  function shapeSVG(dims, prev, { size = 120, cls = '', label = true } = {}) {
+    const order = [/consisten/i, /mix|content/i, /engage/i, /profile/i];
+    const R = size / 2 - 4;
+    const pts = ds => order.map((re, i) => { const d = (ds || []).find(x => re.test(x.label)); const v = d ? clamp(d.score, 0, 100) / 100 : 0; const r = R * Math.max(v, 0.06); const a = -Math.PI / 2 + i * Math.PI / 2; return `${(size / 2 + r * Math.cos(a)).toFixed(1)},${(size / 2 + r * Math.sin(a)).toFixed(1)}`; }).join(' ');
+    const now = pts(dims), was = prev ? pts(prev) : null;
+    const axes = order.map((_, i) => { const a = -Math.PI / 2 + i * Math.PI / 2; return `<line x1="${size / 2}" y1="${size / 2}" x2="${(size / 2 + R * Math.cos(a)).toFixed(1)}" y2="${(size / 2 + R * Math.sin(a)).toFixed(1)}"/>`; }).join('');
+    const title = label && dims ? (dims || []).map(d => `${d.label} ${d.score}`).join(', ') : '';
+    return (`<svg class="sigshape ${cls}" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" role="img" aria-label="${title ? 'Your shape: ' + esc(title) : 'Score shape'}"><g class="axes">${axes}</g><circle class="ring" cx="${size / 2}" cy="${size / 2}" r="${R}"/>${was ? `<polygon class="ghost" points="${was}"/>` : ''}<polygon class="now" points="${was || now}">${was ? `<animate attributeName="points" from="${was}" to="${now}" dur="0.9s" begin="0.2s" fill="freeze" calcMode="spline" keySplines="0.2 0.7 0.2 1"/>` : ''}</polygon></svg>`);
+  }
+  // Their colour: the dominant hue of the top three post thumbnails, softened into two tokens.
+  async function tintFor(report) {
+    const cached = sget('sc_tint_' + report.report_id, null); if (cached) return cached;
+    const posts = [...(report.posts || [])].filter(p => p.thumbnail_url).sort((a, b) => ((b.likes || 0) + (b.comments || 0)) - ((a.likes || 0) + (a.comments || 0))).slice(0, 3);
+    if (!posts.length) return null;
+    const c = document.createElement('canvas'); c.width = 24; c.height = 24; const ctx = c.getContext('2d', { willReadFrequently: true });
+    let sx = 0, sy = 0, sw = 0, sat = 0, n = 0;
+    for (const p of posts) {
+      try {
+        const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = p.thumbnail_url; });
+        ctx.drawImage(img, 0, 0, 24, 24); const d = ctx.getImageData(0, 0, 24, 24).data;
+        for (let i = 0; i < d.length; i += 4) { const r = d[i] / 255, g = d[i + 1] / 255, b = d[i + 2] / 255; const mx = Math.max(r, g, b), mn = Math.min(r, g, b); const l = (mx + mn) / 2; const sv = mx === mn ? 0 : (mx - mn) / (1 - Math.abs(2 * l - 1)); if (sv < 0.18 || l < 0.12 || l > 0.9) continue; let hh = 0; if (mx === r) hh = ((g - b) / (mx - mn)) % 6; else if (mx === g) hh = (b - r) / (mx - mn) + 2; else hh = (r - g) / (mx - mn) + 4; const ang = hh * Math.PI / 3; sx += Math.cos(ang) * sv; sy += Math.sin(ang) * sv; sw += sv; sat += sv; n++; }
+      } catch { }
+    }
+    if (n < 40) return null;
+    let hue = Math.round((Math.atan2(sy, sx) * 180 / Math.PI + 360) % 360); const s0 = Math.min(0.55, Math.max(0.3, sat / n));
+    const hsl = (l) => `hsl(${hue} ${Math.round(s0 * 100)}% ${l}%)`;
+    const hex = (() => { const l = 0.4, ss = s0; const k = t => (t + hue / 30) % 12; const f = t => l - ss * Math.min(l, 1 - l) * Math.max(-1, Math.min(k(t) - 3, 9 - k(t), 1)); return '#' + [f(0), f(8), f(4)].map(x => Math.round(x * 255).toString(16).padStart(2, '0')).join(''); })();
+    const t = { tint: hsl(40), soft: hsl(93), deep: hsl(28), hex };
+    sset('sc_tint_' + report.report_id, t); return t;
+  }
+  const applyTint = (el, t) => { if (!el || !t) return; el.style.setProperty('--their', t.tint); el.style.setProperty('--their-soft', t.soft); el.style.setProperty('--their-deep', t.deep); el.classList.add('tinted'); };
+  // The favicon becomes their shape while they're looking at their own report.
+  function setFaviconShape(dims, t) {
+    try {
+      const c = document.createElement('canvas'); c.width = 64; c.height = 64; const ctx = c.getContext('2d');
+      ctx.fillStyle = '#FFF6E9'; ctx.beginPath(); ctx.arc(32, 32, 32, 0, Math.PI * 2); ctx.fill();
+      const order = [/consisten/i, /mix|content/i, /engage/i, /profile/i]; ctx.beginPath();
+      order.forEach((re, i) => { const d = (dims || []).find(x => re.test(x.label)); const v = d ? clamp(d.score, 0, 100) / 100 : 0; const r = 26 * Math.max(v, 0.08); const a = -Math.PI / 2 + i * Math.PI / 2; const x = 32 + r * Math.cos(a), y = 32 + r * Math.sin(a); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+      ctx.closePath(); ctx.fillStyle = (t && t.hex) || '#B84E2A'; ctx.fill();
+      let link = document.querySelector('link[rel="icon"][data-shape]'); if (!link) { link = document.createElement('link'); link.rel = 'icon'; link.dataset.shape = '1'; document.head.appendChild(link); }
+      link.href = c.toDataURL('image/png');
+    } catch { }
+  }
+  // Your feed, annotated: the last 30 posts as a grid, tinted by how each did against the typical post,
+  // with a mark on every post the plan uses.
+  function feedGridHTML(report, phases) {
+    const posts = [...(report.posts || [])].filter(p => p.posted_at).sort((a, b) => +new Date(b.posted_at) - +new Date(a.posted_at)).slice(0, 30);
+    if (posts.length < 6) return '';
+    const eng = p => (Number(p.likes) || 0) + (Number(p.comments) || 0);
+    const med = Number(report.post_insights?.avg_engagement) || (() => { const e = posts.filter(p => !p.is_pinned).map(eng).sort((a, b) => a - b); return e[Math.floor(e.length / 2)] || 1; })();
+    const marks = {};
+    const MARK = { pin: 'PIN', highlight: 'HL', repurpose: 'CUT', format: 'CUT', schedule: 'POST', bio_link: 'BIO', bio_cta: 'BIO', bio_rewrite: 'BIO', media_kit: 'KIT', other: 'PLAN' };
+    for (const ph of phases || []) for (const m of [ph.opener ? { ...ph.opener, topic: ph.opener.topic } : null, ...(ph.moves || [])]) { if (m && m.cta && m.cta.type === 'see_example' && m.cta.post_id) marks[m.cta.post_id] = MARK[m.topic] || 'PLAN'; }
+    const cells = posts.map(p => {
+      const r = med > 0 ? eng(p) / med : 1; const hidden = Number(p.likes) === 0 && (Number(p.comments) > 5 || Number(p.views) > 100);
+      const heat = r >= 2 ? 'hot' : r >= 1.2 ? 'warm' : r < 0.5 ? 'cold' : 'even';
+      const fmt = /reel|video/i.test(p.type) ? '▶' : /carousel/i.test(p.type) ? '▤' : '▪';
+      const title = `${fmtShort(p.posted_at)} · ${String(p.type || 'post')} · ${hidden ? 'likes hidden' : fmtN(p.likes) + ' likes'} · ${fmtN(p.comments)} comments${p.views ? ' · ' + fmtN(p.views) + ' views' : ''} · ${r.toFixed(1)}× your typical post`;
+      const inner = p.thumbnail_url ? h`<img src="${p.thumbnail_url}" alt="" loading="lazy">` : h`<span class="ph">${fmt}</span>`;
+      const badge = marks[p.id] ? h`<span class="mk">${marks[p.id]}</span>` : (p.is_pinned ? h`<span class="mk pinned">PINNED</span>` : '');
+      const x = heat === 'hot' || heat === 'cold' ? h`<span class="x">${r >= 10 ? Math.round(r) : r.toFixed(1)}×</span>` : '';
+      const tag = p.permalink ? 'a' : 'span';
+      return `<${tag} class="cell ${heat}" ${p.permalink ? `href="${esc(p.permalink)}" target="_blank" rel="noopener"` : ''} title="${esc(title)}" aria-label="${esc(title)}">${inner}${x}${badge}</${tag}>`;
+    }).join('');
+    const top = posts.reduce((a, p) => (eng(p) > eng(a) ? p : a), posts[0]); const topR = med > 0 ? eng(top) / med : 0;
+    const marked = Object.keys(marks).length;
+    return h`<div class="card feedcard">
+      <div class="fh"><h2>Your feed, annotated</h2><span class="fine">${posts.length} posts · tinted by likes + comments against your typical post (${fmtN(med)})</span></div>
+      <div class="feedgrid">${raw(cells)}</div>
+      <div class="fl"><span class="sw hot"></span> 2× or more <span class="sw warm"></span> above typical <span class="sw even"></span> typical <span class="sw cold"></span> under half${marked ? raw(h` · <b>${marked}</b> post${marked === 1 ? '' : 's'} the plan uses, marked`) : ''}</div>
+      ${topR >= 3 ? raw(h`<p class="marg">↑ One post did ${topR >= 10 ? Math.round(topR) : topR.toFixed(1)}× your typical. The plan re-cuts it, it doesn't chase it.</p>`) : ''}
+    </div>`;
+  }
+  // Marginalia: short pointer notes under the score box, from the data.
+  function marginaliaHTML(report) {
+    const s = report.scores || {}; const notes = [];
+    const cons = (s.dimensions || []).find(d => /consisten/i.test(d.label)); const m = cons && /([\d.]+)\/week vs ([\d.]+)\/week/.exec(cons.evidence || '');
+    if (m) notes.push(`${m[1]} posts a week against a ${report.calendar?.schedule?.per_week || m[2]}-a-week target. That's the number the plan moves first.`);
+    const bd = report.best_times?.best_days?.[0]; if (bd && bd.n >= 3 && bd.vs_avg >= 1.3) notes.push(`Your ${{ Mon: 'Monday', Tue: 'Tuesday', Wed: 'Wednesday', Thu: 'Thursday', Fri: 'Friday', Sat: 'Saturday', Sun: 'Sunday' }[bd.day] || bd.day} habit: ${bd.vs_avg}× your usual over ${bd.n} posts.`);
+    const prof = (s.dimensions || []).find(d => /profile/i.test(d.label)); if (prof && prof.score < 50) notes.push(`Profile is the cheapest points on the page: ${prof.score} today, ${prof.score < 50 ? 60 : 80} within reach in an afternoon.`);
+    return notes.length ? h`<ul class="marginalia">${raw(notes.slice(0, 3).map(n => h`<li>${n}</li>`).join(''))}</ul>` : '';
   }
   const targetLine = t => t ? h`<div class="target"><span class="tl">Target</span> ${t.dimension}${t.metric === 'score' ? '' : ' · ' + t.metric}: <b>${t.from}${t.unit || ''} → ${t.to}${t.unit || ''}</b></div>` : '';
   const confPill = c => c ? h`<span class="conf ${c.level}" title="${c.n} in the sample">${c.label} · ${c.n}</span>` : '';
@@ -1818,7 +1918,7 @@
         <header class="phead">
           <div class="l"><div class="eb">YOUR PATH · @${biz.handle}${path.plan_day ? raw(h` · DAY ${path.plan_day}`) : ''}</div>
             <h1>${path.free ? 'Start here.' : path.caught_up ? "You're caught up." : nowSteps.length > 1 ? `${nowSteps.length} things today.` : first && first.kind === 'slot' ? 'Post today.' : 'One thing today.'}</h1></div>
-          <div class="r"><a class="btn ghost sm" href="#/report/${report.report_id}">Your report</a></div>
+          <div class="r">${raw(shapeSVG((report.scores || {}).dimensions, null, { size: 44, cls: 'inhead', label: false }))}<button type="button" class="btn ghost sm" data-focus aria-pressed="${lget('sc_focus', false) ? 'true' : 'false'}">${lget('sc_focus', false) ? 'Exit focus' : 'Focus'}</button><a class="btn ghost sm" href="#/report/${report.report_id}">Your report</a></div>
         </header>
         <div class="pprog" role="progressbar" aria-valuemin="0" aria-valuemax="${path.progress.total}" aria-valuenow="${path.progress.done}" aria-label="Path progress">
           <div class="t"><span>${path.progress.done} of ${path.progress.total} done${path.progress.skipped ? raw(h` <em>· ${path.progress.skipped} skipped</em>`) : ''}</span><span>${path.phase ? `Days ${String(path.phase.range).replace('-', '–')} · ${path.phase.label} · ${path.phase.done}/${path.phase.total}` : ''}</span></div>
@@ -1838,13 +1938,14 @@
             <div class="plocked"><div class="eb">${locked.length} MORE STEPS IN YOUR GROWTH PLAN</div>${raw(locked.slice(0, 6).map((s, i) => h`<div class="prow ghost"><span class="k">${String(i + 4).padStart(2, '0')}</span><span class="t">${s.title}</span></div>`).join(''))}${locked.length > 6 ? raw(h`<div class="fine">…and ${locked.length - 6} more, plus your posting calendar and written posts.</div>`) : ''}
               <button class="btn" data-action="unlock-path">Start the plan · $${price}/mo${founders ? raw(h` <span class="fine">founders price</span>`) : ''}</button></div>
           </div>`) : ''}
-        ${!path.free && upcoming.length ? raw(h`<div class="pnext"><div class="eb">UP NEXT</div>${raw(upcoming.map(s => h`<button class="prow ${s.phase_open ? '' : 'ghost'}" data-open="${s.key}" ${s.phase_open ? '' : 'title="Opens with the next phase"'}><span class="k">${s.kind === 'slot' ? dueLabel(s.due) : `MOVE ${String(s.n).padStart(2, '0')}`}</span><span class="t">${s.kind === 'slot' && s.post ? s.post.hook : s.action || s.title}</span><span class="d">${s.kind === 'slot' ? `${s.day} · ${s.format}` : s.time || ''}</span></button>`).join(''))}</div>`) : ''}
-        ${doneSteps.length ? raw(h`<details class="pdone"><summary>Done and skipped <span class="fine">${doneSteps.length}</span></summary>${raw(doneSteps.map(s => h`<div class="prow done ${s.status}"><span class="k" aria-hidden="true">${s.status === 'done' ? '✓' : '→'}</span><span class="t">${s.action || s.title}${s.verified ? raw(h`<span class="fine ${s.verified.ok ? 'ok' : ''}">${s.verified.ok ? '✓✓ ' : ''}${s.verified.note}</span>`) : s.status === 'skipped' ? raw(h`<span class="fine">Skipped${s.skipped?.reason ? ' · ' + (PATH_SKIP_REASONS.find(r => r[0] === s.skipped.reason) || [])[1]?.toLowerCase() : ''}</span>`) : ''}</span><button class="undo" data-path="open" data-key="${s.key}">Undo</button></div>`).join(''))}</details>`) : ''}
+        ${!path.free && upcoming.length ? raw(h`<div class="pnext trail"><div class="eb">UP NEXT</div>${raw(upcoming.map(s => h`<button class="prow ${s.phase_open ? '' : 'ghost'}" data-open="${s.key}" ${s.phase_open ? '' : 'title="Opens with the next phase"'}><span class="k">${s.kind === 'slot' ? dueLabel(s.due) : `MOVE ${String(s.n).padStart(2, '0')}`}</span><span class="t">${s.kind === 'slot' && s.post ? s.post.hook : s.action || s.title}</span><span class="d">${s.kind === 'slot' ? `${s.day} · ${s.format}` : s.time || ''}</span></button>`).join(''))}</div>`) : ''}
+        ${doneSteps.length ? raw(h`<details class="pdone trail"><summary>Done and skipped <span class="fine">${doneSteps.length}</span></summary>${raw(doneSteps.map(s => h`<div class="prow done ${s.status}"><span class="k" aria-hidden="true">${s.status === 'done' ? '✓' : '→'}</span><span class="t">${s.action || s.title}${s.verified ? raw(h`<span class="fine ${s.verified.ok ? 'ok' : ''}">${s.verified.ok ? '✓✓ ' : ''}${s.verified.note}</span>`) : s.status === 'skipped' ? raw(h`<span class="fine">Skipped${s.skipped?.reason ? ' · ' + (PATH_SKIP_REASONS.find(r => r[0] === s.skipped.reason) || [])[1]?.toLowerCase() : ''}</span>`) : ''}</span><button class="undo" data-path="open" data-key="${s.key}">Undo</button></div>`).join(''))}</details>`) : ''}
       </div></div>${raw(footer())}`;
 
       const update = async (key, status, reason, momentFor) => {
         const btns = $view.querySelectorAll(`[data-key="${key}"]`); btns.forEach(b => { b.disabled = true; });
         try {
+          if (status === 'done') { const card = $view.querySelector('.pstep'); if (card && !matchMedia('(prefers-reduced-motion: reduce)').matches) { card.classList.add('leaving'); await new Promise(r => setTimeout(r, 220)); } }
           const before = path; path = await setStatus(key, status, reason);
           if (!isSample) { const cached = sget('sc_report_' + report.report_id, null); if (cached) { cached.moves_done = Object.fromEntries(path.steps.filter(s => s.status === 'done').map(s => [s.key, s.done_at || Date.now()])); sset('sc_report_' + report.report_id, cached); } track(status === 'done' ? 'path_done' : status === 'skip' ? 'path_skipped' : 'path_later', { key, reason }, report.report_id); }
           const step = before.steps.find(s => s.key === key);
@@ -1876,6 +1977,8 @@
       const openPost = (i) => { const slot = steps.find(x => x.kind === 'slot' && x.post && (x.post.n === i + 1 || x.post.n === i)); if (slot) showStep(slot.key); else go('#/report/' + report.report_id); };
       const bind = (root) => { bindCta(root, { paid: !path.free, reportId: report.report_id, openPost }); root.querySelector('[data-save-link]')?.addEventListener('click', () => saveLink(root)); root.querySelectorAll('[data-path]').forEach(b => b.addEventListener('click', () => { const key = b.dataset.key, st = b.dataset.path; if (st === 'skip') { const box = b.closest('.pstep').querySelector('.skipwhy'); box.hidden = !box.hidden; return; } update(key, st); })); root.querySelectorAll('[data-skip-reason]').forEach(b => b.addEventListener('click', () => update(b.dataset.key, 'skip', b.dataset.skipReason))); root.querySelectorAll('[data-skip-cancel]').forEach(b => b.addEventListener('click', () => { b.closest('.skipwhy').hidden = true; })); root.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', () => { const t = b.closest('.fld').querySelector('.txt, .hook')?.textContent || ''; navigator.clipboard?.writeText(t).then(() => toast('Copied.')).catch(() => toast('Select the text and copy it.')); })); };
       $view.querySelectorAll('[data-open], [data-ahead]').forEach(b => b.addEventListener('click', () => showStep(b.dataset.open || b.dataset.ahead)));
+      document.body.classList.toggle('focus', !!lget('sc_focus', false));
+      $view.querySelector('[data-focus]')?.addEventListener('click', e => { const on = !lget('sc_focus', false); lset('sc_focus', on); document.body.classList.toggle('focus', on); e.currentTarget.textContent = on ? 'Exit focus' : 'Focus'; e.currentTarget.setAttribute('aria-pressed', on ? 'true' : 'false'); });
       $view.querySelector('[data-save-link]')?.addEventListener('click', () => saveLink($view));
       bindCta($view, { paid: !path.free, reportId: report.report_id, openPost });
       if (qs.get('open') && !$view.dataset.opened) { $view.dataset.opened = '1'; const k = qs.get('open'); if (steps.some(x => x.key === k)) showStep(k); }
@@ -1905,7 +2008,7 @@
     const goalNow = knownGoal(r); const gp = goalNow ? goalProgress(goalNow, r.goal_target || sget('sc_goal', null)?.goal_target || null, r) : null;
     $view.innerHTML = h`<div class="wrap narrow"><div class="progress">
       <div class="ph"><div class="eb">@${r.business?.handle || ''} · ${hist ? `run ${hist.runs}` : 'first run'}</div><h1>${hist && hist.delta_overall != null ? (hist.delta_overall > 0 ? `Up ${hist.delta_overall} point${hist.delta_overall === 1 ? '' : 's'}.` : hist.delta_overall < 0 ? `Down ${-hist.delta_overall} point${hist.delta_overall === -1 ? '' : 's'}.` : 'Holding steady.') : 'Your trend starts at the first rescore.'}</h1></div>
-      <div class="card"><div class="bigrow"><span class="bignum">${r.scores?.overall ?? '—'}</span><div class="meta"><span class="fine">${hist ? `was ${hist.previous.overall} on ${fmtShort(hist.previous.generated_at)}` : 'scored ' + fmtDate(r.generated_at)}</span>${streak ? raw(h`<span class="streak ${streak.weeks ? 'on' : ''}">${streak.weeks ? `🔥 ${streak.weeks}-week streak` : 'Streak starts this week'}</span>`) : ''}</div></div>
+      <div class="card"><div class="bigrow"><span class="bignum">${r.scores?.overall ?? '—'}</span>${raw(shapeSVG(dims, hist ? dims.map(d => ({ label: d.label, score: clamp(d.score - (d.delta || 0), 0, 100) })) : null, { size: 96, cls: 'inbox' }))}<div class="meta"><span class="fine">${hist ? `was ${hist.previous.overall} on ${fmtShort(hist.previous.generated_at)}` : 'scored ' + fmtDate(r.generated_at)}</span>${streak ? raw(h`<span class="streak ${streak.weeks ? 'on' : ''}">${streak.weeks ? `🔥 ${streak.weeks}-week streak` : 'Streak starts this week'}</span>`) : ''}</div></div>
         ${raw(historyChartHTML(hist))}${!hist || !(hist.series || []).length ? raw('<div class="fine">The chart appears after your first weekly rescore.</div>') : ''}
         <div class="dims">${raw(dims.map(d => dimRow({ label: d.label, score: d.score }, null) + (d.delta != null ? h`<div class="fine dd">${d.delta > 0 ? '+' : ''}${d.delta} since last time</div>` : '')).join(''))}</div></div>
       <div class="card"><div class="eb">MOVES</div><div class="facts3"><div class="fact"><b>${Object.keys(done).length}</b><span>done</span></div><div class="fact"><b>${verified}</b><span>seen on your profile</span></div><div class="fact"><b>${Object.keys(skipped).length}</b><span>skipped</span></div></div>
@@ -1996,6 +2099,7 @@
   // ------------------------------------------------------------ router
   function route() {
     stopPolling(); window.scrollTo(0, 0);
+    if (!/^#\/path\//.test(location.hash || '')) document.body.classList.remove('focus');
     const hash = location.hash || '#/';
     const parts = hash.slice(1).split('?')[0].split('/').filter(Boolean);
     if (parts.length === 0) return viewLanding();
