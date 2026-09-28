@@ -129,6 +129,8 @@
   let foundersTaken = 212;
   const PRICING = {
     audience: 'creators',
+    // ?mock=1&waitlist=1 previews the closed-billing state (every Start button becomes "Join the waitlist").
+    billing_available: !/[?&]waitlist=1/.test(location.search),
     support_email: 'hello@futreeng.com',
     discount: { annual: '2 months free', note: "Annual is 10 months' price for 12" },
     refund: 'Not useful in the first 7 days? Reply to any email and we refund it.',

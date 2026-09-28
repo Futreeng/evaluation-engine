@@ -34,6 +34,7 @@ is why `SUPPORT_EMAIL` exists as the real contact point in footers.
 ```
 RESEND_API_KEY=re_…                        # Resend → API Keys → "Sending access" only
 MAIL_FROM=Scalecraft <hello@send.futreeng.com>   # must be on the verified domain
+REPLY_TO=hello@futreeng.com                 # Reply-To header on every email; a person reads this inbox
 EMAIL_POSTAL_ADDRESS=FutreEng LLC, <street>, <city, state zip>   # CAN-SPAM footer
 SUPPORT_EMAIL=hello@futreeng.com
 APP_URL=https://scalecraft.onrender.com    # links in emails

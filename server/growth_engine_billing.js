@@ -388,6 +388,9 @@ class BillingManager {
     const pro = plans.publicTier("growth_plan_pro");
     return {
       audience: "creators",
+      // false while production has no real Stripe key: nothing can be charged, so the
+      // app shows "join the waitlist" instead of Start buttons. Real checkout replaces it.
+      billing_available: !this.mockInProduction,
       pause: { months: Array.from({ length: Number(process.env.PAUSE_MAX_MONTHS || 3) }, (_, i) => i + 1) },
       maintenance: { ...plans.publicTier("maintenance"), hidden: true },
       tiers: [free, growth, pro],

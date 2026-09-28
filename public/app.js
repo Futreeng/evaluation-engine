@@ -142,7 +142,25 @@
     const tick = now => { const t = Math.min(1, (now - start) / ms); const e = 1 - Math.pow(1 - t, 3); el.textContent = Math.round(from + (to - from) * e); if (t < 1) requestAnimationFrame(tick); else el.textContent = to; };
     el.textContent = from; requestAnimationFrame(tick);
   }
-  function rememberPricing(p) { try { const g = (p.tiers || []).find(t => t.tier === 'growth_plan'); sset('sc_pricing', { at: Date.now(), cta: p.cta || null, variant: p.variant || 'control', growth_plan: g?.monthlyPrice, plan_unlock: p.one_time?.[0]?.price, one_time_sold: !!(p.one_time || []).length, founders: p.founders && p.founders.left > 0 ? p.founders : null, pro: (p.tiers || []).find(t => t.tier === 'growth_plan_pro')?.monthlyPrice, rescore: Object.fromEntries(Object.entries(p.limits || {}).map(([k, v]) => [k, v && v.rescore_days])) }); } catch { } }
+  function rememberPricing(p) { try { const g = (p.tiers || []).find(t => t.tier === 'growth_plan'); sset('sc_pricing', { at: Date.now(), billing_available: p.billing_available !== false, cta: p.cta || null, variant: p.variant || 'control', growth_plan: g?.monthlyPrice, plan_unlock: p.one_time?.[0]?.price, one_time_sold: !!(p.one_time || []).length, founders: p.founders && p.founders.left > 0 ? p.founders : null, pro: (p.tiers || []).find(t => t.tier === 'growth_plan_pro')?.monthlyPrice, rescore: Object.fromEntries(Object.entries(p.limits || {}).map(([k, v]) => [k, v && v.rescore_days])) }); } catch { } }
+  // False while production has no payment provider: every Start button becomes "Join the waitlist".
+  function billingOpen() { const pv = sget('sc_pricing', null); return !pv || pv.billing_available !== false; }
+  // The waitlist form that stands in for a Start button while billing is closed. `tier` is what they wanted.
+  function waitlistHTML(tier, { ghost = false } = {}) {
+    const email = sget('sc_form', {}).email || '';
+    return h`<form class="wl" data-waitlist="${tier}"><input type="email" name="email" value="${email}" placeholder="you@email.com" autocomplete="email" aria-label="Email for the waitlist" required><button type="submit" class="btn ${ghost ? 'ghost' : ''}">Join the waitlist</button><span class="fine">Plans open soon. We email you the day checkout opens.</span></form>`;
+  }
+  function bindWaitlist(root) {
+    root.querySelectorAll('form[data-waitlist]').forEach(f => f.addEventListener('submit', async e => {
+      e.preventDefault(); const email = f.email.value.trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast('Add an email first.'); return; }
+      const b = f.querySelector('button'); b.disabled = true;
+      try { await api('/waitlist', { method: 'POST', body: JSON.stringify({ email, platform: 'plan' }) }); } catch { }
+      sset('sc_form', { ...sget('sc_form', {}), email }); track('waitlist_joined', { tier: f.dataset.waitlist, from: location.hash.split('?')[0] });
+      const fd = sget('sc_pricing', null)?.founders;
+      f.outerHTML = h`<div class="waitdone">You're on the list — we'll write to ${email} the day checkout opens.${fd ? ` Founders pricing ($${fd.monthlyPrice}/mo) is held for the list while spots last.` : ''}</div>`;
+    }));
+  }
   // Admin link in the nav: ask /auth/me once per token and remember the answer.
   async function refreshAdminFlag() {
     if (!token()) { try { localStorage.removeItem('sc_admin'); } catch { } return; }
@@ -997,12 +1015,12 @@
           ${isSample ? raw(h`<div class="refresh"><div class="t"><h2>This is what $${price} a month gets you${founders ? " (founders price)" : ""}</h2><p>Every move with the reason behind it, a week-by-week posting calendar and posts written from the account's own material, competitors scored the same way, and a fresh score every week. Yours starts with a free Snapshot.</p></div><a class="btn green" href="#/" data-scroll="evalForm">Score my account free</a></div>`)
           : paid && once ? raw(h`<div class="notin"><div class="hd"><h2>Not in your 60-day plan</h2><p>Yours to keep, as bought. This is what the Growth Plan adds, for $${price} a month — less than the $${oneTime} you paid once.</p></div>
               <div class="rows">${raw(['Days 61–90 — phase 3, moves 10 through 13', 'Re-scored every week, with what each move changed', 'Day-30 and day-60 check-ins that reshape the plan', 'Up to 5 competitors, scored the same way', 'Score and follower history', 'A fresh plan every 90 days'].map(t => h`<div><i>🔒</i>${t}</div>`).join(''))}</div>
-              <button class="btn green" data-action="unlock">Start the plan · $${price}/mo</button></div>`)
+              <button class="btn green" data-action="unlock">${billingOpen() ? `Start the plan · $${price}/mo` : 'Join the waitlist'}</button></div>`)
           : paid ? raw(h`<div class="refresh"><div class="t"><h2>This plan refreshes ${(sget('sc_pricing', null)?.rescore || {})[report.tier] === 3 ? 'every 3 days' : 'weekly'}</h2><p>${Object.keys(done).length ? `You did ${Object.keys(done).length} move${Object.keys(done).length === 1 ? '' : 's'} — we'll re-score you and tell you what changed.` : 'Run it again any time — the moves and calendar are rewritten against your latest posts.'}</p></div><a class="btn green" href="#/" data-scroll="evalForm">Run a fresh evaluation</a></div>`)
           : raw(h`<div class="upsell"><h2>Unlock your full Growth Plan</h2><p>${report.upsell?.unlock_count || 12} locked items: the remaining moves and your week-by-week calendar, written from your own posts — and around four quick answers about your next 90 days, so it's a plan you can actually do.</p>
               <div class="paths">
-                <div class="path main"><div class="pn">Growth Plan · <b>$${price}/mo</b>${founders ? raw(h` <span class="fine">founders price · ${fmtN(founders.left)} spots left</span>`) : ''}</div><div class="pd">Your full plan, posts written for you every week, and a score that moves — rescored weekly with check-ins at day 30 and 60.</div><button class="btn" data-action="unlock">Start the plan →</button></div>
-                ${oneTime ? raw(h`<div class="path"><div class="pn">60-day plan · <b>$${oneTime} once</b></div><div class="pd">Phases 1 and 2 — moves 01–09 and 8 weeks of calendar, written once. No subscription.</div><button class="btn light" data-action="unlock-once">Get the 60-day plan</button></div>`) : ''}
+                <div class="path main"><div class="pn">Growth Plan · <b>$${price}/mo</b>${founders ? raw(h` <span class="fine">founders price · ${fmtN(founders.left)} spots left</span>`) : ''}</div><div class="pd">Your full plan, posts written for you every week, and a score that moves — rescored weekly with check-ins at day 30 and 60.</div><button class="btn" data-action="unlock">${billingOpen() ? `Start the plan →` : 'Join the waitlist'}</button></div>
+                ${oneTime ? raw(h`<div class="path"><div class="pn">60-day plan · <b>$${oneTime} once</b></div><div class="pd">Phases 1 and 2 — moves 01–09 and 8 weeks of calendar, written once. No subscription.</div><button class="btn light" data-action="unlock-once">${billingOpen() ? 'Get the 60-day plan' : 'Join the waitlist'}</button></div>`) : ''}
               </div>
               <div class="fine">Cancel anytime. Keep the report either way.</div></div>`)}
 
@@ -1091,8 +1109,8 @@
       if (new URLSearchParams(location.hash.split('?')[1] || '').get('roast') === '1') { if (report.roast) reveal(report.roast); else pick(); }
     }
     // Both paid paths go through the 60-second intake first.
-    $view.querySelector('[data-action=unlock]')?.addEventListener('click', () => { sset('sc_intent_tier', 'growth_plan'); sset('sc_form', { handle: biz.handle, platform: biz.platform, category: biz.category, email: sget('sc_form', {}).email || report.email || '' }); go(`#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=subscribe`); });
-    $view.querySelector('[data-action=unlock-once]')?.addEventListener('click', () => { sset('sc_once_price', oneTime); go(`#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=once`); });
+    $view.querySelector('[data-action=unlock]')?.addEventListener('click', () => { if (!billingOpen()) { sset('sc_intent_tier', 'growth_plan'); sset('sc_unlock_report', report.report_id); go('#/pricing'); return; } sset('sc_intent_tier', 'growth_plan'); sset('sc_form', { handle: biz.handle, platform: biz.platform, category: biz.category, email: sget('sc_form', {}).email || report.email || '' }); go(`#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=subscribe`); });
+    $view.querySelector('[data-action=unlock-once]')?.addEventListener('click', () => { if (!billingOpen()) { go('#/pricing'); return; } sset('sc_once_price', oneTime); go(`#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=once`); });
     // Check-in "nothing changed" and nudge answers
     const answer = async (b, body, doneMsg) => {
       b.disabled = true;
@@ -1248,11 +1266,12 @@
       const lim = pricing.limits || {};
       const limLine = t => { const l = lim[t]; return l ? `${l.written_posts_per_week} posts written a week · ${l.post_regens_per_week} rewrites · ${l.post_reviews_per_week} post reviews · ${l.competitor_handles} competitors · rescored every ${l.rescore_days} day${l.rescore_days === 1 ? '' : 's'}` : ''; };
       const col = (t, extra) => h`<div class="feats">${raw((t.features || []).map(f => h`<div>${f}</div>`).join(''))}</div>${extra ? raw(extra) : ''}`;
+      const open = pricing.billing_available !== false;
       $view.innerHTML = h`<div class="wrap"><div class="pricing">
         ${limitMsg ? raw(h`<div class="notice" style="margin-bottom:18px">${limitMsg}</div>`) : ''}
         <h1>Pay when the plan is worth doing.</h1>
-        <p class="lede">Score first, free. Unlock the rest when you've read it and decided it's right.</p>
-        ${fd ? raw(h`<div class="founders-bar"><b>Founders pricing:</b> ${fmtN(fd.left)} of ${fmtN(fd.cap)} spots left — Growth at $${fd.monthlyPrice}/mo or $${fd.annualPrice}/yr, locked in for as long as you stay subscribed.</div>`) : ''}
+        <p class="lede">${open ? "Score first, free. Unlock the rest when you've read it and decided it's right." : "Score first, free. Paid plans open soon — join the waitlist and we'll email you the day checkout opens."}</p>
+        ${fd ? raw(h`<div class="founders-bar"><b>Founders pricing:</b> ${fmtN(fd.left)} of ${fmtN(fd.cap)} spots left — Growth at $${fd.monthlyPrice}/mo or $${fd.annualPrice}/yr, locked in for as long as you stay subscribed.${open ? '' : ' Held for the waitlist.'}</div>`) : ''}
         <div class="toggle" role="tablist" aria-label="Billing period"><button type="button" role="tab" aria-selected="${annual ? 'false' : 'true'}" class="${annual ? '' : 'on'}" data-billing="monthly">Monthly</button><button type="button" role="tab" aria-selected="${annual ? 'true' : 'false'}" class="${annual ? 'on' : ''}" data-billing="annual">Annual · ${pricing.discount?.annual || '2 months free'}</button></div>
         <div class="tiers three">
           <div class="card tier">
@@ -1267,12 +1286,12 @@
             <div class="price"><span class="p">$${gPrice}</span><span class="per">${annual ? '/ year' : '/ month'}</span>${fd && gPrice !== gList ? raw(h`<span class="was">$${gList}</span>`) : ''}</div>
             <div class="note">${growthLine ? raw(h`<span class="promoline">${promoState.code}: ${growthLine}</span>`) : fd ? `Founders price · ${fmtN(fd.left)} spots left` : annual ? 'Two months free' : `Or $${yr(growth)} a year — 2 months free`}</div>
             ${raw(col(growth, h`<div class="fine">${limLine('growth_plan')}</div>`))}
-            <button type="button" class="btn" data-subscribe="growth_plan" ${cur('growth_plan') ? 'disabled' : ''}>${cur('growth_plan') ? 'Current plan' : (growth.cta || 'Start Growth')}</button>
+            ${open || cur('growth_plan') ? raw(h`<button type="button" class="btn" data-subscribe="growth_plan" ${cur('growth_plan') ? 'disabled' : ''}>${cur('growth_plan') ? 'Current plan' : (growth.cta || 'Start Growth')}</button>`) : raw(waitlistHTML('growth_plan'))}
             <div class="fine center">Cancel in two clicks. Keep the report either way.${SHIPPED ? raw(' · <a href="#/report/sample">See a full report</a>') : ''}</div>
           </div>
           ${pro ? raw(h`<div class="card tier procard ${proOpen ? 'open' : ''} ${cur('growth_plan_pro') ? 'cur' : ''}">
             <button type="button" class="prohead" data-expand><div><div class="n">${pro.name}</div><div class="price"><span class="p">$${annual ? yr(pro) : pro.monthlyPrice}</span><span class="per">${annual ? '/ year' : '/ month'}</span></div><div class="note">${pro.description || ''}</div></div><span class="caret">${proOpen ? '−' : '+'}</span></button>
-            <div class="probody">${raw(col(pro, h`<div class="fine">${limLine('growth_plan_pro')}</div>`))}<button type="button" class="btn ghost block" data-subscribe="growth_plan_pro" ${cur('growth_plan_pro') ? 'disabled' : ''}>${cur('growth_plan_pro') ? 'Current plan' : (pro.cta || 'Start Pro')}</button></div>
+            <div class="probody">${raw(col(pro, h`<div class="fine">${limLine('growth_plan_pro')}</div>`))}${open || cur('growth_plan_pro') ? raw(h`<button type="button" class="btn ghost block" data-subscribe="growth_plan_pro" ${cur('growth_plan_pro') ? 'disabled' : ''}>${cur('growth_plan_pro') ? 'Current plan' : (pro.cta || 'Start Pro')}</button>`) : raw(waitlistHTML('growth_plan_pro', { ghost: true }))}</div>
           </div>`) : ''}
         </div>
         ${(pricing.one_time || []).length ? raw((pricing.one_time || []).map(o => h`<div class="card tier once"><div class="th"><span class="n">${o.name}</span><span class="tag fair">ONE-TIME</span></div><div class="price"><span class="p">$${o.price}</span><span class="per">once</span></div><div class="note">${o.description}</div><div class="feats">${raw((o.features || []).map(f => h`<div>${f}</div>`).join(''))}</div><a class="btn ghost" href="#/" data-scroll="evalForm">${o.cta}</a></div>`).join('')) : ''}
@@ -1285,6 +1304,7 @@
           : raw(h`<a href="#" data-promo="open">${pcode ? `Apply code ${pcode}` : 'Have a code?'}</a><form id="promoForm" ${pcode ? '' : 'hidden'}><input type="text" name="code" placeholder="CODE" autocomplete="off" autocapitalize="characters" maxlength="24"><button class="btn ghost sm" type="submit">Apply</button><span class="fine" id="promoMsg"></span></form>`)}</div>
         <div class="pfoot"><div>All tiers keep your report history. Cancel in two clicks. <a href="#/business">Business pricing →</a></div><div>${pricing.refund || 'Not useful in the first 7 days? Reply to any email and we refund it.'}${supportEmail() ? raw(h` Or write to <a href="mailto:${supportEmail()}">${supportEmail()}</a>.`) : ''}</div></div>
       </div></div>${raw(footer())}`;
+      bindWaitlist($view);
       $view.querySelectorAll('[data-billing]').forEach(b => b.addEventListener('click', () => { billing = b.dataset.billing; sset('sc_billing', billing); render(); }));
       $view.querySelector('[data-expand]')?.addEventListener('click', () => { sset('sc_pro_open', !proOpen); render(); });
       $view.querySelectorAll('[data-subscribe]').forEach(b => b.addEventListener('click', async () => {
@@ -1299,7 +1319,12 @@
           const last = sget('sc_form', {});
           if (last.handle && last.platform && last.category) { toast(`You're on. Writing the full plan for @${last.handle}…`); await submitEvaluation(last, null); return; }
           toast("You're on. Score an account to get the full plan."); go('#/');
-        } catch (e) { if (e.status === 401) return; toast(e.message || 'Subscription failed.'); b.disabled = false; b.textContent = label; }
+        } catch (e) {
+          if (e.status === 401) return;
+          // The server refuses paid flows until a real payment provider is wired: fall back to the waitlist.
+          if (e.body?.code === 'BILLING_UNAVAILABLE' || e.status === 503) { pricing.billing_available = false; rememberPricing(pricing); toast("Checkout isn't open yet — join the waitlist and we'll tell you when it is."); render(); return; }
+          toast(e.message || 'Subscription failed.'); b.disabled = false; b.textContent = label;
+        }
       }));
       // promo box
       $view.querySelector('[data-promo=open]')?.addEventListener('click', e => { e.preventDefault(); const f = $view.querySelector('#promoForm'); f.hidden = false; f.code.focus(); if (f.code.value) f.requestSubmit(); });
@@ -1836,7 +1861,7 @@
         ${path.free ? raw(h`<div class="pfree">
             ${raw(steps.filter(s => s.live).map((s, i) => h`<div class="prow ${i === 0 ? 'now' : ''}"><span class="k">${String(i + 1).padStart(2, '0')}</span><span class="t"><b>${s.action}</b>${s.why ? raw(h`<span class="fine">${s.why}</span>`) : ''}</span><span class="d">Days ${String(s.phase_range).replace('-', '–')}</span></div>`).join(''))}
             <div class="plocked"><div class="eb">${locked.length} MORE STEPS IN YOUR GROWTH PLAN</div>${raw(locked.slice(0, 6).map((s, i) => h`<div class="prow ghost"><span class="k">${String(i + 4).padStart(2, '0')}</span><span class="t">${s.title}</span></div>`).join(''))}${locked.length > 6 ? raw(h`<div class="fine">…and ${locked.length - 6} more, plus your posting calendar and written posts.</div>`) : ''}
-              <button class="btn" data-action="unlock-path">Start the plan · $${price}/mo${founders ? raw(h` <span class="fine">founders price</span>`) : ''}</button></div>
+              <button class="btn" data-action="unlock-path">${billingOpen() ? raw(h`Start the plan · $${price}/mo${founders ? raw(h` <span class="fine">founders price</span>`) : ''}`) : 'Join the waitlist'}</button></div>
           </div>`) : ''}
         ${!path.free && upcoming.length ? raw(h`<div class="pnext"><div class="eb">UP NEXT</div>${raw(upcoming.map(s => h`<button class="prow ${s.phase_open ? '' : 'ghost'}" data-open="${s.key}" ${s.phase_open ? '' : 'title="Opens with the next phase"'}><span class="k">${s.kind === 'slot' ? dueLabel(s.due) : `MOVE ${String(s.n).padStart(2, '0')}`}</span><span class="t">${s.kind === 'slot' && s.post ? s.post.hook : s.action || s.title}</span><span class="d">${s.kind === 'slot' ? `${s.day} · ${s.format}` : s.time || ''}</span></button>`).join(''))}</div>`) : ''}
         ${doneSteps.length ? raw(h`<details class="pdone"><summary>Done and skipped <span class="fine">${doneSteps.length}</span></summary>${raw(doneSteps.map(s => h`<div class="prow done ${s.status}"><span class="k" aria-hidden="true">${s.status === 'done' ? '✓' : '→'}</span><span class="t">${s.action || s.title}${s.verified ? raw(h`<span class="fine ${s.verified.ok ? 'ok' : ''}">${s.verified.ok ? '✓✓ ' : ''}${s.verified.note}</span>`) : s.status === 'skipped' ? raw(h`<span class="fine">Skipped${s.skipped?.reason ? ' · ' + (PATH_SKIP_REASONS.find(r => r[0] === s.skipped.reason) || [])[1]?.toLowerCase() : ''}</span>`) : ''}</span><button class="undo" data-path="open" data-key="${s.key}">Undo</button></div>`).join(''))}</details>`) : ''}

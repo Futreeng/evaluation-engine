@@ -306,6 +306,13 @@ answers on when to post, Instagram steps that don't exist. Two parts:
 - **One primary button per screen**: Share and Roast are secondary on the report, "See the
   plan" is secondary on the reports page, the opportunity card's Start this move is primary.
 
+### Waitlist until checkout exists, and the emails (28 Sept)
+
+- `GET /billing/pricing` now carries `billing_available` (false on production without a real Stripe key — the same condition that makes `/billing/subscribe` refuse with 503 `BILLING_UNAVAILABLE`). While it's false every Start button — pricing page Growth and Pro, the report upsell, the 60-day plan, the Path paywall — becomes **Join the waitlist**: an email form posting to `/waitlist` with platform `plan`, so the admin waitlist counts show who tried to pay. The founders bar reads "Held for the waitlist." A subscribe call that still hits the 503 falls back to the same form. Preview locally with `?mock=1&waitlist=1`. A real checkout page replaces this the day Stripe is live (Joe).
+- Every email now sets `Reply-To` (`REPLY_TO`, default `SUPPORT_EMAIL`, then hello@futreeng.com); `MAIL_FROM` stays on the verified `send.futreeng.com`. The footer says "Reply to this email and a person answers."
+- Email design pass in `server/mailer.js`: tables only (Gmail and Outlook drop flex), a masthead with a colour mark and an eyebrow naming the email, the account line, a preheader for the inbox preview, the score set large with its grade, the four dimensions as bars (with deltas on the weekly rescore), moves with why, how-steps and done-when, a 2.4× figure on post reviews, and a data-window note. Report-ready and score-changed now receive the dimension scores from the job queue.
+- `node scripts/email_preview.js [dir]` renders all ten templates with sample data, footer included, without sending — for design review and Resend tests.
+
 ## Also fixed along the way
 
 - Stored report bodies carried a provisional `report_id` (share sheet broke).

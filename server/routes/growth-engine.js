@@ -915,7 +915,8 @@ router.post("/waitlist", async (req, res) => {
     if (!/^[a-z]{1,30}$/.test(platform)) return sendError(res, 400, "INVALID_PLATFORM", "Platform is required");
     await geDb.addWaitlist(email, platform);
     // Founders pricing (P.2) applies itself at checkout while spots last — no code is handed out here.
-    // "launch" is the landing-page note list; platforms are the "soon" waitlists; "business" the phase-2 list.
+    // "launch" is the landing-page note list; platforms are the "soon" waitlists; "business" the phase-2 list;
+    // "plan" is people who tried to pay while billing was closed (pricing page, report and Path unlock buttons).
     res.json({ ok: true, platform, promo: null });
   } catch (err) {
     sendError(res, 500, "WAITLIST_ERROR", err.message);

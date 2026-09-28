@@ -1120,3 +1120,12 @@ button.prow:hover { background: var(--ground); transform: translateX(2px); }
 .progress .targets li.hit span { color: var(--strong); }
 .progress .acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
 .progress .goalbar { margin-top: 14px; }
+
+/* Waitlist stand-in for Start buttons while billing is closed (pricing, report upsell, Path). */
+.wl { display: flex; flex-direction: column; gap: 8px; margin-top: 22px; }
+.wl input { min-height: 48px; padding: 12px 16px; border: 1px solid var(--line); border-radius: var(--r-pill); background: var(--card); color: var(--ink); font-size: 15px; outline: none; }
+.wl .btn { margin-top: 0; width: 100%; }
+.wl .fine { text-align: center; font-size: 12px; }
+.tier.dark .wl input { border: 0; background: var(--dark-inset); color: var(--on-dark); }
+.tier.dark .wl input::placeholder { color: var(--on-dark-dim); }
+.tier .waitdone { margin-top: 22px; }
