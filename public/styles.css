@@ -190,7 +190,7 @@ p { margin: 0; }
 .howstrip .it p { font-size: 14px; color: var(--body); }
 .founders { padding: 26px; background: var(--dark); color: var(--on-dark); border-radius: var(--r-card); display: flex; flex-wrap: wrap; gap: 18px; align-items: center; margin-bottom: 36px; }
 .founders .t { flex: 1 1 320px; }
-.founders h3 { font-size: 24px; color: var(--on-dark); letter-spacing: -.025em; }
+.founders h2, .founders h3 { font-size: 24px; color: var(--on-dark); letter-spacing: -.025em; }
 .founders p { margin-top: 8px; font-size: 15px; color: var(--on-dark-muted); line-height: 1.5; }
 .founders form { display: flex; flex-wrap: wrap; gap: 8px; flex: 1 1 280px; min-width: 0; }
 .founders form input { flex: 1 1 180px; min-width: 0; }
@@ -201,7 +201,7 @@ p { margin: 0; }
 .founders .mark { font-size: 11px; letter-spacing: .1em; color: var(--on-dark-dim); width: 100%; }
 .sharepromo { display: flex; flex-wrap: wrap; gap: 24px; align-items: center; padding: 26px; margin-bottom: 36px; }
 .sharepromo .t { flex: 1 1 280px; }
-.sharepromo h3 { font-size: 24px; }
+.sharepromo h2, .sharepromo h3 { font-size: 24px; letter-spacing: -.02em; }
 .sharepromo p { margin-top: 8px; font-size: 15px; color: var(--body); }
 .sharepromo .mini { width: 120px; flex: none; border-radius: 16px; overflow: hidden; }
 .sharepromo .mini canvas { display: block; width: 100%; height: auto; }
@@ -1214,3 +1214,19 @@ body.focus .sigshape .now { fill: var(--on-dark); stroke: var(--on-dark); }
 .tier.dark .wl input::placeholder { color: var(--on-dark-dim); }
 .tier .waitdone { margin-top: 22px; }
 
+/* The score reads as "71 out of 100": the denominator sits small at the number's top right. */
+.bigwrap { display: inline-flex; align-items: flex-start; }
+.bigwrap .of { font-family: var(--sans); font-size: 14px; font-weight: 700; letter-spacing: 0; line-height: 1; color: var(--muted); margin: 8px 0 0 5px; }
+.scorecard .bigwrap .of { font-size: 15px; margin-top: 10px; }
+/* Level pill and the points-to-next line stay on their own lines instead of wrapping inside the pill. */
+.scorebox .next { font-size: 12px; color: var(--muted); margin-top: -2px; }
+@media (max-width: 560px) {
+  .scorebox .bigrow { flex-wrap: wrap; gap: 14px 18px; }
+  .scorebox .meta { flex: 1 1 100%; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+  .scorebox .meta .next, .scorebox .meta .f { flex-basis: 100%; margin-top: -2px; }
+  /* The poster card and its caption share the row on a phone instead of stacking with a blank column. */
+  .sharepromo { flex-wrap: nowrap; gap: 18px; padding: 20px; }
+  .sharepromo .mini { width: 96px; }
+  .sharepromo .t { flex: 1 1 auto; min-width: 0; }
+  .sharepromo h2 { font-size: 22px; }
+}

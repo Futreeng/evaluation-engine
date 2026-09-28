@@ -56,6 +56,7 @@ function drawScore(ctx, W, H, d, size) {
     y += M.numThen * 1.08; ctx.font = sans(M.label, 600); ctx.fillText(d.span || "in six weeks", P, y); y += M.label * 1.9;
   } else {
     ctx.font = dsp(M.num); ctx.fillText(String(d.overall), P - 14, y);
+    { const w = ctx.measureText(String(d.overall)).width; ctx.font = sans(Math.round(M.label * 1.2), 700); ctx.globalAlpha = 0.7; ctx.fillText("/100", P - 14 + w + 18, y + Math.round(M.num * 0.05)); ctx.globalAlpha = 1; }
     y += M.num * 1.02;
     ctx.font = sans(M.label, 600); ctx.fillText("My Scalecraft Social score", P, y); y += M.label * 1.45;
     if (Number.isFinite(d.niche_avg)) { ctx.font = sans(M.sub, 500); ctx.globalAlpha = 0.85; ctx.fillText(`${nicheName(d.niche)} average ${Math.round(d.niche_avg)}`, P, y); ctx.globalAlpha = 1; y += M.sub * 1.5; }
