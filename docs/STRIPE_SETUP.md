@@ -25,6 +25,27 @@ a card. Code: `server/growth_engine_stripe.js` (sessions, webhook, portal),
 Cancel, pause and resume in the app call Stripe directly using the stored
 subscription id. "Card & receipts" on the account page opens Stripe's portal.
 
+## What the account looks like (28 Sept)
+
+- The dashboard uses **Sandboxes** instead of a test-mode toggle. Sandbox keys
+  and webhooks only work inside that sandbox; live keys come from the main
+  account when you go live.
+- **Managed Payments is on by default.** Stripe (through Link) is the merchant of
+  record: it collects and remits sales tax itself, and the checkout page says
+  "Sold through Link". Two consequences the code already handles: every product
+  carries a tax code (`STRIPE_TAX_CODE`, default SaaS personal use), and
+  `automatic_tax` is never sent unless `STRIPE_AUTOMATIC_TAX=true`. It also needs
+  the Stripe SDK at v22+ (API 2025-03-31 or later); `server/package.json` has it.
+  To turn Managed Payments off instead: Settings → Managed Payments in the
+  dashboard, then nothing else changes.
+- Products and prices were created by `node scripts/stripe_products.js`; the ids
+  are in `server/.env` as `STRIPE_PRODUCTS_JSON` / `STRIPE_PRICES_JSON`. Re-run the
+  script in the live account when the time comes and copy its two lines to Render.
+- Verified against the sandbox on 28 Sept: checkout session at the founders $12,
+  a real $12 subscription applied through the signed webhook (plan on, founders
+  flag, period end stored), bad signature refused, customer portal session
+  created, cancel from the app recorded on the Stripe subscription.
+
 ## Dashboard (test mode first)
 
 1. **Developers → API keys**: copy the secret key. Local: `STRIPE_API_KEY` in
@@ -39,12 +60,9 @@ subscription id. "Card & receipts" on the account page opens Stripe's portal.
    payment method, invoice history. Return URL is set by the app.
 4. **Settings → Business**: legal name FutreEng LLC, support email
    hello@futreeng.com, statement descriptor `SCALECRAFT`.
-5. **Products** (optional). Checkout carries the amount itself, so nothing
-   needs to exist in the catalogue. If you'd rather see named products in
-   reports, create them and put the ids in `STRIPE_PRODUCTS_JSON`; to bill from
-   dashboard Prices instead, put the ids in `STRIPE_PRICES_JSON` (a price is
-   used only when its amount matches the app's quote, so founders $12/$108 and
-   Growth $19/$190 each need their own). Formats in `server/.env.example`.
+5. **Products**: `node scripts/stripe_products.js` creates or finds the
+   catalogue with tax codes and prints the two env lines. Checkout falls back to
+   carrying the amount itself if a price id doesn't match the app's quote.
 6. **Stripe Tax** (optional): enable in the dashboard, then `STRIPE_AUTOMATIC_TAX=true`.
 7. Live mode: repeat 1–3 with live keys. Never edit or delete a price a
    subscriber is on; create a new one.

@@ -32,6 +32,11 @@ const PRODUCT_IDS = jsonEnv("STRIPE_PRODUCTS_JSON");
 const APP = (process.env.APP_URL || "http://localhost:3005").replace(/\/$/, "");
 const NAMES = { growth_plan: "Scalecraft Growth Plan", growth_plan_pro: "Scalecraft Pro", maintenance: "Scalecraft Maintenance", plan_unlock: "Scalecraft 60-day plan" };
 
+// Stripe Tax is opt-in. Accounts on Managed Payments (Stripe as merchant of
+// record) handle tax themselves and reject the parameter, so it's only sent
+// when STRIPE_AUTOMATIC_TAX=true.
+const taxParams = () => process.env.STRIPE_AUTOMATIC_TAX === "true" ? { automatic_tax: { enabled: true }, customer_update: { address: "auto" } } : {};
+
 // Sessions being applied right now, so a webhook and a browser return that
 // land together don't both grant.
 const inflight = new Map();
@@ -59,7 +64,7 @@ class StripeCheckout {
     }
     const price_data = { currency: "usd", unit_amount: amountCents };
     if (PRODUCT_IDS[tier]) price_data.product = PRODUCT_IDS[tier];
-    else price_data.product_data = { name: `${NAMES[tier] || tier}${founder ? " · founders price" : ""}` };
+    else price_data.product_data = { name: `${NAMES[tier] || tier}${founder ? " · founders price" : ""}`, tax_code: process.env.STRIPE_TAX_CODE || "txcd_10103000" };
     if (!oneTime) price_data.recurring = { interval: cycle === "annual" ? "year" : "month" };
     return { price_data, quantity: 1 };
   }
@@ -91,7 +96,7 @@ class StripeCheckout {
       allow_promotion_codes: !promo,
       success_url: `${APP}/#/checkout/done?session_id={CHECKOUT_SESSION_ID}${returnTo ? `&to=${encodeURIComponent(returnTo)}` : ""}`,
       cancel_url: `${APP}/#/pricing?checkout=cancelled`,
-      customer_update: { address: "auto" }, automatic_tax: { enabled: process.env.STRIPE_AUTOMATIC_TAX === "true" },
+      ...taxParams(),
     };
     if (promo?.stripeCouponId) params.discounts = [{ coupon: promo.stripeCouponId }];
     else if (promo?.freeMonths) params.subscription_data.trial_period_days = promo.freeMonths * 30;
@@ -110,7 +115,7 @@ class StripeCheckout {
       line_items: [line], metadata, payment_intent_data: { metadata },
       success_url: `${APP}/#/checkout/done?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${APP}/#/report/${encodeURIComponent(reportId)}?checkout=cancelled`,
-      customer_update: { address: "auto" }, automatic_tax: { enabled: process.env.STRIPE_AUTOMATIC_TAX === "true" },
+      ...taxParams(),
     };
     if (promo?.stripeCouponId) params.discounts = [{ coupon: promo.stripeCouponId }];
     const session = await this.stripe.checkout.sessions.create(params);
@@ -174,9 +179,13 @@ class StripeCheckout {
       await geDb.setSubscriptionPrice(accountId, { priceCents: Number(md.priceCents) || sub.items?.data?.[0]?.price?.unit_amount || null, cycle: md.cycle || (sub.items?.data?.[0]?.price?.recurring?.interval === "year" ? "annual" : "monthly"), founder: md.founder === "1" || md.founder === true ? true : (ent.founder && tier === "growth_plan" ? null : false) });
       console.log(`[Stripe] ${accountId} → ${tier} (${sub.id})`);
     }
-    if (sub.current_period_start && sub.current_period_end) await geDb.setBillingPeriod(accountId, sub.current_period_start * 1000, sub.current_period_end * 1000);
-    await geDb.setCancelAt(accountId, sub.cancel_at_period_end && sub.current_period_end ? sub.current_period_end * 1000 : null);
-    return { applied: true, already, accountId, tier, amount_cents: Number(md.priceCents) || sub.items?.data?.[0]?.price?.unit_amount || 0, subscription_id: sub.id, current_period_end: sub.current_period_end ? sub.current_period_end * 1000 : null, founder: md.founder === "1" || md.founder === true };
+    // API versions from 2025-03 keep the period on the subscription item, older ones on the subscription.
+    const item = sub.items?.data?.[0] || {};
+    const periodStart = sub.current_period_start || item.current_period_start || null;
+    const periodEnd = sub.current_period_end || item.current_period_end || null;
+    if (periodStart && periodEnd) await geDb.setBillingPeriod(accountId, periodStart * 1000, periodEnd * 1000);
+    await geDb.setCancelAt(accountId, sub.cancel_at_period_end && periodEnd ? periodEnd * 1000 : null);
+    return { applied: true, already, accountId, tier, amount_cents: Number(md.priceCents) || item.price?.unit_amount || 0, subscription_id: sub.id, current_period_end: periodEnd ? periodEnd * 1000 : null, founder: md.founder === "1" || md.founder === true };
   }
 
   /** Find the account for a subscription or invoice event. */
@@ -214,7 +223,7 @@ class StripeCheckout {
         const accountId = await this.accountFor(obj);
         if (!accountId) return { type: event.type, ignored: "no account" };
         // The tier reads as free from now; growth_engine_db's effective-entitlement logic handles the lapse.
-        await geDb.setCancelAt(accountId, Math.min(Date.now(), obj.current_period_end ? obj.current_period_end * 1000 : Date.now()));
+        await geDb.setCancelAt(accountId, Date.now());
         await geDb.setStripeIds(accountId, { subscriptionId: null });
         return { type: event.type, ended: true };
       }

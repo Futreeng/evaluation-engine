@@ -44,6 +44,9 @@ const CATALOGUE = [
   ] },
 ];
 
+// Stripe Tax code for everything we sell: SaaS, personal use. Managed Payments
+// (Stripe as merchant of record) refuses a line whose product has no code.
+const TAX_CODE = process.env.STRIPE_TAX_CODE || "txcd_10103000";
 const usd = (c) => `$${(c / 100).toFixed(2)}`;
 
 (async () => {
@@ -54,8 +57,11 @@ const usd = (c) => `$${(c / 100).toFixed(2)}`;
     let product = existing.data.find((p) => p.metadata?.scalecraft === item.key);
     if (!product) {
       console.log(`+ product ${item.name}`);
-      if (!dry) product = await stripe.products.create({ name: item.name, description: item.description, metadata: { scalecraft: item.key } });
-    } else console.log(`= product ${item.name} (${product.id})`);
+      if (!dry) product = await stripe.products.create({ name: item.name, description: item.description, tax_code: TAX_CODE, metadata: { scalecraft: item.key } });
+    } else {
+      console.log(`= product ${item.name} (${product.id})`);
+      if (!dry && product.tax_code !== TAX_CODE) { await stripe.products.update(product.id, { tax_code: TAX_CODE }); console.log(`  ~ tax code set to ${TAX_CODE}`); }
+    }
     if (product) products[item.key] = product.id;
     const have = product ? (await stripe.prices.list({ product: product.id, active: true, limit: 100 })).data : [];
     for (const pr of item.prices) {
