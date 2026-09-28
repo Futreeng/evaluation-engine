@@ -190,8 +190,50 @@ class BillingManager {
    * Real Stripe integration (production)
    * TODO: Implement when Stripe keys are configured
    */
+  // Stripe Checkout, hosted. The card never touches this server, so the PCI
+  // surface stays near zero and 3DS/SCA is Stripe's problem, not ours.
+  //
+  // This grants nothing. It returns a URL to send the customer to; the
+  // entitlement is granted in handleWebhook when Stripe confirms payment. The
+  // redirect back is not proof of anything — the customer can close the tab,
+  // and the success_url can be visited by hand.
   async _createStripeSubscription(accountId, tier, customerId, amountInCents, billingCycle, promo = null) {
-    throw new Error("[Stripe] Real Stripe integration not yet implemented. Use mock mode for development.");
+    const cycle = billingCycle === "annual" ? "annual" : "monthly";
+    const app = String(process.env.APP_URL || "").replace(/\/$/, "");
+    if (!app) throw Object.assign(new Error("APP_URL is not set, so Stripe has nowhere to send the customer back to."), { code: "APP_URL_MISSING", status: 500 });
+
+    const session = await this.stripe.checkout.sessions.create({
+      mode: "subscription",
+      client_reference_id: accountId,
+      customer: customerId || undefined,
+      allow_promotion_codes: promo?.stripeCouponId ? undefined : true,
+      discounts: promo?.stripeCouponId ? [{ coupon: promo.stripeCouponId }] : undefined,
+      line_items: [{
+        quantity: 1,
+        price_data: {
+          currency: "usd",
+          unit_amount: amountInCents,
+          recurring: { interval: cycle === "annual" ? "year" : "month" },
+          product_data: { name: `Scalecraft Social — ${plans.TIERS?.[tier]?.name || tier}` },
+        },
+      }],
+      // Both places: the session metadata covers checkout.session.completed,
+      // the subscription metadata covers every later invoice and cancellation,
+      // which arrive without any reference to the original session.
+      metadata: { accountId, tier, cycle },
+      subscription_data: { metadata: { accountId, tier, cycle } },
+      success_url: `${app}/#/plan-setup?checkout=success`,
+      cancel_url: `${app}/#/pricing?checkout=cancelled`,
+    });
+
+    return {
+      checkoutUrl: session.url,
+      sessionId: session.id,
+      status: "pending",
+      accountId, tier, billingCycle: cycle,
+      amountInCents,
+      amountFormatted: `$${(amountInCents / 100).toFixed(2)}`,
+    };
   }
 
   /**
@@ -333,42 +375,89 @@ class BillingManager {
     };
   }
 
-  /**
-   * Handle webhook from Stripe (payment succeeded, failed, subscription canceled, etc.)
-   */
+  // Stripe is the only trustworthy source of "they paid". Every grant and every
+  // downgrade happens here, never on the redirect back from Checkout — that
+  // redirect can be skipped, replayed, or typed in by hand.
+  //
+  // The event is already signature-verified by the route before it gets here.
   async handleWebhook(event) {
-    const eventId = event.data?.object?.id || "unknown";
+    const obj = event?.data?.object || {};
+    const eventId = event?.id || "unknown";
+
+    // Stripe retries until it sees a 2xx and can deliver the same event twice
+    // even after one succeeded. Claim it once; a redelivery is a no-op.
+    try {
+      if (event?.id && !(await geDb.claimWebhookEvent(event.id, event.type))) {
+        console.log(`[Billing] webhook ${eventId} (${event.type}) already handled — skipping`);
+        return { received: true, duplicate: true };
+      }
+    } catch (e) {
+      // A ledger failure must not swallow a payment. Log loudly and carry on:
+      // acting twice on a grant is recoverable, silently dropping one is not.
+      console.error(`[Billing] webhook ledger failed for ${eventId}: ${e.message} — processing anyway`);
+    }
+
+    // accountId and tier ride on metadata set at Checkout. Subscription events
+    // carry the subscription's copy; invoices only reference the subscription,
+    // so fall back to looking it up.
+    const metaOf = async (o) => {
+      if (o?.metadata?.accountId) return o.metadata;
+      const subId = typeof o?.subscription === "string" ? o.subscription : (typeof o?.id === "string" ? o.id : null);
+      if (subId && this.stripe && subId.startsWith("sub_")) {
+        try { return (await this.stripe.subscriptions.retrieve(subId))?.metadata || {}; } catch { return {}; }
+      }
+      return {};
+    };
 
     switch (event.type) {
+      // Payment taken and the subscription exists. This is the grant.
+      case "checkout.session.completed": {
+        const accountId = obj.client_reference_id || obj.metadata?.accountId;
+        const tier = obj.metadata?.tier;
+        if (!accountId || !tier) { console.error(`[Billing] ${eventId}: checkout completed without accountId/tier metadata — cannot grant`); break; }
+        if (obj.payment_status && obj.payment_status !== "paid" && obj.payment_status !== "no_payment_required") {
+          console.warn(`[Billing] ${eventId}: checkout completed but payment_status=${obj.payment_status} — not granting`);
+          break;
+        }
+        await geDb.upgradeTier(accountId, tier, typeof obj.subscription === "string" ? obj.subscription : null);
+        console.log(`[Billing] granted ${tier} to ${accountId} (sub ${obj.subscription || "none"})`);
+        break;
+      }
+
+      // Renewals, and the safety net if checkout.session.completed was missed.
+      case "invoice.payment_succeeded": {
+        const meta = await metaOf(obj);
+        if (!meta.accountId || !meta.tier) { console.warn(`[Billing] ${eventId}: invoice paid but no accountId/tier metadata — skipping`); break; }
+        await geDb.upgradeTier(meta.accountId, meta.tier, typeof obj.subscription === "string" ? obj.subscription : null);
+        console.log(`[Billing] renewed ${meta.tier} for ${meta.accountId}`);
+        break;
+      }
+
+      // Cancelled, or lapsed after Stripe gave up retrying. Back to free.
+      case "customer.subscription.deleted": {
+        const meta = await metaOf(obj);
+        if (!meta.accountId) { console.warn(`[Billing] ${eventId}: subscription deleted with no accountId metadata — skipping`); break; }
+        await geDb.upgradeTier(meta.accountId, "social_snapshot", null);
+        console.log(`[Billing] downgraded ${meta.accountId} to social_snapshot (subscription ended)`);
+        break;
+      }
+
+      // Card declined. Stripe retries on its own schedule; the plan stays on
+      // until it gives up and sends subscription.deleted. Logged so this is
+      // visible before the cancellation rather than after.
+      case "invoice.payment_failed": {
+        const meta = await metaOf(obj);
+        console.warn(`[Billing] payment failed for ${meta.accountId || "unknown account"} (invoice ${obj.id}) — Stripe will retry`);
+        break;
+      }
+
       case "customer.subscription.created":
-        // Subscription started
-        console.log(`[Billing] Subscription created: ${eventId}`);
-        break;
-
       case "customer.subscription.updated":
-        // Subscription updated (tier change)
-        console.log(`[Billing] Subscription updated: ${eventId}`);
-        break;
-
-      case "customer.subscription.deleted":
-        // Subscription canceled
-        console.log(`[Billing] Subscription canceled: ${eventId}`);
-        // Downgrade user to free tier
-        break;
-
-      case "invoice.payment_succeeded":
-        // Payment succeeded
-        console.log(`[Billing] Payment succeeded: ${eventId}`);
-        break;
-
-      case "invoice.payment_failed":
-        // Payment failed
-        console.log(`[Billing] Payment failed: ${eventId}`);
-        // Send retry email to user
+        console.log(`[Billing] ${event.type}: ${obj.id}`);
         break;
 
       default:
-        console.log(`[Billing] Unhandled webhook event: ${event.type}`);
+        console.log(`[Billing] unhandled webhook event: ${event.type}`);
     }
 
     return { received: true };

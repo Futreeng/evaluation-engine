@@ -199,6 +199,15 @@ function initSchema() {
   try { db.run(`ALTER TABLE users ADD COLUMN utm TEXT`); } catch { /* exists */ }
   try { db.run(`ALTER TABLE users ADD COLUMN price_variant TEXT`); } catch { /* exists */ }
   try { db.run(`ALTER TABLE users ADD COLUMN email_prefs TEXT`); } catch { /* exists */ }
+  // Stripe redelivers a webhook until it gets a 2xx, and the same event can
+  // arrive again after success. The primary key is the ledger: a conflicting
+  // insert means we have already acted on this event.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS growth_engine_webhook_events (
+      event_id TEXT PRIMARY KEY,
+      type TEXT,
+      created_at INTEGER NOT NULL
+    )`);
   db.run(`
     CREATE TABLE IF NOT EXISTS growth_engine_email_log (
       id TEXT PRIMARY KEY,
@@ -1599,6 +1608,15 @@ async function listEmailLog(limit = 100) {
   if (!db) throw new Error("Database not initialized");
   return rowsOf(`SELECT * FROM growth_engine_email_log ORDER BY created_at DESC LIMIT ?`, [limit]).map((r) => ({ ...r, created_at: Number(r.created_at) }));
 }
+// True the first time an event id is seen, false on every redelivery.
+async function claimWebhookEvent(eventId, type = null) {
+  if (!db) throw new Error("Database not initialized");
+  const seen = rowsOf(`SELECT event_id FROM growth_engine_webhook_events WHERE event_id = ?`, [String(eventId)]);
+  if (seen.length) return false;
+  db.run(`INSERT INTO growth_engine_webhook_events (event_id, type, created_at) VALUES (?, ?, ?)`, [String(eventId), type, Date.now()]);
+  saveDb();
+  return true;
+}
 async function setEmailPaused(userId, paused) {
   if (!db) throw new Error("Database not initialized");
   db.run(`UPDATE users SET email_paused = ?, updated_at = ? WHERE user_id = ?`, [paused ? 1 : 0, Date.now(), userId]);
@@ -1688,6 +1706,7 @@ module.exports = {
   setEmailPrefs,
   insertEmailLog,
   listEmailLog,
+  claimWebhookEvent,
   insertRoastRejection,
   listRoastRejections,
   setGoal,
