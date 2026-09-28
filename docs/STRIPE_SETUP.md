@@ -46,6 +46,25 @@ The 60-day one-time plan is not sold through Stripe yet; it stays on the waitlis
   webhook granting the plan, a bad signature refused, a customer portal session,
   and cancel from the app recorded on the Stripe subscription.
 
+## What is on Render right now (28 Sept, sandbox)
+
+Set through Render's API from `server/.env`, no values typed by hand:
+`STRIPE_API_KEY` (Haron's sandbox key), `STRIPE_WEBHOOK_SECRET` (from the
+endpoint below), `STRIPE_PRODUCTS_JSON`, `STRIPE_PRICES_JSON`. `APP_URL` is
+`https://scalecraftsocial.com`. Deploy `dep-datefsg93c1s73a9s3cg` went live and
+`/billing/pricing` reports `checkout: "stripe"`, `billing_available: true`.
+
+The webhook endpoint was created with the Stripe API in the sandbox
+(`we_1UKmtRRmNl7Nhf9n2rvK4d5s`): `https://scalecraftsocial.com/api/growth-engine/v1/billing/webhook`,
+events `checkout.session.completed`, `invoice.payment_succeeded`,
+`customer.subscription.updated`, `customer.subscription.deleted`,
+`invoice.payment_failed`. Its secret is the one on Render. Going live means
+repeating exactly this in the main account: run `scripts/stripe_products.js`
+with the live key, create the endpoint, replace the four values.
+
+Not yet done: a human click-through on the live site with card 4242 4242 4242 4242
+(Stripe's hosted page blocks automated card entry).
+
 ## Dashboard (test mode first)
 
 1. **Developers → API keys**: copy the secret key. Local: `STRIPE_API_KEY` in
