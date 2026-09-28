@@ -142,7 +142,7 @@
     const tick = now => { const t = Math.min(1, (now - start) / ms); const e = 1 - Math.pow(1 - t, 3); el.textContent = Math.round(from + (to - from) * e); if (t < 1) requestAnimationFrame(tick); else el.textContent = to; };
     el.textContent = from; requestAnimationFrame(tick);
   }
-  function rememberPricing(p) { try { const g = (p.tiers || []).find(t => t.tier === 'growth_plan'); sset('sc_pricing', { at: Date.now(), billing_available: p.billing_available !== false, cta: p.cta || null, variant: p.variant || 'control', growth_plan: g?.monthlyPrice, plan_unlock: p.one_time?.[0]?.price, one_time_sold: !!(p.one_time || []).length, founders: p.founders && p.founders.left > 0 ? p.founders : null, pro: (p.tiers || []).find(t => t.tier === 'growth_plan_pro')?.monthlyPrice, rescore: Object.fromEntries(Object.entries(p.limits || {}).map(([k, v]) => [k, v && v.rescore_days])) }); } catch { } }
+  function rememberPricing(p) { try { const g = (p.tiers || []).find(t => t.tier === 'growth_plan'); sset('sc_pricing', { at: Date.now(), billing_available: p.billing_available !== false, checkout: p.checkout || 'mock', cta: p.cta || null, variant: p.variant || 'control', growth_plan: g?.monthlyPrice, plan_unlock: p.one_time?.[0]?.price, one_time_sold: !!(p.one_time || []).length, founders: p.founders && p.founders.left > 0 ? p.founders : null, pro: (p.tiers || []).find(t => t.tier === 'growth_plan_pro')?.monthlyPrice, rescore: Object.fromEntries(Object.entries(p.limits || {}).map(([k, v]) => [k, v && v.rescore_days])) }); } catch { } }
   // False while production has no payment provider: every Start button becomes "Join the waitlist".
   function billingOpen() { const pv = sget('sc_pricing', null); return !pv || pv.billing_available !== false; }
   // The waitlist form that stands in for a Start button while billing is closed. `tier` is what they wanted.
@@ -757,6 +757,7 @@
           try {
             const res = await api('/reports/' + encodeURIComponent(reportId) + '/unlock', { method: 'POST', body: JSON.stringify({ plan_context: ctx, ...(oncePromo ? { promo_code: oncePromo.code } : {}) }) });
             if (res.already_unlocked) { go('#/report/' + encodeURIComponent(res.report_id)); return; }
+            if (res.checkout_url) { b.textContent = 'Opening secure checkout…'; location.href = res.checkout_url; return; }
             sset('sc_job_' + res.job_id, { handle: biz.handle, platform: biz.platform, category: biz.category, submitted_at: Date.now(), one_time: true });
             if (oncePromo) clearPromo();
             toast(res.payment?.amount === '$0.00' ? 'Free with your code. Writing your 60-day plan…' : `Charged ${res.payment?.amount || ''} once. Writing your 60-day plan…`); go('#/evaluating/' + encodeURIComponent(res.job_id));
@@ -775,6 +776,37 @@
       });
     };
     render();
+  }
+
+  // Back from Stripe Checkout. Stripe's webhook usually lands first; either
+  // way the confirm call is what tells us the session is paid, then the plan
+  // runs exactly as the mock subscribe did: write the report for the handle
+  // that was scored, or go straight to the 60-day job.
+  async function viewCheckoutDone() {
+    renderHeader('pricing');
+    const qs = new URLSearchParams(location.hash.split('?')[1] || '');
+    const sid = qs.get('session_id'); const to = qs.get('to');
+    $view.innerHTML = h`<div class="center-msg"><h2>Confirming your payment…</h2><p class="fine">A few seconds. Don't close this tab.</p></div>`;
+    if (!sid) { go('#/pricing'); return; }
+    if (!token()) { sset('sc_next', location.hash); go('#/signin'); return; }
+    let r = null;
+    for (let i = 0; i < 6; i++) {
+      try { r = await api('/billing/checkout/confirm?session_id=' + encodeURIComponent(sid)); } catch (e) { if (e.status === 401) return; $view.innerHTML = h`<div class="center-msg"><h2>We couldn't confirm the payment.</h2><p>${e.message}</p><p class="fine">If your card was charged, reply to any of our emails and a person will sort it out.</p><a class="btn" href="#/reports">Your reports</a></div>`; return; }
+      if (r.applied) break;
+      await new Promise(res => setTimeout(res, 1500));
+    }
+    if (!r || !r.applied) { $view.innerHTML = h`<div class="center-msg"><h2>Payment is still processing.</h2><p>Stripe hasn't confirmed it yet. Your plan switches on the moment it does — you'll get an email.</p><a class="btn" href="#/reports">Your reports</a></div>`; return; }
+    sessionStorage.removeItem('sc_intent_tier'); sessionStorage.removeItem('sc_limit_msg'); clearPromo();
+    try { rememberPricing(await api('/billing/pricing', {}, { allow401: true })); } catch { }
+    if (r.one_time) {
+      if (r.job_id) { sset('sc_job_' + r.job_id, { submitted_at: Date.now(), one_time: true }); toast('Paid. Writing your 60-day plan…'); go('#/evaluating/' + encodeURIComponent(r.job_id)); }
+      else go('#/report/' + encodeURIComponent(r.report_id || ''));
+      return;
+    }
+    const last = sget('sc_form', {});
+    if (to && /^#\/(path|report)\//.test(to)) { toast("You're on. Your plan is being written."); }
+    if (last.handle && last.platform && last.category) { toast(`You're on. Writing the full plan for @${last.handle}…`); await submitEvaluation(last, null); return; }
+    toast("You're on. Score an account to get the full plan."); go(to && /^#\//.test(to) ? to : '#/');
   }
 
   // Checks a cached report against the server without blocking the render.
@@ -1313,7 +1345,9 @@
         try {
           const body = { tier: b.dataset.subscribe, billingCycle: billing };
           if (b.dataset.subscribe === 'growth_plan' && promoState && promoState.code) body.promo_code = promoState.code;
+          body.return_to = sget('sc_unlock_report', null) ? '#/path/' + sget('sc_unlock_report', null) : '';
           const sub = await api('/billing/subscribe', { method: 'POST', body: JSON.stringify(body) });
+          if (sub.checkout_url) { b.textContent = 'Opening secure checkout…'; location.href = sub.checkout_url; return; }
           sessionStorage.removeItem('sc_intent_tier'); sessionStorage.removeItem('sc_limit_msg'); clearPromo();
           if (sub.promo) toast(`${sub.promo.code} applied — ${sub.promo.description}.`);
           const last = sget('sc_form', {});
@@ -1465,7 +1499,7 @@
       const downg = subn.status === 'downgrade_pending';
       return h`<div class="card plancard ${pending ? 'pending' : ''}"><div class="t"><div class="n">Your plan${subn.founder ? raw(h` <span class="tag act founder">FOUNDER</span>`) : ''}</div><h2>${subn.tier_name || 'Free Snapshot'}${free ? '' : raw(h` <span class="pr">· $${shown}${subn.billing_cycle === 'annual' ? '/yr' : '/mo'}${subn.founder ? ' locked' : ''}</span>`)}</h2>${downg ? raw(h`<p class="fine">Moving to ${subn.pending_tier === 'maintenance' ? 'Maintenance' : subn.pending_tier === 'growth_plan' ? 'Growth' : subn.pending_tier} on ${fmtDate(subn.pending_tier_at)} — everything you have stays until then, and Pro data is kept if you come back.</p>`) : ''}
         <p>${free ? 'One free Snapshot per handle. The Growth Plan writes the whole 90 days and re-scores you every week.' : paused ? `Paused until ${fmtDate(subn.paused_until)}. Nothing is charged, nothing runs, and your history and streak are kept exactly as they are. Resume any time.` : maint ? 'Weekly rescore and score history only. Switch back whenever you want the plan, Monday moves and post writing again.' : pending ? `Cancelled. You keep everything until ${fmtDate(subn.cancel_at)}, then the weekly refresh stops. Your reports stay.` : subn.billing_period_end ? `Renews ${fmtDate(subn.billing_period_end)}. Cancel any time — you keep the plan to the end of the period and every report after.` : 'Cancel any time — you keep the plan to the end of the period and every report after.'}</p></div>
-        <div class="acts">${free ? raw(h`<a class="btn ghost" href="#/pricing">See the plan</a>`) : paused ? raw(h`<button type="button" class="btn green" data-action="unpause-plan">Resume now</button>`) : pending ? raw(h`<button type="button" class="btn green" data-action="resume-plan">Resume the plan</button>`) : downg ? raw(h`<button type="button" class="btn green" data-action="keep-plan">Keep ${subn.tier_name || 'my plan'}</button><button type="button" class="btn ghost" data-action="cancel-plan">Cancel plan</button>`) : maint ? raw(h`<button type="button" class="btn" data-action="switch-growth">Back to the Growth Plan</button><button type="button" class="btn ghost" data-action="cancel-plan">Cancel</button>`) : raw(h`<button type="button" class="btn ghost" data-action="cancel-plan">Cancel plan</button>`)}</div>
+        <div class="acts">${free ? raw(h`<a class="btn ghost" href="#/pricing">See the plan</a>`) : paused ? raw(h`<button type="button" class="btn green" data-action="unpause-plan">Resume now</button>`) : pending ? raw(h`<button type="button" class="btn green" data-action="resume-plan">Resume the plan</button>`) : downg ? raw(h`<button type="button" class="btn green" data-action="keep-plan">Keep ${subn.tier_name || 'my plan'}</button><button type="button" class="btn ghost" data-action="cancel-plan">Cancel plan</button>`) : maint ? raw(h`<button type="button" class="btn" data-action="switch-growth">Back to the Growth Plan</button><button type="button" class="btn ghost" data-action="cancel-plan">Cancel</button>`) : raw(h`<button type="button" class="btn ghost" data-action="cancel-plan">Cancel plan</button>`)}${!free && sget('sc_pricing', null)?.checkout === 'stripe' ? raw(h`<button type="button" class="btn ghost" data-action="manage-billing">Card &amp; receipts</button>`) : ''}</div>
         ${raw(emailPrefsHTML(subn.email_prefs))}</div>`;
     };
     const reports = (list.reports || []).map(r => ({ id: r.reportId || r.report_id, tier: r.tier, at: r.generatedAt || r.generated_at, handle: r.business?.handle, platform: r.business?.platform, category: r.business?.category, overall: r.reportBody?.scores?.overall ?? null, known: r.reportBody?.scores?.niche_known !== false })).sort((a, b) => b.at - a.at);
@@ -1503,6 +1537,7 @@
     $view.querySelector('[data-action=copy-ref]')?.addEventListener('click', async () => { try { await navigator.clipboard.writeText(refs.link); toast('Link copied.'); } catch { toast(refs.link); } });
     { const gc = $view.querySelector('#goalCard'); if (gc) { const ed = gc.querySelector('.goaledit'); gc.querySelector('[data-action=edit-goal]')?.addEventListener('click', () => { ed.hidden = false; }); bindGoalPicker(ed, async (goal, target) => { try { const res = await api('/account/goal', { method: 'PUT', body: JSON.stringify({ goal, goal_target: target }) }); sset('sc_goal', { goal: res.goal, goal_target: res.goal_target }); track('goal_set', { goal }); toast('Goal saved.'); viewReports(); } catch (e) { toast('Could not save the goal: ' + e.message); } }); } }
     $view.querySelector('[data-action=cancel-plan]')?.addEventListener('click', () => openCancelDialog(subn));
+    $view.querySelector('[data-action=manage-billing]')?.addEventListener('click', async e => { e.currentTarget.disabled = true; try { const r = await api('/billing/portal', { method: 'POST', body: '{}' }); location.href = r.url; } catch (e2) { toast(e2.message || 'Could not open billing.'); e.currentTarget.disabled = false; } });
     $view.querySelector('[data-action=keep-plan]')?.addEventListener('click', async e => { e.currentTarget.disabled = true; try { await api('/billing/switch', { method: 'POST', body: JSON.stringify({ tier: subn.current_tier }) }); toast('Kept. Nothing changes at the end of the period.'); viewReports(); } catch (e2) { toast(e2.message); e.currentTarget.disabled = false; } });
     $view.querySelector('[data-action=unpause-plan]')?.addEventListener('click', async e => { e.currentTarget.disabled = true; try { await api('/billing/unpause', { method: 'POST', body: '{}' }); toast('Resumed. The weekly rescore is back on.'); viewReports(); } catch (e2) { toast(e2.message); e.currentTarget.disabled = false; } });
     $view.querySelector('[data-action=switch-growth]')?.addEventListener('click', async e => { e.currentTarget.disabled = true; try { await api('/billing/switch', { method: 'POST', body: JSON.stringify({ tier: 'growth_plan' }) }); toast('Back on the Growth Plan.'); viewReports(); } catch (e2) { toast(e2.message); e.currentTarget.disabled = false; } });
@@ -2028,7 +2063,8 @@
     if (parts[0] === 'report' && parts[1]) return viewReport(decodeURIComponent(parts[1]));
     if (parts[0] === 'path' && parts[1]) return viewPath(decodeURIComponent(parts[1]));
     if (parts[0] === 'progress') return viewProgress();
-    if (parts[0] === 'pricing') return viewPricing();
+    if (parts[0] === 'pricing') { if (new URLSearchParams(location.hash.split('?')[1] || '').get('checkout') === 'cancelled') toast('No charge was made. Come back whenever you like.'); return viewPricing(); }
+    if (parts[0] === 'checkout') return viewCheckoutDone();
     if (parts[0] === 'plan-setup') return viewPlanSetup();
     if (parts[0] === 'business') return viewBusiness();
     if (parts[0] === 'signin') return viewSignin();

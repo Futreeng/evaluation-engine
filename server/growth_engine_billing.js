@@ -49,6 +49,7 @@ class BillingManager {
       // Initialize Stripe SDK in production
       try {
         this.stripe = require('stripe')(stripeApiKey);
+        this.checkout = new (require("./growth_engine_stripe").StripeCheckout)(this.stripe);
       } catch (err) {
         console.warn("[Billing] Stripe SDK not available, using mock mode");
         this.isProduction = false;
@@ -82,6 +83,24 @@ class BillingManager {
   }
 
   /**
+   * What this account would pay for a tier: locked price for a current
+   * subscriber (P.3), founders price for Growth while spots remain (P.2),
+   * a variant override, or the list price. Checkout and the mock both use it.
+   */
+  async quote(accountId, tier, billingCycle = "monthly", priceOverride = null) {
+    const cycle = billingCycle === "annual" ? "annual" : "monthly";
+    const ent = await geDb.getOrCreateEntitlement(accountId);
+    let amount, founder = false;
+    const keeps = ent.currentTier === tier && ent.priceCents != null && !ent.lapsedAt;
+    if (keeps) amount = ent.priceCents;
+    else if (tier === "growth_plan" && (await this.foundersLeft()) > 0) { amount = cycle === "annual" ? plans.FOUNDERS.growth_annual : plans.FOUNDERS.growth_monthly; founder = true; }
+    else if (tier === "growth_plan" && priceOverride && cycle === "monthly") amount = priceOverride;
+    else if (tier === "growth_plan" && priceOverride && cycle === "annual") amount = priceOverride * 10;
+    else amount = plans.priceFor(tier, cycle);
+    return { ent, amount, founder, cycle, tier, keeps };
+  }
+
+  /**
    * Create subscription for user
    * Mock mode: Simulates payment processing (for development)
    * Production: Uses real Stripe API
@@ -99,25 +118,16 @@ class BillingManager {
     // P.3: a current subscriber who re-subscribes without lapsing keeps their price.
     // P.2: founders pricing for Growth while spots remain (excluded from A/B variants).
     // Otherwise the plan price (a variant may override Growth's monthly).
-    const ent = await geDb.getOrCreateEntitlement(accountId);
-    let amount, founder = false;
-    const keeps = ent.currentTier === tier && ent.priceCents != null && !ent.lapsedAt;
-    if (keeps) amount = ent.priceCents;
-    else if (tier === "growth_plan" && (await this.foundersLeft()) > 0) { amount = cycle === "annual" ? plans.FOUNDERS.growth_annual : plans.FOUNDERS.growth_monthly; founder = true; }
-    else if (tier === "growth_plan" && priceOverride && cycle === "monthly") amount = priceOverride;
-    else if (tier === "growth_plan" && priceOverride && cycle === "annual") amount = priceOverride * 10;
-    else amount = plans.priceFor(tier, cycle);
+    const { ent, amount, founder } = await this.quote(accountId, tier, cycle, priceOverride);
 
     // Promo already validated by the route: { code, amountCents, freeMonths, description }
     const charged = promo ? promo.amountCents : amount;
     const lock = async () => { await geDb.setSubscriptionPrice(accountId, { priceCents: amount, cycle, founder: founder ? true : (ent.founder && tier === "growth_plan" ? null : false) }); };
 
     if (this.isProduction && this.stripe) {
-      // Production: use real Stripe (pass promo.stripeCouponId as the coupon).
-      // New Price objects per price (P.3) — never edit existing ones.
-      const r = await this._createStripeSubscription(accountId, tier, stripeCustomerId, charged, cycle, promo);
-      await lock();
-      return { ...r, founder, priceCents: amount };
+      // With a real key the browser goes through Stripe Checkout (POST /billing/checkout);
+      // the entitlement is written when the session is paid, never here.
+      throw Object.assign(new Error("Use /billing/checkout — payments go through Stripe Checkout."), { code: "USE_CHECKOUT", status: 409 });
     }
 
     // Mock mode: Simulate payment processing
@@ -391,6 +401,8 @@ class BillingManager {
       // false while production has no real Stripe key: nothing can be charged, so the
       // app shows "join the waitlist" instead of Start buttons. Real checkout replaces it.
       billing_available: !this.mockInProduction,
+      // "stripe": POST /billing/checkout returns a hosted Checkout URL. "mock": /billing/subscribe grants directly.
+      checkout: this.isProduction && this.checkout ? "stripe" : "mock",
       pause: { months: Array.from({ length: Number(process.env.PAUSE_MAX_MONTHS || 3) }, (_, i) => i + 1) },
       maintenance: { ...plans.publicTier("maintenance"), hidden: true },
       tiers: [free, growth, pro],

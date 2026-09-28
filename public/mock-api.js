@@ -131,6 +131,7 @@
     audience: 'creators',
     // ?mock=1&waitlist=1 previews the closed-billing state (every Start button becomes "Join the waitlist").
     billing_available: !/[?&]waitlist=1/.test(location.search),
+    checkout: 'mock',
     support_email: 'hello@futreeng.com',
     discount: { annual: '2 months free', note: "Annual is 10 months' price for 12" },
     refund: 'Not useful in the first 7 days? Reply to any email and we refund it.',
@@ -289,6 +290,8 @@
       const promo = body.promo_code ? { code: String(body.promo_code).toUpperCase(), description: String(body.promo_code).toUpperCase() === 'FOUNDER50' ? 'First month free, then $12/mo' : '20% off your first month' } : null;
       return json(200, { ok: true, entitlement, tier: tier.tier, promo });
     }
+    if (method === 'POST' && path === '/billing/portal') return json(404, { error: "Billing isn't running through Stripe here", code: 'NOT_STRIPE' });
+    if (method === 'GET' && path.startsWith('/billing/checkout/confirm')) return json(200, { applied: true, tier: 'growth_plan', founder: true, mode: 'subscription' });
     if (method === 'POST' && path === '/billing/check-access') {
       const order = ['social_snapshot', 'growth_plan', 'growth_plan_pro', 'business_growth', 'business_evaluator', 'agency'];
       const ok = order.indexOf(entitlement.current_tier) >= order.indexOf(body.requiredTier);

@@ -739,6 +739,25 @@ router.get("/account/history", authMiddleware, async (req, res) => {
   }
 });
 
+// Starts the 60-day plan job for a paid unlock. Called by the unlock route
+// (mock billing) and by Stripe — the webhook or the browser's return — once a
+// Checkout session is paid. `req` is absent on the Stripe path.
+async function startUnlockJob(accountId, reportId, paymentId, { amountCents = 0, promo = null, variant = null, req = null } = {}) {
+  const report = await geDb.getReport(reportId);
+  if (!report) throw Object.assign(new Error("Report not found"), { status: 404, code: "REPORT_NOT_FOUND" });
+  const b = report.business || {};
+  const user = await geDb.getUserById(accountId).catch(() => null);
+  const plan_context = await resolvePlanContext(req || { body: {} }, accountId, b.handle, b.platform);
+  const input = { handle: b.handle, platform: b.platform, category: b.category, email: user?.email || null, one_time_unlock: true, unlock_of: report.reportId, payment_id: paymentId, plan_context, tz: report.reportBody?.tz || null };
+  const { jobId } = await geDb.createJob(accountId, "growth_plan", input);
+  jobQueue.processJob(jobId, accountId, "growth_plan", input).catch((err) => console.error(`[Unlock] job ${jobId} failed:`, err.message));
+  if (promo) { try { await geDb.redeemPromo(promo, accountId, "plan_unlock", Math.max(0, ONE_TIME_PRICING.plan_unlock - amountCents)); } catch (e) { console.warn("[Promo] redemption record failed:", e.message); } }
+  events.track("unlock", { ...(req ? events.attribution(req) : { accountId }), reportId: report.reportId, props: { amount_cents: amountCents, promo, variant } });
+  geDb.recordReferralPayment({ referredId: accountId, cents: amountCents, product: "plan_unlock" }).catch(() => { });
+  if (promo) events.track("promo_applied", { ...(req ? events.attribution(req) : { accountId }), props: { code: promo, product: "plan_unlock" } });
+  return { jobId };
+}
+
 // One-time unlock: the full plan for one report, no subscription.
 // Runs the plan pipeline once for the report's handle; the result is a new
 // growth_plan-tier report with refresh_due_at cleared and unlock metadata.
@@ -759,18 +778,17 @@ router.post("/reports/:reportId/unlock", authMiddleware, async (req, res) => {
       promo = { code: r.code, amountCents: r.amount_cents, description: r.description };
     }
     const vpu = pricingAB.prices(await variantFor(req));
+    // Save the intake answers now so the job started by the webhook (no request) finds them.
+    const b = report.business || {};
+    await resolvePlanContext(req, req.user.id, b.handle, b.platform);
+    if (billingManager.checkout && !(promo && promo.amountCents === 0)) {
+      const { url } = await billingManager.checkout.oneTimeSession({ accountId: req.user.id, email: req.user.email, reportId: report.reportId, amountCents: vpu.plan_unlock || ONE_TIME_PRICING.plan_unlock, promo });
+      events.track("checkout_started", { ...events.attribution(req), reportId: report.reportId, props: { product: "plan_unlock", promo: promo?.code || null, variant: vpu.variant } });
+      return res.json({ checkout_url: url, one_time: true });
+    }
     const payment = await billingManager.purchaseOneTime(req.user.id, "plan_unlock", null, promo, vpu.plan_unlock);
     if (payment.status !== "succeeded" && !payment.mock) return res.status(402).json({ error: "Payment did not complete", code: "PAYMENT_INCOMPLETE", status: 402, payment });
-    if (promo) { try { await geDb.redeemPromo(promo.code, req.user.id, "plan_unlock", ONE_TIME_PRICING.plan_unlock - promo.amountCents); } catch (e) { console.warn("[Promo] redemption record failed:", e.message); } }
-
-    const b = report.business || {};
-    const plan_context = await resolvePlanContext(req, req.user.id, b.handle, b.platform);
-    const input = { handle: b.handle, platform: b.platform, category: b.category, email: req.user.email || null, one_time_unlock: true, unlock_of: report.reportId, payment_id: payment.paymentId, plan_context, tz: report.reportBody?.tz || null };
-    const { jobId } = await geDb.createJob(req.user.id, "growth_plan", input);
-    jobQueue.processJob(jobId, req.user.id, "growth_plan", input).catch((err) => console.error(`[Unlock] job ${jobId} failed:`, err.message));
-    events.track("unlock", { ...events.attribution(req), reportId: report.reportId, props: { amount_cents: payment.amountInCents, promo: promo?.code || null, variant: vpu.variant } });
-    geDb.recordReferralPayment({ referredId: req.user.id, cents: payment.amountInCents ?? 0, product: "plan_unlock" }).catch(() => { });
-    if (promo) events.track("promo_applied", { ...events.attribution(req), props: { code: promo.code, product: "plan_unlock" } });
+    const { jobId } = await startUnlockJob(req.user.id, report.reportId, payment.paymentId, { amountCents: payment.amountInCents ?? 0, promo: promo?.code || null, variant: vpu.variant, req });
     res.json({ job_id: jobId, status: "queued", tier: "growth_plan", one_time: true, payment: { id: payment.paymentId, amount: payment.amountFormatted } });
   } catch (err) {
     sendError(res, err.status || 500, err.code || "UNLOCK_ERROR", err.message);
@@ -1098,6 +1116,12 @@ router.post("/billing/subscribe", authMiddleware, validateSubscriptionRequest, a
     }
 
     const vp = pricingAB.prices(await variantFor(req));
+    if (billingManager.checkout && !(promo && promo.amountCents === 0 && !promo.freeMonths)) {
+      const quote = await billingManager.quote(accountId, tier, billingCycle || "monthly", vp.growth_plan);
+      const { url } = await billingManager.checkout.subscriptionSession({ accountId, email: req.user.email, tier, quote, promo, returnTo: String(req.body.return_to || "").slice(0, 200) });
+      events.track("checkout_started", { ...events.attribution(req), props: { tier, billingCycle: quote.cycle, promo: promo?.code || null, amount_cents: quote.amount, founder: quote.founder, variant: vp.variant } });
+      return res.json({ checkout_url: url, tier, billingCycle: quote.cycle, amountInCents: quote.amount, founder: quote.founder });
+    }
     const result = await billingManager.createSubscription(accountId, tier, null, billingCycle || "monthly", promo, vp.growth_plan);
     events.track("subscribe", { ...events.attribution(req), props: { tier, billingCycle: billingCycle || "monthly", promo: promo?.code || null, amount_cents: result.amountInCents ?? null, variant: vp.variant } });
     geDb.recordReferralPayment({ referredId: accountId, cents: result.amountInCents ?? 0, product: tier }).catch(() => { });
@@ -1142,14 +1166,53 @@ router.get("/billing/estimate", async (req, res) => {
   }
 });
 
-// Stripe webhook
+// After a paid Checkout session: what was bought, applied now if the webhook
+// hasn't done it yet. The browser lands here from Stripe's success URL.
+async function grantedSubscription(accountId, r, req = null) {
+  if (!r.applied || r.already) return;
+  events.track("subscribe", { ...(req ? events.attribution(req) : { accountId }), props: { tier: r.tier, founder: !!r.founder, via: "stripe" } });
+  geDb.recordReferralPayment({ referredId: accountId, cents: r.amount_cents ?? 0, product: r.tier }).catch(() => { });
+}
+router.get("/billing/checkout/confirm", authMiddleware, async (req, res) => {
+  try {
+    if (!billingManager.checkout) return sendError(res, 404, "NOT_STRIPE", "Checkout isn't running through Stripe here");
+    const id = String(req.query.session_id || "");
+    if (!/^cs_(test|live)_[A-Za-z0-9]+$/.test(id)) return sendError(res, 400, "BAD_SESSION", "session_id is required");
+    const session = await billingManager.stripe.checkout.sessions.retrieve(id, { expand: ["subscription", "payment_intent"] });
+    const owner = session.metadata?.accountId || session.client_reference_id;
+    if (owner !== req.user.id) return sendError(res, 403, "NOT_YOUR_SESSION", "This checkout belongs to another account");
+    const r = await billingManager.checkout.applySession(session, { startUnlock: (a, rid, pid, x) => startUnlockJob(a, rid, pid, x) });
+    if (r.applied && !r.one_time) await grantedSubscription(req.user.id, r, req);
+    res.json({ ...r, mode: session.mode, amount_total: session.amount_total, currency: session.currency });
+  } catch (err) {
+    sendError(res, err.status || 500, err.code || "CHECKOUT_CONFIRM_ERROR", err.message);
+  }
+});
+// Stripe's customer portal: card on file, invoices, cancel.
+router.post("/billing/portal", authMiddleware, async (req, res) => {
+  try {
+    if (!billingManager.checkout) return sendError(res, 404, "NOT_STRIPE", "Billing isn't running through Stripe here");
+    res.json({ url: await billingManager.checkout.portalUrl(req.user.id, req.user.email) });
+  } catch (err) {
+    sendError(res, err.status || 500, err.code || "PORTAL_ERROR", err.message);
+  }
+});
+
+// Stripe webhook. server.js mounts express.raw() on this path so req.body is
+// the untouched bytes the signature was computed over.
 router.post("/billing/webhook", async (req, res) => {
   try {
-    const result = await billingManager.handleWebhook(req.body);
-    res.json(result);
+    if (!billingManager.checkout) return sendError(res, 404, "NOT_STRIPE", "Billing isn't running through Stripe here");
+    const raw = Buffer.isBuffer(req.body) ? req.body : Buffer.from(typeof req.body === "string" ? req.body : JSON.stringify(req.body || {}));
+    const r = await billingManager.checkout.handleWebhook(raw, req.get("stripe-signature"), {
+      startUnlock: (a, rid, pid, x) => startUnlockJob(a, rid, pid, x),
+      onPaymentFailed: async (accountId, invoice) => { events.track("payment_failed", { accountId, props: { invoice: invoice.id, attempt: invoice.attempt_count } }); },
+    });
+    if (r.applied && !r.one_time && r.accountId) await grantedSubscription(r.accountId, r);
+    res.json({ received: true, ...r });
   } catch (err) {
-    console.error("[Growth Engine] Webhook error:", err);
-    res.status(500).json({ error: err.message });
+    console.error("[Growth Engine] Webhook error:", err.message);
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 

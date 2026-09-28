@@ -313,6 +313,14 @@ answers on when to post, Instagram steps that don't exist. Two parts:
 - Email design pass in `server/mailer.js`: tables only (Gmail and Outlook drop flex), a masthead with a colour mark and an eyebrow naming the email, the account line, a preheader for the inbox preview, the score set large with its grade, the four dimensions as bars (with deltas on the weekly rescore), moves with why, how-steps and done-when, a 2.4× figure on post reviews, and a data-window note. Report-ready and score-changed now receive the dimension scores from the job queue.
 - `node scripts/email_preview.js [dir]` renders all ten templates with sample data, footer included, without sending — for design review and Resend tests.
 
+### Stripe Checkout (28 Sept)
+
+- `server/growth_engine_stripe.js`: hosted Checkout sessions for subscriptions (the app's own quote — locked, founders or list price — as the line item, dashboard Price ids used only when they match) and the one-time 60-day plan; a Stripe customer per account; the customer portal; and `applySession`, which the webhook and the browser's return both call — idempotent, with an in-process lock and a stamp on the Stripe object, so a plan is never granted twice and the unlock job never starts twice.
+- Routes: `/billing/subscribe` and `/reports/:id/unlock` return `checkout_url` when a real key is present; `GET /billing/checkout/confirm` (owner-checked), `POST /billing/portal`, `/billing/webhook` with signature verification (`STRIPE_WEBHOOK_SECRET`). `startUnlockJob` is shared by the mock path and the webhook.
+- Entitlements gain `stripe_customer_id` on both backends; `setStripeIds`, `getEntitlementByStripeCustomer`. `GROWTH_ENGINE_DB` env points the sql.js file elsewhere for tests.
+- App: `#/checkout/done` confirms the session (polls up to six times), then runs the plan for the scored handle or opens the 60-day job; cancelled checkout returns to pricing with a note; "Card & receipts" on the account page opens the portal. Pricing carries `checkout: "stripe" | "mock"`.
+- `server/growth_engine_stripe.test.js` (in `npm test`) drives the module against a fake Stripe client. `docs/STRIPE_SETUP.md` has the dashboard steps and the local Stripe CLI test.
+
 ## Also fixed along the way
 
 - Stored report bodies carried a provisional `report_id` (share sheet broke).

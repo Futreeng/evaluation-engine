@@ -136,6 +136,7 @@ async function initSchema() {
         created_at BIGINT NOT NULL
       )`);
     await client.query(`ALTER TABLE entitlements ADD COLUMN IF NOT EXISTS cancel_at BIGINT`);
+    await client.query(`ALTER TABLE entitlements ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT`);
     await client.query(`ALTER TABLE entitlements ADD COLUMN IF NOT EXISTS paused_until BIGINT`);
     await client.query(`ALTER TABLE entitlements ADD COLUMN IF NOT EXISTS pause_started_at BIGINT`);
     await client.query(`ALTER TABLE entitlements ADD COLUMN IF NOT EXISTS pause_ended_at BIGINT`);
@@ -571,6 +572,7 @@ function entRow(row) {
         billingPeriodStart: row.billing_period_start ? Number(row.billing_period_start) : null, billing_period_start: row.billing_period_start ? Number(row.billing_period_start) : null,
         billingPeriodEnd: row.billing_period_end ? Number(row.billing_period_end) : null, billing_period_end: row.billing_period_end ? Number(row.billing_period_end) : null,
         stripeSubscriptionId: row.stripe_subscription_id || null,
+        stripeCustomerId: row.stripe_customer_id || null,
         cancelAt: row.cancel_at ? Number(row.cancel_at) : null, cancel_at: row.cancel_at ? Number(row.cancel_at) : null,
         priceCents: row.price_cents != null ? Number(row.price_cents) : null, billingCycle: row.billing_cycle || null, founder: !!row.founder, pendingTier: row.pending_tier || null, pendingTierAt: row.pending_tier_at ? Number(row.pending_tier_at) : null,
         pausedUntil: row.paused_until ? Number(row.paused_until) : null, pauseStartedAt: row.pause_started_at ? Number(row.pause_started_at) : null, pauseEndedAt: row.pause_ended_at ? Number(row.pause_ended_at) : null, lapsedAt: row.lapsed_at ? Number(row.lapsed_at) : null,
@@ -633,6 +635,17 @@ async function listCancelReasons(limit = 200) { return (await q(`SELECT * FROM g
 async function listLapsedEntitlements(fromTs, toTs) {
   const r = await q(`SELECT user_id, lapsed_at FROM entitlements WHERE lapsed_at IS NOT NULL AND lapsed_at >= $1 AND lapsed_at <= $2 AND current_tier = 'social_snapshot'`, [fromTs, toTs]);
   return r.rows.map((x) => ({ accountId: x.user_id, lapsedAt: Number(x.lapsed_at) }));
+}
+// Stripe ids from checkout / webhooks. Pass undefined to leave a field alone, null to clear it.
+async function setStripeIds(accountId, { customerId, subscriptionId } = {}) {
+  await getOrCreateEntitlement(accountId);
+  if (customerId !== undefined) await q(`UPDATE entitlements SET stripe_customer_id = $1, updated_at = $2 WHERE user_id = $3`, [customerId, Date.now(), accountId]);
+  if (subscriptionId !== undefined) await q(`UPDATE entitlements SET stripe_subscription_id = $1, updated_at = $2 WHERE user_id = $3`, [subscriptionId, Date.now(), accountId]);
+  return getEntitlement(accountId);
+}
+async function getEntitlementByStripeCustomer(customerId) {
+  if (!customerId) return null;
+  return entRow((await q(`SELECT * FROM entitlements WHERE stripe_customer_id = $1`, [customerId])).rows[0]);
 }
 async function setCancelAt(accountId, cancelAt) {
   await getOrCreateEntitlement(accountId);
@@ -964,6 +977,7 @@ async function getBaselineStats(category) {
 }
 
 module.exports = {
+  setStripeIds, getEntitlementByStripeCustomer,
   initDb,
   initSchema,
   // Users
