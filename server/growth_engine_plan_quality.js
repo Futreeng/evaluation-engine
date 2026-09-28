@@ -329,7 +329,7 @@ const evidence = require("./growth_engine_evidence");
 // Every number the account's data can vouch for: scores, follower count, every post's
 // likes/comments/views, best-time lifts, the evidence lines, targets.
 function numbersInReport(r) {
-  const posts = (r.posts || []).map((p) => ({ l: p.likes, c: p.comments, v: p.views, d: p.posted_at ? new Date(p.posted_at).getDate() : null }));
+  const posts = (r.posts || []).map((p) => ({ l: p.likes, c: p.comments, v: p.views, d: p.posted_at ? new Date(p.posted_at).getUTCDate() : null }));
   return evidence.allowedNumbers({
     scores: { overall: r.scores?.overall, dims: (r.scores?.dimensions || []).map((d) => ({ s: d.score, e: d.evidence, p: d.parts, avg: d.category_avg })), pct: r.scores?.category_percentile },
     followers: r.business?.followers, sampled: r.posts_sampled, window: r.data_window,
