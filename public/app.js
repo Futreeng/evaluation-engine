@@ -251,11 +251,11 @@
     const [gl, gc] = grade(s.overall);
     return h`<div class="card scorecard">
       <div class="head"><b>@${s.handle}</b><span>${platName(s.platform)} · ${fmtDate(s.date)}</span></div>
-      <div class="bigrow"><span class="bignum">${s.overall}</span>
+      <div class="bigrow"><span class="bigwrap"><span class="bignum">${s.overall}</span><sup class="of">/100</sup></span>
         <div class="meta"><span class="tag ${gc}">${gl.toUpperCase()}</span><span class="f">${fmtN(s.followers)} followers</span></div></div>
       <div class="dims">${raw(s.dims.map(d => dimRow(d, d.category_avg)).join(''))}</div>
       <p class="why">${s.summary}</p>
-      <div class="foot"><span>Marker = niche average</span><a href="${s.link || '#/report/sample'}">See a real one →</a></div>
+      <div class="foot"><span>Marker = niche average</span><a href="${s.link || '#/report/sample'}">See the full report →</a></div>
     </div>`;
   }
 
@@ -280,7 +280,7 @@
         <section class="hero">
           <div class="l">
             <h1>Stop posting into the void.</h1>
-            <p class="sub">Growth is a system, not luck. Scalecraft Social scores your account out of 100 from what you actually post, shows exactly where the points went, and writes the next 90 days — move by move, week by week.</p>
+            <p class="sub">Growth is a system, not luck. Scalecraft Social scores your account from 0 to 100 from what you actually post, shows exactly where the points went, and writes the next 90 days — move by move, week by week.</p>
             <form class="darkform" id="evalForm" novalidate>
               <div class="ql formlead">Score your account. See exactly why. Get the plan.</div>
               <div class="steps2" aria-hidden="true"><span class="on"></span><span></span></div>
@@ -594,6 +594,7 @@
       ctx.font = sans(40, 600); ctx.fillText(opts.span || 'in six weeks', P, y); y += 90;
     } else {
       ctx.font = dsp(size === 'square' ? 420 : 520); ctx.fillText(String(s.overall), P - 14, y);
+      { const w = ctx.measureText(String(s.overall)).width; ctx.font = sans(size === 'square' ? 52 : 60, 700); ctx.globalAlpha = 0.7; ctx.fillText('/100', P - 14 + w + 18, y + 26); ctx.globalAlpha = 1; }
       y += size === 'square' ? 420 : 520;
       ctx.font = sans(48, 600); ctx.fillText('My Scalecraft Social score', P, y); y += 110;
     }
@@ -899,9 +900,9 @@
           <div class="toprow">
             <div class="card scorebox">
               ${hist && hist.delta_overall != null ? raw(h`<div class="trend ${hist.delta_overall > 0 ? 'up' : hist.delta_overall < 0 ? 'down' : 'flat'}"><b>${hist.delta_overall > 0 ? `Up ${hist.delta_overall} point${hist.delta_overall === 1 ? '' : 's'}` : hist.delta_overall < 0 ? `Down ${-hist.delta_overall} point${hist.delta_overall === -1 ? '' : 's'}` : 'Unchanged'}</b> since ${fmtShort(hist.previous.generated_at)}${hist.runs ? raw(h` · run ${hist.runs}`) : ''}${hist.delta_followers != null && hist.delta_followers !== 0 ? raw(h` · ${hist.delta_followers > 0 ? '+' : ''}${fmtN(hist.delta_followers)} followers`) : ''}</div>`) : paid && !isSample ? raw(h`<div class="trend first">Your first score — the plan rescores you weekly, so this line becomes your own trend.</div>`) : ''}
-              <div class="bigrow"><span class="bignum">${overall}</span>
+              <div class="bigrow"><span class="bigwrap"><span class="bignum">${overall}</span><sup class="of">/100</sup></span>
                 ${raw(shapeSVG(s.dimensions, hist && hist.delta_dimensions ? (s.dimensions || []).map(d => ({ label: d.label, score: clamp(d.score - (hist.delta_dimensions.find(x => x.label === d.label)?.delta || 0), 0, 100) })) : null, { size: 84, cls: 'inbox' }))}
-                <div class="meta"><span class="tag ${gc}">${gl.toUpperCase()}</span>${lvl ? raw(h`<span class="lvl" title="Rank ${lvl.rank} of ${lvl.of}">${lvl.name.toUpperCase()}${lvl.next ? raw(h`<em>· ${lvl.next.points_away} points to ${lvl.next.name}</em>`) : raw('<em>· top band</em>')}</span>`) : ''}${report.streak && report.streak.visible ? raw(h`<span class="streak ${report.streak.weeks ? 'on' : ''}" title="An on-plan week means you posted on at least ${report.streak.planned_days} days. A freeze covers a missed week.">${report.streak.weeks ? `🔥 ${report.streak.weeks}-week streak` : 'New streak starts this week'}${report.streak.freezes ? raw(h`<em>· ${report.streak.freezes} freeze${report.streak.freezes === 1 ? '' : 's'}</em>`) : ''}</span>`) : ''}
+                <div class="meta"><span class="tag ${gc}">${gl.toUpperCase()}</span>${lvl ? raw(h`<span class="lvl" title="Rank ${lvl.rank} of ${lvl.of}">${lvl.name.toUpperCase()}</span>${lvl.next ? raw(h`<span class="next">${lvl.next.points_away} points to ${lvl.next.name}</span>`) : raw('<span class="next">Top band</span>')}`) : ''}${report.streak && report.streak.visible ? raw(h`<span class="streak ${report.streak.weeks ? 'on' : ''}" title="An on-plan week means you posted on at least ${report.streak.planned_days} days. A freeze covers a missed week.">${report.streak.weeks ? `🔥 ${report.streak.weeks}-week streak` : 'New streak starts this week'}${report.streak.freezes ? raw(h`<em>· ${report.streak.freezes} freeze${report.streak.freezes === 1 ? '' : 's'}</em>`) : ''}</span>`) : ''}
                   ${followers ? raw(h`<span class="f">${fmtN(followers)} followers</span>`) : ''}
                 </div></div>
               <p class="why">${s.summary || ''}</p>
