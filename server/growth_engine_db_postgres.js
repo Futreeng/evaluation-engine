@@ -737,7 +737,7 @@ async function adminOverview() {
   const s7 = Number((await q(`SELECT COUNT(*) AS n FROM users WHERE created_at > $1`, [now - 7 * day])).rows[0].n);
   const s30 = Number((await q(`SELECT COUNT(*) AS n FROM users WHERE created_at > $1`, [now - 30 * day])).rows[0].n);
   const reports = (await q(`SELECT tier, COUNT(*) AS n FROM growth_engine_reports WHERE generated_at > $1 GROUP BY tier`, [now - day])).rows;
-  const oneTime = Number((await q(`SELECT COUNT(*) AS n FROM growth_engine_reports WHERE jsonb_typeof(report_body->'one_time_unlock') = 'object'`)).rows[0].n);
+  const oneTime = Number((await q(`SELECT COUNT(*) AS n FROM growth_engine_reports WHERE report_body->'one_time_unlock' IS NOT NULL`)).rows[0].n);
   const jobs = (await q(`SELECT status, COUNT(*) AS n FROM growth_engine_jobs WHERE created_at > $1 GROUP BY status`, [now - day])).rows;
   const waitlist = (await q(`SELECT platform, COUNT(*) AS n FROM growth_engine_waitlist GROUP BY platform ORDER BY n DESC`)).rows;
   const users = Number((await q(`SELECT COUNT(*) AS n FROM users`)).rows[0].n);
