@@ -34,6 +34,8 @@ services:
         sync: false
       - key: STRIPE_API_KEY
         sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
       # Email (Resend). See docs/EMAIL_SETUP.md. Unset RESEND_API_KEY → every
       # send is logged, nothing goes out.
       - key: RESEND_API_KEY

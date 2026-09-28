@@ -1069,7 +1069,7 @@
     }).catch(() => { }); }
     { const ao = $view.querySelector('#annualOffer'); if (ao) {
       ao.querySelector('[data-action=dismiss-annual]').addEventListener('click', () => { sset('sc_annual_dismissed', true); ao.remove(); });
-      ao.querySelector('[data-action=take-annual]').addEventListener('click', async e => { e.currentTarget.disabled = true; try { await api('/billing/subscribe', { method: 'POST', body: JSON.stringify({ tier: 'growth_plan', billingCycle: 'annual' }) }); track('annual_offer_taken', {}, report.report_id); sset('sc_annual_dismissed', true); ao.remove(); toast('Annual plan on. Thank you — same plan, one payment a year.'); } catch (e2) { toast(e2.message); e.currentTarget.disabled = false; } });
+      ao.querySelector('[data-action=take-annual]').addEventListener('click', async e => { e.currentTarget.disabled = true; try { const r = await api('/billing/subscribe', { method: 'POST', body: JSON.stringify({ tier: 'growth_plan', billingCycle: 'annual' }) }); if (r.checkoutUrl) { location.href = r.checkoutUrl; return; } track('annual_offer_taken', {}, report.report_id); sset('sc_annual_dismissed', true); ao.remove(); toast('Annual plan on. Thank you — same plan, one payment a year.'); } catch (e2) { toast(e2.message); e.currentTarget.disabled = false; } });
       if (qs.get('annual') === '1') ao.scrollIntoView({ behavior: 'smooth', block: 'center' });
     } }
     $view.querySelectorAll('details > summary').forEach(sm => { if (sm.querySelector('[role=heading]')) return; const w = document.createElement('span'); w.setAttribute('role', 'heading'); w.setAttribute('aria-level', '2'); while (sm.firstChild) w.appendChild(sm.firstChild); sm.appendChild(w); });
@@ -1494,6 +1494,10 @@
           const body = { tier: b.dataset.subscribe, billingCycle: billing };
           if (b.dataset.subscribe === 'growth_plan' && promoState && promoState.code) body.promo_code = promoState.code;
           const sub = await api('/billing/subscribe', { method: 'POST', body: JSON.stringify(body) });
+          // Real Stripe hands back a hosted Checkout URL and grants nothing yet;
+          // the plan turns on when Stripe's webhook confirms payment. Keep the
+          // intent in session so returning from Checkout resumes where we were.
+          if (sub.checkoutUrl) { clearPromo(); location.href = sub.checkoutUrl; return; }
           sessionStorage.removeItem('sc_intent_tier'); sessionStorage.removeItem('sc_limit_msg'); clearPromo();
           if (sub.promo) toast(`${sub.promo.code} applied — ${sub.promo.description}.`);
           const last = sget('sc_form', {});

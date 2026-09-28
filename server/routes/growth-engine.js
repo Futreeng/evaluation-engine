@@ -1142,13 +1142,35 @@ router.get("/billing/estimate", async (req, res) => {
   }
 });
 
-// Stripe webhook
+// Stripe webhook. This endpoint is public and grants paid tiers, so the
+// signature is the only thing standing between it and a forged
+// "payment succeeded". Without STRIPE_WEBHOOK_SECRET we refuse outright
+// rather than trusting whatever arrives — an unverified webhook is worse
+// than no webhook.
+//
+// req.body is a Buffer here: server.js mounts express.raw for this path ahead
+// of express.json, because the signature covers the exact bytes Stripe sent.
 router.post("/billing/webhook", async (req, res) => {
+  const secret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (!secret) {
+    console.error("[Billing] webhook received but STRIPE_WEBHOOK_SECRET is unset — refusing unverified event");
+    return res.status(503).json({ error: "Webhook not configured", code: "WEBHOOK_NOT_CONFIGURED" });
+  }
+  let event;
   try {
-    const result = await billingManager.handleWebhook(req.body);
-    res.json(result);
+    const stripe = require("stripe")(process.env.STRIPE_API_KEY);
+    event = stripe.webhooks.constructEvent(req.body, req.get("stripe-signature"), secret);
   } catch (err) {
-    console.error("[Growth Engine] Webhook error:", err);
+    // Bad signature, replayed timestamp, or a parsed (non-raw) body.
+    console.error("[Billing] webhook signature verification failed:", err.message);
+    return res.status(400).json({ error: "Invalid signature" });
+  }
+  try {
+    res.json(await billingManager.handleWebhook(event));
+  } catch (err) {
+    // A 500 makes Stripe retry, which is what we want for a transient failure
+    // (a database blip shouldn't lose someone's subscription).
+    console.error(`[Billing] webhook ${event.id} (${event.type}) failed:`, err.message);
     res.status(500).json({ error: err.message });
   }
 });

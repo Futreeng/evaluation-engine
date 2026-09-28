@@ -55,6 +55,13 @@ app.use((req, res, next) => {
 // Conversations accumulate history (every prior turn is replayed to the model),
 // so bodies grow well past a couple of megabytes in long sessions. 2mb was too
 // tight and produced opaque 413 HTML error pages mid-conversation.
+// Stripe signs the webhook body; verifying that signature needs the exact
+// bytes Stripe sent, so this one path must be parsed as raw and must come
+// before express.json — once JSON has parsed it the original bytes are gone
+// and every signature check fails. An unverified webhook is a forged
+// "payment succeeded" away from a free subscription, so this ordering is
+// load-bearing, not a style choice.
+app.use("/api/growth-engine/v1/billing/webhook", express.raw({ type: "application/json" }));
 app.use(express.json({ limit: "50mb" }));
 app.use(cookieParser());
 

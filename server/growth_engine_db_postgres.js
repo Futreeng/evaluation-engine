@@ -171,6 +171,13 @@ async function initSchema() {
         id TEXT PRIMARY KEY, user_id TEXT, to_email TEXT NOT NULL, type TEXT NOT NULL, subject TEXT, status TEXT NOT NULL,
         provider TEXT, provider_id TEXT, error TEXT, created_at BIGINT NOT NULL
       )`);
+    // Stripe redelivers a webhook until it gets a 2xx, and the same event can
+    // arrive more than once even after success. The primary key is the ledger:
+    // an insert that conflicts means we've already acted on this event.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_webhook_events (
+        event_id TEXT PRIMARY KEY, type TEXT, created_at BIGINT NOT NULL
+      )`);
     await client.query(`
       CREATE TABLE IF NOT EXISTS growth_engine_niche_briefs (
         id TEXT PRIMARY KEY, category TEXT NOT NULL, platform TEXT NOT NULL, week TEXT NOT NULL, n INTEGER NOT NULL, body TEXT NOT NULL, created_at BIGINT NOT NULL
@@ -343,6 +350,13 @@ async function insertRoastRejection(r) {
 }
 async function listRoastRejections(limit = 100) { return (await q(`SELECT * FROM growth_engine_roast_rejections ORDER BY created_at DESC LIMIT $1`, [limit])).rows.map((r) => ({ ...r, created_at: Number(r.created_at) })); }
 async function listEmailLog(limit = 100) { return (await q(`SELECT * FROM growth_engine_email_log ORDER BY created_at DESC LIMIT $1`, [limit])).rows.map((r) => ({ ...r, created_at: Number(r.created_at) })); }
+
+// True the first time an event id is seen, false on every redelivery. The
+// insert is the claim, so two concurrent deliveries can't both win.
+async function claimWebhookEvent(eventId, type = null) {
+  const r = await q(`INSERT INTO growth_engine_webhook_events (event_id, type, created_at) VALUES ($1, $2, $3) ON CONFLICT (event_id) DO NOTHING RETURNING event_id`, [String(eventId), type, Date.now()]);
+  return r.rowCount > 0;
+}
 async function setEmailPaused(userId, paused) {
   await q(`UPDATE users SET email_paused = $1, updated_at = $2 WHERE user_id = $3`, [!!paused, Date.now(), userId]);
   return getUserById(userId);
@@ -976,6 +990,7 @@ module.exports = {
   setEmailPrefs,
   insertEmailLog,
   listEmailLog,
+  claimWebhookEvent,
   insertRoastRejection,
   listRoastRejections,
   setGoal,
