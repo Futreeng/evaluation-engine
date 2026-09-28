@@ -26,6 +26,9 @@ const PREF_TYPES = TYPES.filter((t) => t !== "transactional");
 const DEFAULT_PREFS = { weekly_score: true, monday_move: true, milestones: true, post_reviews: true, product_news: true };
 const APP = (process.env.APP_URL || "http://localhost:3005").replace(/\/$/, "");
 const FROM = process.env.MAIL_FROM || "Scalecraft Social <onboarding@resend.dev>";
+// Replies land with a person. MAIL_FROM stays on the verified sending domain
+// (send.futreeng.com, nothing reads it); REPLY_TO is the inbox that does.
+const REPLY_TO = process.env.REPLY_TO || process.env.SUPPORT_EMAIL || "hello@futreeng.com";
 const POSTAL = process.env.EMAIL_POSTAL_ADDRESS || "";
 const SUPPORT = process.env.SUPPORT_EMAIL || "";
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -36,7 +39,7 @@ const providers = {
   resend: {
     name: "resend",
     async send({ to, subject, html, text, type }) {
-      const res = await fetch("https://api.resend.com/emails", { method: "POST", headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ from: FROM, to: [to], subject, html, text: text || undefined, tags: [{ name: "type", value: type }] }) });
+      const res = await fetch("https://api.resend.com/emails", { method: "POST", headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ from: FROM, to: [to], reply_to: REPLY_TO, subject, html, text: text || undefined, tags: [{ name: "type", value: type }] }) });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body?.message || `Resend ${res.status}`);
       return { id: body.id, status: "sent" };
@@ -98,4 +101,4 @@ async function send({ to, userId = null, type = "transactional", subject, html, 
 }
 async function log(row) { try { await geDb.insertEmailLog({ ...row, provider: provider().name }); } catch (e) { console.warn("[Mail] log failed:", e.message); } }
 
-module.exports = { TYPES, PREF_TYPES, DEFAULT_PREFS, send, prefsFor, allowed, unsubscribeLink, verifyUnsub, configured, providerName: () => provider().name };
+module.exports = { TYPES, PREF_TYPES, DEFAULT_PREFS, FROM, REPLY_TO, footer, send, prefsFor, allowed, unsubscribeLink, verifyUnsub, configured, providerName: () => provider().name };

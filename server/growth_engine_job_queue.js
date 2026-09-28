@@ -324,11 +324,11 @@ class JobQueue {
           for (const m of reportBody.moments || []) await mailer.moment({ to, userId: accountId, handle: inputParams.handle, reportId, moment: m });
           if (h.delta_overall !== 0 || reportBody.nudge) {
             let brief = null; try { brief = await require("./growth_engine_briefs").getBrief(inputParams.category, inputParams.platform); } catch { /* optional */ }
-            await mailer.scoreChanged({ to, userId: accountId, handle: inputParams.handle, reportId, oldScore: h.previous.overall, newScore: reportBody.scores.overall, dimension: biggest?.label || "Overall", delta: biggest?.delta ?? h.delta_overall, movesDone: (h.moves_done_since || []).length, nudge: reportBody.nudge || null, brief });
+            await mailer.scoreChanged({ to, userId: accountId, handle: inputParams.handle, reportId, oldScore: h.previous.overall, newScore: reportBody.scores.overall, dimension: biggest?.label || "Overall", delta: biggest?.delta ?? h.delta_overall, dimensions: (reportBody.scores.dimensions || []).map((d) => ({ label: d.label, score: d.score, delta: (h.delta_dimensions || []).find((x) => x.label === d.label)?.delta ?? null })), movesDone: (h.moves_done_since || []).length, nudge: reportBody.nudge || null, brief });
           }
           if (annualOfferNow && reportBody.offers?.annual) { await mailer.annualOffer({ to, userId: accountId, handle: inputParams.handle, reportId, offer: reportBody.offers.annual, oldScore: h.previous.overall, newScore: reportBody.scores.overall }); events.track("annual_offer_shown", { accountId, reportId, props: { annual: reportBody.offers.annual.annual } }); }
         } else if (!inputParams.rerun_of && reportBody.scores) {
-          await mailer.reportReady({ to, handle: inputParams.handle, reportId, overall: reportBody.scores.overall, grade, summary: reportBody.scores.summary, firstMove, paid: hasPlan });
+          await mailer.reportReady({ to, handle: inputParams.handle, platform: inputParams.platform, reportId, overall: reportBody.scores.overall, grade, summary: reportBody.scores.summary, firstMove, paid: hasPlan, dimensions: (reportBody.scores.dimensions || []).map((d) => ({ label: d.label, score: d.score })), dataWindow: reportBody.data_window || null });
         }
       } catch (err) {
         console.warn("[JobQueue] email failed:", err.message);
