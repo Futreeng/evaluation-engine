@@ -339,6 +339,10 @@ answers on when to post, Instagram steps that don't exist. Two parts:
 
 Joe's #23 put payments through hosted Stripe Checkout with the grant in the signed webhook. Against the real account two things broke and are fixed here: the account runs **Managed Payments** (Stripe as merchant of record), which needs the Stripe SDK at v22+ (API 2025-03-31) and a tax code on every product. Added on top of his design: a Stripe customer per account (`stripe_customer_id`, `setStripeIds`) so receipts and the portal work; `stripeLineItem` that bills from the catalogue price when it matches the app's quote (founders included) and otherwise carries the amount with a tax code; `POST /billing/portal` and "Card & receipts" on the account page; a "Payment received" note on the return; `scripts/stripe_products.js` that creates or finds the catalogue with tax codes and prints the env ids; `docs/STRIPE_SETUP.md`.
 
+### Numbers in words (28 Sept)
+
+Haron: a new user looking at "2.1", "190", "46.65×" asks what the heck they mean. Now every bare number carries its verdict and its reference. The three tiles under the bars lead with a sentence ("Posting less than the plan needs", "Engagement is your strength", "Thursday evening is your window"), then the number with what it's measured against ("2.1 a week · target 3"), then "See the move →" where a move exists. Best and worst posts read "47× your usual post" / "About a tenth of your usual post" under a rounding rule (whole numbers past 10×, one decimal to 10×, plain fractions below 1×), the median pill became a sentence ("Your typical post gets 190 likes and comments. Every figure below is measured against that"), and every card ends with a Why line built from the numbers we hold — format and day averages, caption shape, hidden likes, reach — two clauses at most, no model, so each is checkable against the card. `multText`, `multVerdict`, `postReason`, `factTiles` in `public/app.js`.
+
 ## Also fixed along the way
 
 - Stored report bodies carried a provisional `report_id` (share sheet broke).

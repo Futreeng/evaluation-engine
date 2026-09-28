@@ -62,6 +62,68 @@
   const fmtN = n => Number(n || 0).toLocaleString();
   // Post dates in the account's own time zone, never the viewer's: the same day everywhere on the page.
   const zoneOf = report => (report && (report.tz || (report.best_times && report.best_times.tz))) || 'UTC';
+
+  // Numbers a first-time reader can parse. A multiplier against the account's
+  // own typical post: whole numbers past 10×, one decimal from 1.25× to 10×,
+  // and plain fractions below 1× ("about a third"), never "0.11×".
+  function multText(v) { v = Number(v); if (!isFinite(v)) return ''; if (v >= 10) return Math.round(v) + '×'; if (v >= 1.25) return v.toFixed(1) + '×'; if (v >= 0.8) return 'about average'; if (v >= 0.6) return 'about two-thirds'; if (v >= 0.42) return 'about half'; if (v >= 0.28) return 'about a third'; if (v >= 0.2) return 'about a quarter'; if (v >= 0.13) return 'about a fifth'; return 'about a tenth'; }
+  function multVerdict(v) { const n = Number(v), t = multText(n); if (!t) return ''; if (n >= 1.25) return `${t} your usual post`; if (n >= 0.8) return 'About your usual post'; return `${t.charAt(0).toUpperCase() + t.slice(1)} of your usual post`; }
+  const DAY_LONG = { Mon: 'Monday', Tue: 'Tuesday', Wed: 'Wednesday', Thu: 'Thursday', Fri: 'Friday', Sat: 'Saturday', Sun: 'Sunday' };
+  const FORMAT_PLURAL = { reel: 'Reels', video: 'Videos', carousel: 'Carousels', static: 'Photos', image: 'Photos', photo: 'Photos' };
+  // Why a post did what it did, from the numbers we hold (format and day
+  // averages, caption shape, hidden likes, reach) — no model, so every clause
+  // is checkable against the card it sits on. Two clauses at most.
+  function postReason(p, pi, report, kind) {
+    const typ = Number(pi.avg_engagement) || 0, pat = pi.patterns || {}, bits = [];
+    const fname = FORMAT_PLURAL[String(p.format || '').toLowerCase()] || (String(p.format || 'post') + 's');
+    const fa = pat.format_avg && pat.format_avg[p.format];
+    if (fa && typ && fa.posts >= 2) {
+      const r = fa.avg_engagement / typ; const one = String(p.format || 'post').toLowerCase();
+      if (kind === 'top' && r >= 1.5) bits.push(`${fname.toLowerCase()} are your best format (${multText(r)} your typical post)`);
+      else if (kind === 'top' && r <= 0.7) bits.push(`${fname.toLowerCase()} usually run cold for you, so this one beat the odds`);
+      else if (kind === 'low' && r <= 0.7) bits.push(`${fname.toLowerCase()} run cold for you (${multText(r)} of your typical post)`);
+      else if (kind === 'low' && r >= 1.5) bits.push(`a ${one}, normally your best format, so the format isn't the problem`);
+    }
+    const dl = DAY_LONG[p.weekday]; const da = pat.day_avg && pat.day_avg[p.weekday];
+    if (dl && da && typ) { const r = da / typ; if (pat.best_day && pat.best_day.day === p.weekday) bits.push(`${dl} is your strongest day`); else if (r <= 0.8) bits.push(`${dl} is one of your weaker days`); }
+    const cap = String(p.caption || '').trim(); const first = cap.split(/[.!?\n]/)[0].trim();
+    if (!cap) bits.push('no caption to pull people in');
+    else if (/^[#@]/.test(cap)) bits.push('the caption opens with a hashtag instead of a line');
+    else if (kind === 'top' && first.length > 0 && first.length <= 60) bits.push('the caption opens with one clear line');
+    else if (kind === 'low' && first.length > 90) bits.push('the caption takes a while to get to the point');
+    if (p.likes === 0 && (p.comments > 5 || p.views > 100)) bits.push('likes are hidden on this one, so the count undercounts it');
+    const fol = report.business && report.business.followers;
+    if (kind === 'top' && p.views && fol && p.views >= 2 * fol) bits.push(`seen by ${Math.round(p.views / fol)}× your follower count`);
+    if (p.pinned) bits.push('pinned, so it kept collecting');
+    const picked = bits.slice(0, 2);
+    if (!picked.length) return kind === 'top' ? 'Why: nothing in format or timing explains it — the subject did the work.' : 'Why: nothing in format or timing explains it — the subject didn\'t land.';
+    return 'Why: ' + picked.join('; ') + '.';
+  }
+  // The three tiles under the bars: verdict first, then the number with what it's measured against, then the move.
+  function factTiles(report, s, pi, phases) {
+    const tiles = [];
+    const cons = (s.dimensions || []).find(d => /consisten/i.test(d.label));
+    const m = cons && /([\d.]+)\/week(?:\s*vs\s*([\d.]+)\/week)?/.exec(cons.evidence || '');
+    if (m) {
+      const ppw = Number(m[1]); const target = report.calendar?.schedule?.per_week || (m[2] ? Number(m[2]) : null);
+      const v = target ? (ppw >= target ? 'Posting on target' : ppw >= target * 0.8 ? 'Posting close to target' : 'Posting less than the plan needs') : 'How often you post';
+      const ph = phaseForDim(cons.label, phases);
+      tiles.push({ v, n: `${m[1]} a week`, l: target ? `target ${target}` : 'over the last posts', fix: ph ? ph.key + 'm1' : null });
+    }
+    const eq = (s.dimensions || []).find(d => /engage/i.test(d.label));
+    if (pi && pi.avg_engagement) {
+      const sc = eq ? Number(eq.score) : null;
+      const v = sc == null ? 'What a post gets' : sc >= 70 ? 'Engagement is your strength' : sc >= 45 ? 'Engagement is middling' : 'Engagement is the gap';
+      const ph = eq && sc != null && sc < 70 ? phaseForDim(eq.label, phases) : null;
+      tiles.push({ v, n: fmtN(pi.avg_engagement), l: pi.metric === 'median' ? 'likes + comments on a typical post' : 'likes + comments per post', fix: ph ? ph.key + 'm1' : null });
+    }
+    const w = report.best_times && report.best_times.confident && report.best_times.windows && report.best_times.windows[0];
+    if (w) {
+      const dl = DAY_LONG[w.day] || w.day; const part = w.start_hour >= 17 ? 'evening' : w.start_hour >= 12 ? 'afternoon' : 'morning';
+      tiles.push({ v: `${dl} ${part} is your window`, n: w.label, l: w.vs_avg ? `${multText(w.vs_avg)} your usual${w.n ? `, ${w.n} posts` : ''}` : 'your best window', fix: null });
+    }
+    return tiles.length ? h`<div class="facts">${raw(tiles.map(t => h`<div class="fact"><span class="v">${t.v}</span><b>${t.n}</b><span>${t.l}</span>${t.fix ? raw(h`<a href="#" data-dim-fix="${t.fix}">See the move →</a>`) : ''}</div>`).join(''))}</div>` : '';
+  }
   const postDay = (report, iso, opts = {}) => { try { return new Date(iso).toLocaleDateString('en-GB', { timeZone: zoneOf(report), day: 'numeric', month: 'short', ...opts }); } catch { return fmtShort(iso); } };
   const ordinal = n => ['1st', '2nd', '3rd', '4th', '5th'][n - 1] || (n + 'th');
   const sget = (k, d) => { try { const v = sessionStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
@@ -908,7 +970,7 @@
               <p class="why">${s.summary || ''}</p>
               ${(s.dimensions || []).length ? raw(h`<div class="glance">
                 <div class="dims">${raw((s.dimensions || []).map(d => dimRow({ label: d.label, score: d.score }, d.category_avg, gradeIn({ score: clamp(d.score, 0, 100), label: d.label }, s.summary)[0])).join(''))}</div>
-                ${raw((() => { const facts = []; const cons = (s.dimensions || []).find(d => /consisten/i.test(d.label)); const ppw = cons && /([\d.]+)\/week/.exec(cons.evidence || ''); if (ppw) facts.push([ppw[1], 'posts a week']); if (pi && pi.avg_engagement) facts.push([fmtN(pi.avg_engagement), pi.metric === 'median' ? 'likes + comments on a typical post' : 'likes + comments per post']); const w = report.best_times && report.best_times.confident && report.best_times.windows && report.best_times.windows[0]; if (w) facts.push([w.label, 'your best window']); return facts.length ? h`<div class="facts">${raw(facts.map(([v, l]) => h`<div class="fact"><b>${v}</b><span>${l}</span></div>`).join(''))}</div>` : ''; })())}
+                ${raw(factTiles(report, s, pi, phases))}
                 <div class="fine">${(s.dimensions || []).some(d => d.category_avg != null) ? `Marker = ${niche} average.` : ''} Each dimension is explained below.</div>
                 ${raw(marginaliaHTML(report))}
               </div>`) : ''}
@@ -967,12 +1029,13 @@
           </details>
 
           ${pi && pi.top && pi.top.length ? raw(h`<details class="card acc" open>
-            <summary>Your best and worst posts <span class="fine" style="font-weight:500">best: ${pi.top[0].vs_avg}× your ${pi.metric === 'median' ? 'typical post' : 'average'}</span></summary>
+            <summary>Your best and worst posts <span class="fine" style="font-weight:500">best: ${multText(pi.top[0].vs_avg)} your ${pi.metric === 'median' ? 'typical post' : 'average'}</span></summary>
             <div class="body">
-              <div class="postmeta"><span class="pill tone">${pi.metric === 'median' ? 'MEDIAN' : 'AVG'} ${fmtN(pi.avg_engagement)} per post</span>${pi.patterns?.best_format ? raw(h`<span class="pill tone">${String(pi.patterns.best_format.format).toUpperCase()}S ${pi.patterns.best_format.vs_avg}×</span>`) : ''}${pi.patterns?.best_day ? raw(h`<span class="pill green">${String(pi.patterns.best_day.day).toUpperCase()} IS YOUR STRONGEST DAY</span>`) : ''}</div>
+              <p class="postlead">Your ${pi.metric === 'median' ? 'typical' : 'average'} post gets <b>${fmtN(pi.avg_engagement)}</b> likes and comments. Every figure below is measured against that.</p>
+              <div class="postmeta">${pi.patterns?.best_format ? raw(h`<span class="pill tone">${(FORMAT_PLURAL[String(pi.patterns.best_format.format).toLowerCase()] || pi.patterns.best_format.format + 's').toUpperCase()} ${multText(pi.patterns.best_format.vs_avg).toUpperCase()} YOUR USUAL</span>`) : ''}${pi.patterns?.best_day ? raw(h`<span class="pill green">${String(pi.patterns.best_day.day).toUpperCase()} IS YOUR STRONGEST DAY</span>`) : ''}</div>
               <div class="posts">${raw([...pi.top.map(p => [p, 'top']), ...pi.bottom.map(p => [p, 'low'])].map(([p, k]) => h`<div class="post ${k}">
-                <div class="k"><div class="x ${k === 'top' ? 'g-strong' : 'g-weak'}">${p.vs_avg}×</div><div class="t">${k === 'top' ? 'TOP' : 'LOW'} · ${String(p.format).toUpperCase()}</div><div class="d">${p.weekday ? p.weekday + ' ' : ''}${p.date ? postDay(report, p.date) : ''}</div></div>
-                <div class="c"><p>“${p.caption || 'no caption'}”</p><div class="n">${p.likes === 0 && (p.comments > 5 || p.views > 100) ? 'likes hidden' : fmtN(p.likes) + ' likes'} · ${fmtN(p.comments)} comments${p.views ? ` · ${fmtN(p.views)} views` : ''}${p.url ? raw(h` · <a href="${p.url}" target="_blank" rel="noopener">open</a>`) : ''}</div></div></div>`).join(''))}</div>
+                <div class="k"><div class="x ${k === 'top' ? 'g-strong' : 'g-weak'}">${multVerdict(p.vs_avg)}</div><div class="t">${k === 'top' ? 'TOP' : 'LOW'} · ${String(p.format).toUpperCase()}</div><div class="d">${p.weekday ? p.weekday + ' ' : ''}${p.date ? postDay(report, p.date) : ''}</div></div>
+                <div class="c"><p>“${p.caption || 'no caption'}”</p><div class="n">${p.likes === 0 && (p.comments > 5 || p.views > 100) ? 'likes hidden' : fmtN(p.likes) + ' likes'} · ${fmtN(p.comments)} comments${p.views ? ` · ${fmtN(p.views)} views` : ''}${p.url ? raw(h` · <a href="${p.url}" target="_blank" rel="noopener">open</a>`) : ''}</div><div class="r">${postReason(p, pi, report, k)}</div></div></div>`).join(''))}</div>
               ${pi.note ? raw(h`<p class="postnote">${pi.note}</p>`) : ''}
             </div>
           </details>`) : ''}
