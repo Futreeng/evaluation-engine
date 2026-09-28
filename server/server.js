@@ -154,10 +154,16 @@ app.get("/s/:id", async (req, res) => {
   } catch (err) { res.status(500).type("text").send("Card unavailable"); }
 });
 
-app.use(express.static(path.join(__dirname, "..", "public")));
+// The HTML must revalidate every time. It carries the ?v= markers that bust
+// every other asset, so a cached copy pins the browser to an old app.js
+// indefinitely — it never learns a new version exists. Assets keep their own
+// caching; the version query is what invalidates those.
+const NO_STORE_HTML = (res, filePath) => { if (filePath.endsWith(".html")) res.set("Cache-Control", "no-cache, must-revalidate"); };
+app.use(express.static(path.join(__dirname, "..", "public"), { setHeaders: NO_STORE_HTML }));
 // Locally stored post thumbnails (THUMB_STORAGE=local)
 app.use("/thumbs", express.static(require("./growth_engine_thumbs").localDir, { maxAge: "365d", immutable: true, fallthrough: true }));
 app.get("*", (req, res) => {
+  res.set("Cache-Control", "no-cache, must-revalidate");
   res.sendFile(path.join(__dirname, "..", "public", "index.html"));
 });
 
