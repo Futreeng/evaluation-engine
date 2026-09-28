@@ -37,7 +37,7 @@ This guide walks through deploying the Convergence API backend on **Render** whi
 After connecting your repo, you'll see the deployment form:
 
 ### Basic Settings
-- **Name**: `convergence-api`
+- **Name**: `scalecraft`
 - **Runtime**: Select **"Docker"** (Dockerfile will be auto-detected)
 - **Branch**: `main`
 - **Build Command**: `(leave empty — Dockerfile handles this)`
@@ -82,7 +82,7 @@ openssl rand -hex 32
    - Clone your repo
    - Build the Docker image
    - Deploy the service
-   - Print a live URL like `https://convergence-api.onrender.com`
+   - Print a live URL like `https://scalecraft.onrender.com`
 
 3. **Monitor the build** in the **Logs** tab:
    - Look for `"Build Successful"` message
@@ -94,7 +94,7 @@ openssl rand -hex 32
 
 ### Check Health Endpoint
 ```bash
-curl https://convergence-api.onrender.com/api/growth-engine/v1/health
+curl https://scalecraft.onrender.com/api/growth-engine/v1/health
 ```
 
 Expected response:
@@ -122,7 +122,7 @@ If your frontend is on Vercel and pointing to Railway, update it to use Render:
 1. Go to **Vercel project** → **Settings** → **Environment Variables**
 2. Update `VITE_API_URL` or `REACT_APP_API_URL`:
    ```
-   https://convergence-api.onrender.com
+   https://scalecraft.onrender.com
    ```
 3. Redeploy Vercel
 
@@ -132,7 +132,7 @@ Or update in frontend code if hardcoded:
 const API = "https://my-railway-api.up.railway.app";
 
 // After
-const API = "https://convergence-api.onrender.com";
+const API = "https://scalecraft.onrender.com";
 ```
 
 ---

@@ -79,7 +79,9 @@ function footer(userId, type, optOutUrl = null) {
 // Send one email. `html` is the full document from mailer.layout(); the
 // footer row is injected before the closing table row marker.
 async function send({ to, userId = null, type = "transactional", subject, html, text = null, devLink = null, optOutUrl = null }) {
-  if (!to) return { skipped: "no recipient" };
+  // No recipient is a bug upstream, not a normal skip: the work is done and
+  // nobody is told. Warn and log it so it's visible rather than silent.
+  if (!to) { console.warn(`[Mail] no recipient for "${subject}" (type ${type}${userId ? `, user ${userId}` : ""}) — not sent`); await log({ userId, to: "(none)", type, subject, status: "skipped", error: "no recipient" }); return { skipped: "no recipient" }; }
   if (!TYPES.includes(type)) type = "transactional";
   if (!(await allowed(userId, type))) { await log({ userId, to, type, subject, status: "skipped", error: "preference" }); return { skipped: "preference" }; }
   const full = html.includes("<!--footer-->") ? html.replace("<!--footer-->", footer(userId, type, optOutUrl)) : html;

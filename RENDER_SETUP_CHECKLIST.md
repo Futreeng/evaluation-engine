@@ -40,7 +40,7 @@ Before deploying, collect these values:
 
 Fill in the form:
 
-- **Name**: `convergence-api`
+- **Name**: `scalecraft`
 - **Runtime**: **"Docker"** (Dockerfile auto-detected ✓)
 - **Branch**: `main`
 - **Instance Type**: Start with **"Free"** tier
@@ -70,7 +70,7 @@ Click **"Create Web Service"** and wait for the build to complete (~2-3 minutes)
 
 Test the health endpoint:
 ```bash
-curl https://convergence-api.onrender.com/api/growth-engine/v1/health
+curl https://scalecraft.onrender.com/api/growth-engine/v1/health
 ```
 
 Should return:
@@ -84,13 +84,13 @@ If your frontend is on Vercel, update the API URL:
 
 **Option A: Vercel Environment Variables**
 1. Go to Vercel project → **Settings** → **Environment Variables**
-2. Update `VITE_API_URL` to `https://convergence-api.onrender.com`
+2. Update `VITE_API_URL` to `https://scalecraft.onrender.com`
 3. Redeploy
 
 **Option B: In Code**
 ```javascript
 // Update frontend's API base URL
-const API_URL = "https://convergence-api.onrender.com";
+const API_URL = "https://scalecraft.onrender.com";
 ```
 
 ### 8. Test End-to-End

@@ -34,6 +34,18 @@ services:
         sync: false
       - key: STRIPE_API_KEY
         sync: false
+      # Email (Resend). See docs/EMAIL_SETUP.md. Unset RESEND_API_KEY → every
+      # send is logged, nothing goes out.
+      - key: RESEND_API_KEY
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+      - key: EMAIL_POSTAL_ADDRESS
+        sync: false
+      - key: SUPPORT_EMAIL
+        sync: false
+      - key: APP_URL
+        sync: false
       - key: FREE_SNAPSHOTS_PER_EMAIL
         value: '1'
 
