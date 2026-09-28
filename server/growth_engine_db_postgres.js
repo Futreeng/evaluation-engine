@@ -328,7 +328,7 @@ async function setGoal(userId, goal, target) {
 }
 async function listBusinessAccounts() {
   const users = (await q(`SELECT user_id, email, niche, created_at FROM users WHERE is_business = TRUE ORDER BY created_at DESC`)).rows.map((u) => ({ ...u, created_at: Number(u.created_at) }));
-  const reports = (await q(`SELECT r.account_id, r.handle, r.platform, r.category, r.generated_at, r.report_body, u.email AS user_email FROM growth_engine_reports r LEFT JOIN users u ON u.user_id = r.account_id WHERE r.report_body LIKE '%"is_business_account":true%' ORDER BY r.generated_at DESC NULLS LAST`)).rows
+  const reports = (await q(`SELECT r.account_id, r.handle, r.platform, r.category, r.generated_at, r.report_body, u.email AS user_email FROM growth_engine_reports r LEFT JOIN users u ON u.user_id = r.account_id WHERE r.report_body->'business'->>'is_business_account' = 'true' ORDER BY r.generated_at DESC NULLS LAST`)).rows
     .map((r) => { const b = parseJson(r.report_body) || {}; return { account_id: r.account_id, email: b.email || r.user_email || null, handle: r.handle, platform: r.platform, category: r.category, overall: b.scores?.overall ?? null, generated_at: Number(r.generated_at) }; });
   return { users, reports };
 }
@@ -513,7 +513,7 @@ async function updateReportRefreshDue(reportId, refreshDueAt) {
   return getReport(reportId);
 }
 async function listReportsWithEmailSince(fromTs) {
-  const r = await q(`SELECT * FROM growth_engine_reports WHERE generated_at >= $1 AND report_body LIKE '%"email":"%' ORDER BY generated_at DESC`, [fromTs]);
+  const r = await q(`SELECT * FROM growth_engine_reports WHERE generated_at >= $1 AND report_body->>'email' IS NOT NULL ORDER BY generated_at DESC`, [fromTs]);
   return r.rows.map(reportRow);
 }
 async function listReportsByCategorySince(category, platform, fromTs) {
@@ -719,7 +719,7 @@ async function setPlanContext(accountId, handle, platform, context) {
   return { ...ctx, updated_at: now };
 }
 async function listReportsForThumbCleanup(beforeTs, limit = 50) {
-  const r = await q(`SELECT report_id, report_body FROM growth_engine_reports WHERE tier = 'social_snapshot' AND generated_at < $1 AND report_body LIKE '%"thumb_prefix":%' AND report_body NOT LIKE '%"thumbs_removed":true%' LIMIT $2`, [beforeTs, limit]);
+  const r = await q(`SELECT report_id, report_body FROM growth_engine_reports WHERE tier = 'social_snapshot' AND generated_at < $1 AND report_body->>'thumb_prefix' IS NOT NULL AND (report_body->>'thumbs_removed') IS DISTINCT FROM 'true' LIMIT $2`, [beforeTs, limit]);
   return r.rows.map((x) => { const b = parseJson(x.report_body) || {}; return { reportId: x.report_id, thumbPrefix: b.thumb_prefix || null }; });
 }
 async function listPaidReportsBetween(fromTs, toTs) {
@@ -737,7 +737,7 @@ async function adminOverview() {
   const s7 = Number((await q(`SELECT COUNT(*) AS n FROM users WHERE created_at > $1`, [now - 7 * day])).rows[0].n);
   const s30 = Number((await q(`SELECT COUNT(*) AS n FROM users WHERE created_at > $1`, [now - 30 * day])).rows[0].n);
   const reports = (await q(`SELECT tier, COUNT(*) AS n FROM growth_engine_reports WHERE generated_at > $1 GROUP BY tier`, [now - day])).rows;
-  const oneTime = Number((await q(`SELECT COUNT(*) AS n FROM growth_engine_reports WHERE report_body LIKE '%"one_time_unlock":{%'`)).rows[0].n);
+  const oneTime = Number((await q(`SELECT COUNT(*) AS n FROM growth_engine_reports WHERE jsonb_typeof(report_body->'one_time_unlock') = 'object'`)).rows[0].n);
   const jobs = (await q(`SELECT status, COUNT(*) AS n FROM growth_engine_jobs WHERE created_at > $1 GROUP BY status`, [now - day])).rows;
   const waitlist = (await q(`SELECT platform, COUNT(*) AS n FROM growth_engine_waitlist GROUP BY platform ORDER BY n DESC`)).rows;
   const users = Number((await q(`SELECT COUNT(*) AS n FROM users`)).rows[0].n);
