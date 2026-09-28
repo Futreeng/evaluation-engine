@@ -165,6 +165,9 @@ function initSchema() {
 
   // Cancel-at-period-end: tier stays until this timestamp, then reads as free.
   try { db.run(`ALTER TABLE entitlements ADD COLUMN cancel_at INTEGER`); } catch { /* exists */ }
+  // The Stripe customer behind this account (portal, receipts) and its subscription.
+  try { db.run(`ALTER TABLE entitlements ADD COLUMN stripe_customer_id TEXT`); } catch { /* exists */ }
+  try { db.run(`ALTER TABLE entitlements ADD COLUMN stripe_subscription_id TEXT`); } catch { /* exists */ }
   // Pause instead of cancel (spec 4.1) + when a cancellation actually took effect (4.4 win-back).
   try { db.run(`ALTER TABLE entitlements ADD COLUMN paused_until INTEGER`); } catch { /* exists */ }
   try { db.run(`ALTER TABLE entitlements ADD COLUMN pause_started_at INTEGER`); } catch { /* exists */ }
@@ -1296,6 +1299,8 @@ async function getEntitlement(accountId) {
     billingPeriodStart: row[columns.indexOf("billing_period_start")],
     billingPeriodEnd: row[columns.indexOf("billing_period_end")],
     cancelAt: columns.includes("cancel_at") ? row[columns.indexOf("cancel_at")] || null : null,
+    stripeCustomerId: columns.includes("stripe_customer_id") ? row[columns.indexOf("stripe_customer_id")] || null : null,
+    stripeSubscriptionId: columns.includes("stripe_subscription_id") ? row[columns.indexOf("stripe_subscription_id")] || null : null,
     pausedUntil: columns.includes("paused_until") ? row[columns.indexOf("paused_until")] || null : null,
     pauseStartedAt: columns.includes("pause_started_at") ? row[columns.indexOf("pause_started_at")] || null : null,
     pauseEndedAt: columns.includes("pause_ended_at") ? row[columns.indexOf("pause_ended_at")] || null : null,
@@ -1397,6 +1402,15 @@ async function listCancelReasons(limit = 200) {
 async function listLapsedEntitlements(fromTs, toTs) {
   if (!db) throw new Error("Database not initialized");
   return rowsOf(`SELECT * FROM entitlements WHERE lapsed_at IS NOT NULL AND lapsed_at >= ? AND lapsed_at <= ? AND current_tier = 'social_snapshot'`, [fromTs, toTs]).map((r) => ({ accountId: r.account_id, lapsedAt: Number(r.lapsed_at) }));
+}
+// Stripe ids. Pass undefined to leave a field alone, null to clear it.
+async function setStripeIds(accountId, { customerId, subscriptionId } = {}) {
+  if (!db) throw new Error("Database not initialized");
+  await getOrCreateEntitlement(accountId);
+  if (customerId !== undefined) db.run(`UPDATE entitlements SET stripe_customer_id = ?, updated_at = ? WHERE account_id = ?`, [customerId, Date.now(), accountId]);
+  if (subscriptionId !== undefined) db.run(`UPDATE entitlements SET stripe_subscription_id = ?, updated_at = ? WHERE account_id = ?`, [subscriptionId, Date.now(), accountId]);
+  saveDb();
+  return getEntitlement(accountId);
 }
 async function setBillingPeriod(accountId, start, end) {
   if (!db) throw new Error("Database not initialized");
@@ -1642,6 +1656,7 @@ async function updateUserPassword(userId, passwordHash) {
 }
 
 module.exports = {
+  setStripeIds,
   countFreeSnapshotsByEmail,
   latestFreeSnapshotForEmail,
   findFreeSnapshotForHandle,

@@ -335,6 +335,10 @@ answers on when to post, Instagram steps that don't exist. Two parts:
 - **Share poster** carries the shape and their colour on both the client and server canvases.
 
 
+### Stripe on our actual account (28 Sept)
+
+Joe's #23 put payments through hosted Stripe Checkout with the grant in the signed webhook. Against the real account two things broke and are fixed here: the account runs **Managed Payments** (Stripe as merchant of record), which needs the Stripe SDK at v22+ (API 2025-03-31) and a tax code on every product. Added on top of his design: a Stripe customer per account (`stripe_customer_id`, `setStripeIds`) so receipts and the portal work; `stripeLineItem` that bills from the catalogue price when it matches the app's quote (founders included) and otherwise carries the amount with a tax code; `POST /billing/portal` and "Card & receipts" on the account page; a "Payment received" note on the return; `scripts/stripe_products.js` that creates or finds the catalogue with tax codes and prints the env ids; `docs/STRIPE_SETUP.md`.
+
 ## Also fixed along the way
 
 - Stored report bodies carried a provisional `report_id` (share sheet broke).
