@@ -1,5 +1,5 @@
-/* Scalecraft — "Field Guide" identity
-   Source: Claude Design "Scalecraft - Field Guide App" (batch 1). Creator-first. */
+/* Scalecraft Social — "Field Guide" identity
+   Source: Claude Design "Scalecraft Social - Field Guide App" (batch 1). Creator-first. */
 
 :root {
   --ground: #FFF6E9;
@@ -1121,6 +1121,90 @@ button.prow:hover { background: var(--ground); transform: translateX(2px); }
 .progress .acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
 .progress .goalbar { margin-top: 14px; }
 
+/* ================================================================ visual identity */
+/* dimension glyphs */
+.glyph { display: inline-flex; width: 14px; height: 14px; margin-right: 6px; vertical-align: -2px; color: currentColor; }
+.glyph svg { width: 100%; height: 100%; }
+/* signature shape */
+.sigshape { display: block; flex: none; }
+.sigshape .axes line { stroke: var(--line2); stroke-width: 1; }
+.sigshape .ring { fill: none; stroke: var(--line); stroke-width: 1; }
+.sigshape .ghost { fill: none; stroke: var(--muted); stroke-width: 1.2; stroke-dasharray: 3 3; opacity: .7; }
+.sigshape .now { fill: var(--their, var(--act)); fill-opacity: .22; stroke: var(--their-deep, var(--act)); stroke-width: 2; stroke-linejoin: round; }
+.sigshape.inbox { margin-left: 4px; }
+.sigshape.inhead { margin-right: 4px; }
+.sigshape.inhead .axes, .sigshape.inhead .ring { display: none; }
+.scorebox .bigrow { align-items: center; }
+/* their colour: a stripe on the report and a tint on the score box */
+.report.tinted { --tint-stripe: var(--their); }
+.report.tinted .scorebox { background: linear-gradient(180deg, var(--their-soft) 0, var(--card) 140px); border-top: 4px solid var(--their); transition: background .6s ease, border-color .6s ease; }
+.report.tinted .glance .fact b { color: var(--their-deep); }
+/* marginalia */
+.marginalia { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.marginalia li { position: relative; padding-left: 18px; font-size: 13px; line-height: 1.45; font-style: italic; color: var(--muted2); }
+.marginalia li::before { content: '→'; position: absolute; left: 0; top: 0; font-style: normal; color: var(--their-deep, var(--act)); }
+.feedcard .marg { margin: 10px 0 0; font-size: 13px; font-style: italic; color: var(--muted2); }
+/* your feed, annotated: the photos untouched, one mark per corner, all in their colour on cream */
+.feedcard { padding: 22px 24px; margin-top: 16px; }
+.feedcard .fh { display: flex; flex-direction: column; gap: 4px; }
+.feedcard .fh h2 { font-family: var(--display); font-size: 20px; }
+.feedcard .fh .fine { max-width: 72ch; }
+.feedgrid { display: grid; grid-template-columns: repeat(10, 1fr); gap: 5px; margin-top: 14px; }
+.feedgrid .cell { position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; background: var(--track); display: flex; align-items: center; justify-content: center; color: var(--muted); text-decoration: none; isolation: isolate; }
+.feedgrid .cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.feedgrid .cell .ph { font-size: 18px; }
+.feedgrid .disc { position: absolute; z-index: 1; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: #FFF6E9; color: var(--their-deep, var(--act)); box-shadow: 0 1px 2px rgba(0,0,0,.28); }
+.feedgrid .disc svg { width: 14px; height: 14px; }
+.feedgrid .disc.lg { width: 27px; height: 27px; } .feedgrid .disc.lg svg { width: 18px; height: 18px; }
+.feedgrid .disc.bl { left: 4px; bottom: 4px; } .feedgrid .disc.tr { right: 4px; top: 4px; }
+.feedgrid .cell:hover { outline: 2px solid var(--ink); outline-offset: 1px; }
+.feedcard .marg { margin: 10px 0 0; font-size: 13px; font-style: italic; color: var(--muted2); }
+@media (max-width: 720px) { .feedgrid { grid-template-columns: repeat(6, 1fr); gap: 4px; } .feedgrid .disc { width: 20px; height: 20px; } .feedgrid .disc svg { width: 13px; height: 13px; } }
+@media (max-width: 420px) { .feedgrid { grid-template-columns: repeat(5, 1fr); } }
+/* the trail */
+.trail { position: relative; padding-left: 22px; }
+.trail::before { content: ''; position: absolute; left: 8px; top: 12px; bottom: 12px; width: 2px; background: var(--line2); border-radius: 2px; }
+.trail .prow { position: relative; }
+.trail .prow::before { content: ''; position: absolute; left: -19px; top: 50%; width: 10px; height: 10px; border-radius: 50%; background: var(--card); border: 2px solid var(--line3); transform: translateY(-50%); box-sizing: border-box; }
+.trail .prow.done::before { background: var(--c2); border-color: var(--c2); }
+.trail .prow.done.skipped::before { background: var(--line3); }
+.trail .eb, .trail summary { margin-left: -22px; }
+.pstep .eb > span:first-child { position: relative; padding-left: 16px; }
+.pstep .eb > span:first-child::before { content: ''; position: absolute; left: 0; top: 50%; width: 9px; height: 9px; border-radius: 50%; background: var(--their-deep, var(--act)); transform: translateY(-50%); animation: pulse 1.8s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(184,78,42,.35); } 50% { box-shadow: 0 0 0 6px rgba(184,78,42,0); } }
+.acc .body .phase + .phase { position: relative; margin-top: 22px; }
+.acc .body .phase + .phase::before { content: ''; position: absolute; left: 28px; top: -22px; height: 22px; width: 2px; background: var(--line2); }
+/* motion with meaning */
+.bar .mark { animation: markIn .5s .55s cubic-bezier(.2,.7,.2,1) both; }
+@keyframes markIn { from { transform: scaleY(0); opacity: 0; } to { transform: scaleY(1); opacity: 1; } }
+.pstep.leaving { animation: slideOut .22s ease-in forwards; }
+@keyframes slideOut { to { transform: translateX(-24px); opacity: 0; } }
+/* focus mode on the Path */
+body.focus { background: var(--dark); }
+body.focus .topbar, body.focus .samplebar, body.focus .ptoday, body.focus .pnext, body.focus .pdone, body.focus .pfree, body.focus .footer, body.focus .pmoment { display: none !important; }
+body.focus .pathwrap { max-width: 640px; padding-top: 40px; }
+body.focus .phead h1, body.focus .phead .eb, body.focus .pprog .t, body.focus .pprog .fine { color: var(--on-dark); }
+body.focus .phead .eb, body.focus .pprog .t { color: var(--on-dark-dim); }
+body.focus .pprog .bar { background: var(--dark-inset); }
+body.focus .phead .btn.ghost { color: var(--on-dark); border-color: var(--dark-line); }
+body.focus .sigshape .now { fill: var(--on-dark); stroke: var(--on-dark); }
+@media (prefers-reduced-motion: reduce) { .pstep.leaving, .bar .mark, .pstep .eb > span:first-child::before { animation: none; } }
+
+.feedcard.locked p { margin-top: 8px; font-size: 14px; color: var(--body); max-width: 60ch; }
+.feedcard.locked .btn { margin-top: 12px; }
+
+/* feed hover card */
+.hovercard { position: absolute; z-index: 60; width: 300px; max-width: calc(100vw - 16px); background: var(--card); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 12px 32px rgba(42,33,24,.18); overflow: hidden; animation: rise .18s ease-out both; }
+.hovercard img { width: 100%; height: 120px; object-fit: cover; display: block; }
+.hovercard .hc { padding: 12px 14px; display: flex; flex-direction: column; gap: 9px; }
+.hovercard .ln { display: flex; flex-direction: column; gap: 1px; font-size: 13px; line-height: 1.35; }
+.hovercard .ln b { color: var(--ink); font-weight: 700; }
+.hovercard .ln span { color: var(--muted2); }
+.hovercard .ln.plan { padding-top: 9px; border-top: 1px dashed var(--line2); }
+.hovercard .ln.plan b { color: var(--their-deep, var(--act)); }
+.hovercard .ln a, .hovercard .open { font-size: 13px; font-weight: 700; color: var(--act); text-decoration: underline; text-underline-offset: 2px; margin-top: 2px; }
+.feedgrid .cell:focus-visible { outline: 3px solid var(--act); outline-offset: 2px; }
+
 /* Waitlist stand-in for Start buttons while billing is closed (pricing, report upsell, Path). */
 .wl { display: flex; flex-direction: column; gap: 8px; margin-top: 22px; }
 .wl input { min-height: 48px; padding: 12px 16px; border: 1px solid var(--line); border-radius: var(--r-pill); background: var(--card); color: var(--ink); font-size: 15px; outline: none; }
@@ -1129,3 +1213,4 @@ button.prow:hover { background: var(--ground); transform: translateX(2px); }
 .tier.dark .wl input { border: 0; background: var(--dark-inset); color: var(--on-dark); }
 .tier.dark .wl input::placeholder { color: var(--on-dark-dim); }
 .tier .waitdone { margin-top: 22px; }
+

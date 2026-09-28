@@ -1,10 +1,10 @@
-/* Scalecraft — creator-first front end over the Growth Engine API.
+/* Scalecraft Social — creator-first front end over the Growth Engine API.
    Design: "Field Guide" (Claude Design batch 1).
    Routes: #/  #/evaluating/:jobId  #/report/:reportId  #/pricing  #/signin  #/signup  #/reports  #/business */
 (function () {
   'use strict';
   const CFG = window.SCALECRAFT_CONFIG || {};
-  // Promo code from a link: scalecraft.app/?promo=CODE or #/pricing?promo=CODE.
+  // Promo code from a link: scalecraftsocial.com/?promo=CODE or #/pricing?promo=CODE.
   (() => { try {
     const fromSearch = new URLSearchParams(location.search).get('promo');
     const fromHash = new URLSearchParams((location.hash.split('?')[1] || '')).get('promo');
@@ -60,6 +60,9 @@
   const fmtDate = d => new Date(d || Date.now()).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
   const fmtShort = d => new Date(d || Date.now()).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
   const fmtN = n => Number(n || 0).toLocaleString();
+  // Post dates in the account's own time zone, never the viewer's: the same day everywhere on the page.
+  const zoneOf = report => (report && (report.tz || (report.best_times && report.best_times.tz))) || 'UTC';
+  const postDay = (report, iso, opts = {}) => { try { return new Date(iso).toLocaleDateString('en-GB', { timeZone: zoneOf(report), day: 'numeric', month: 'short', ...opts }); } catch { return fmtShort(iso); } };
   const ordinal = n => ['1st', '2nd', '3rd', '4th', '5th'][n - 1] || (n + 'th');
   const sget = (k, d) => { try { const v = sessionStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
   const sset = (k, v) => { try { sessionStorage.setItem(k, JSON.stringify(v)); } catch { } };
@@ -208,7 +211,7 @@
   function renderHeader(kind) {
     $header.innerHTML = h`
       <div class="wrap"><div class="topbar">
-        <a class="brand" href="#/">Scalecraft</a>
+        <a class="brand" href="#/">Scalecraft Social</a>
         <nav class="nav">
           ${token()
             ? raw(h`${lget('sc_path_home', null) ? raw(h`<a href="#/path/${lget('sc_path_home', '')}" class="${kind === 'path' ? 'strong' : ''}">Path</a>`) : ''}<a href="#/reports" class="${kind === 'reports' ? 'strong' : ''}">Reports</a><a href="#/progress" class="${kind === 'progress' ? 'strong' : ''}">Progress</a>${lget('sc_admin', false) ? raw(h`<a href="#/admin" class="${kind === 'admin' ? 'strong' : ''}">Admin</a>`) : ''}<a href="#" data-action="signout">Sign out</a>`)
@@ -221,14 +224,14 @@
   const footer = () => h`<div class="wrap"><div class="footer">
     <a href="#/how">How the score works</a><a href="#/business">For businesses</a><a href="#/pricing">Pricing</a>
     <a href="#/legal/terms">Terms</a><a href="#/legal/privacy">Privacy</a><a href="#/legal/cookies">Cookies</a>${supportEmail() ? raw(h`<a href="mailto:${supportEmail()}">Contact</a>`) : ''}
-    <span style="margin-left:auto">© ${new Date().getFullYear()} Scalecraft</span>
+    <span style="margin-left:auto">© ${new Date().getFullYear()} Scalecraft Social</span>
   </div></div>`;
 
   // ------------------------------------------------------------ shared pieces
   function dimRow(d, avg, label) {
     const sc = clamp(d.score, 0, 100); const gl = label || grade(sc)[0]; const hue = hueOf(d.label);
     return h`<div class="dimrow">
-      <div class="lbl"><span class="hue${hue}">${d.label}</span><b>${sc} · ${gl}</b></div>
+      <div class="lbl"><span class="hue${hue}">${raw(glyph(d.label))}${d.label}</span><b>${sc} · ${gl}</b></div>
       <div class="bar"><div class="fill bg${hue}" style="width:${sc}%"></div>${avg != null ? raw(h`<div class="mark" style="left:${clamp(avg, 0, 100)}%"></div>`) : ''}</div>
     </div>`;
   }
@@ -277,7 +280,7 @@
         <section class="hero">
           <div class="l">
             <h1>Stop posting into the void.</h1>
-            <p class="sub">Growth is a system, not luck. Scalecraft scores your account out of 100 from what you actually post, shows exactly where the points went, and writes the next 90 days — move by move, week by week.</p>
+            <p class="sub">Growth is a system, not luck. Scalecraft Social scores your account out of 100 from what you actually post, shows exactly where the points went, and writes the next 90 days — move by move, week by week.</p>
             <form class="darkform" id="evalForm" novalidate>
               <div class="ql formlead">Score your account. See exactly why. Get the plan.</div>
               <div class="steps2" aria-hidden="true"><span class="on"></span><span></span></div>
@@ -566,8 +569,10 @@
     canvas.width = W; canvas.height = H;
     const ctx = canvas.getContext('2d');
     const P = 84;
-    ctx.fillStyle = '#D2603A'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = opts.tint || '#D2603A'; ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = '#FFF6E9';
+    // Their shape, top right.
+    { const order = [/consisten/i, /mix|content/i, /engage/i, /profile/i]; const cx = W - 84 - 110, cy = 84 + 110, R = 110; ctx.save(); ctx.globalAlpha = .35; ctx.strokeStyle = '#FFF6E9'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = .9; ctx.beginPath(); order.forEach((re, i) => { const d = (s.dims || []).find(x => re.test(x.label)); const v = d ? clamp(d.score, 0, 100) / 100 : 0; const r = R * Math.max(v, 0.06); const a = -Math.PI / 2 + i * Math.PI / 2; const x = cx + r * Math.cos(a), y = cy + r * Math.sin(a); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.closePath(); ctx.fillStyle = 'rgba(255,246,233,.28)'; ctx.fill(); ctx.strokeStyle = '#FFF6E9'; ctx.lineWidth = 5; ctx.stroke(); ctx.restore(); ctx.fillStyle = '#FFF6E9'; }
     const dsp = w => `700 ${w}px "Bricolage Grotesque", "Instrument Sans", system-ui, sans-serif`;
     const sans = (w, wt = 500) => `${wt} ${w}px "Instrument Sans", system-ui, sans-serif`;
     ctx.textBaseline = 'top';
@@ -585,7 +590,7 @@
     } else {
       ctx.font = dsp(size === 'square' ? 420 : 520); ctx.fillText(String(s.overall), P - 14, y);
       y += size === 'square' ? 420 : 520;
-      ctx.font = sans(48, 600); ctx.fillText('My Scalecraft score', P, y); y += 110;
+      ctx.font = sans(48, 600); ctx.fillText('My Scalecraft Social score', P, y); y += 110;
     }
     const bw = W - P * 2;
     for (const d of s.dims) {
@@ -597,7 +602,7 @@
       y += 78;
     }
     ctx.font = sans(34, 500); ctx.globalAlpha = .85;
-    ctx.fillText(`${fmtDate(s.date)}  ·  scored by scalecraft`, P, H - P - 30); ctx.globalAlpha = 1;
+    ctx.fillText(`${fmtDate(s.date)}  ·  scored by scalecraft social`, P, H - P - 30); ctx.globalAlpha = 1;
   }
   function roundRect(ctx, x, y, w, hh, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + hh, r); ctx.arcTo(x + w, y + hh, x, y + hh, r); ctx.arcTo(x, y + hh, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
 
@@ -636,7 +641,7 @@
     y += sq ? 20 : 40; ctx.font = `600 ${sq ? 40 : 52}px Inter, system-ui, sans-serif`; ctx.fillText(m.line || '', P, y); y += (sq ? 40 : 52) * 1.7;
     ctx.font = `700 ${sq ? 150 : 240}px Inter, system-ui, sans-serif`; ctx.fillText(String(m.score ?? s.overall), P - 8, y);
     ctx.font = `600 ${sq ? 32 : 40}px Inter, system-ui, sans-serif`; ctx.fillText('MY SCALECRAFT SCORE', P + (sq ? 220 : 340), y + (sq ? 100 : 160));
-    ctx.font = `500 ${sq ? 28 : 34}px Inter, system-ui, sans-serif`; ctx.fillText(`${fmtDate(m.at || Date.now())} · Score yours at scalecraft.app`, P, sq ? H - 62 : H - P - 30);
+    ctx.font = `500 ${sq ? 28 : 34}px Inter, system-ui, sans-serif`; ctx.fillText(`${fmtDate(m.at || Date.now())} · Score yours at scalecraftsocial.com`, P, sq ? H - 62 : H - P - 30);
   }
   function openShareSheet(report, moment = null) {
     const s = { handle: report.business?.handle, platform: report.business?.platform, niche: report.business?.category, date: report.created_at, overall: report.scores.overall, dims: report.scores.dimensions };
@@ -663,10 +668,11 @@
     const thenNowOn = () => { const tn = el.querySelector('#thenNow'); return !!(tn && tn.checked); };
     const makeShare = async () => {
       if (CFG.useMock || isSample) return null;
-      try { return await api('/reports/' + encodeURIComponent(report.report_id) + '/share', { method: 'POST', body: JSON.stringify(moment ? (moment.kind === 'roast' ? { kind: 'roast' } : { kind: 'moment', moment_key: moment.key }) : { kind: 'score', then_now: thenNowOn() }) }, { allow401: true }); } catch (e) { console.warn('[share] card unavailable:', e && e.message); return null; }
+      try { return await api('/reports/' + encodeURIComponent(report.report_id) + '/share', { method: 'POST', body: JSON.stringify(moment ? (moment.kind === 'roast' ? { kind: 'roast' } : { kind: 'moment', moment_key: moment.key }) : { kind: 'score', then_now: thenNowOn(), tint: (sget('sc_tint_' + report.report_id, null) || {}).hex || undefined }) }, { allow401: true }); } catch (e) { console.warn('[share] card unavailable:', e && e.message); return null; }
     };
     const redraw = async () => {
-      if (moment) drawMomentCard(canvas, s, size, moment); else drawShareCard(canvas, s, size, thenNowOn() ? { prev, span: report.history?.previous?.generated_at ? 'since ' + fmtShort(report.history.previous.generated_at) : 'in six weeks' } : {});
+      const tint = sget('sc_tint_' + report.report_id, null);
+      if (moment) drawMomentCard(canvas, s, size, moment); else drawShareCard(canvas, s, size, { tint: tint ? tint.hex : null, ...(thenNowOn() ? { prev, span: report.history?.previous?.generated_at ? 'since ' + fmtShort(report.history.previous.generated_at) : 'in six weeks' } : {}) });
       if (!share) { share = await makeShare(); if (share) el.dataset.share = share.share_id; }
       if (share) { const img = new Image(); img.onload = () => { const ctx = canvas.getContext('2d'); canvas.width = img.width; canvas.height = img.height; ctx.drawImage(img, 0, 0); }; img.src = share.png[size] + '&t=' + Date.now(); }
     };
@@ -676,11 +682,11 @@
     const toBlob = async () => { if (share) { try { const r = await fetch(share.png[size]); if (r.ok) return await r.blob(); } catch { } } return new Promise(r => canvas.toBlob(r, 'image/png')); };
     el.querySelector('[data-share=save]').addEventListener('click', async () => {
       if (report.report_id !== 'sample') track('card_downloaded', { size }, report.report_id);
-      const blob = await toBlob(); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `scalecraft-${s.handle}-${size}.png`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      const blob = await toBlob(); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `scalecraftsocial-${s.handle}-${size}.png`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
     });
     el.querySelector('[data-share=post]').addEventListener('click', async () => {
-      const blob = await toBlob(); const file = new File([blob], `scalecraft-${s.handle}.png`, { type: 'image/png' });
-      if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file], text: moment ? (moment.kind === 'roast' ? `I got roasted by Scalecraft: “${moment.title}”` : `${moment.title} — ${moment.line} on Scalecraft`) : `My account scored ${s.overall}/100 on Scalecraft`, url: share ? share.url : undefined }); return; } catch { } }
+      const blob = await toBlob(); const file = new File([blob], `scalecraftsocial-${s.handle}.png`, { type: 'image/png' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file], text: moment ? (moment.kind === 'roast' ? `I got roasted by Scalecraft Social: “${moment.title}”` : `${moment.title} — ${moment.line} on Scalecraft Social`) : `My account scored ${s.overall}/100 on Scalecraft Social`, url: share ? share.url : undefined }); return; } catch { } }
       el.querySelector('[data-share=save]').click(); toast('Saved — post it from your camera roll.');
     });
     el.querySelector('[data-share=copy]').addEventListener('click', async () => {
@@ -881,6 +887,7 @@
             <div class="card scorebox">
               ${hist && hist.delta_overall != null ? raw(h`<div class="trend ${hist.delta_overall > 0 ? 'up' : hist.delta_overall < 0 ? 'down' : 'flat'}"><b>${hist.delta_overall > 0 ? `Up ${hist.delta_overall} point${hist.delta_overall === 1 ? '' : 's'}` : hist.delta_overall < 0 ? `Down ${-hist.delta_overall} point${hist.delta_overall === -1 ? '' : 's'}` : 'Unchanged'}</b> since ${fmtShort(hist.previous.generated_at)}${hist.runs ? raw(h` · run ${hist.runs}`) : ''}${hist.delta_followers != null && hist.delta_followers !== 0 ? raw(h` · ${hist.delta_followers > 0 ? '+' : ''}${fmtN(hist.delta_followers)} followers`) : ''}</div>`) : paid && !isSample ? raw(h`<div class="trend first">Your first score — the plan rescores you weekly, so this line becomes your own trend.</div>`) : ''}
               <div class="bigrow"><span class="bignum">${overall}</span>
+                ${raw(shapeSVG(s.dimensions, hist && hist.delta_dimensions ? (s.dimensions || []).map(d => ({ label: d.label, score: clamp(d.score - (hist.delta_dimensions.find(x => x.label === d.label)?.delta || 0), 0, 100) })) : null, { size: 84, cls: 'inbox' }))}
                 <div class="meta"><span class="tag ${gc}">${gl.toUpperCase()}</span>${lvl ? raw(h`<span class="lvl" title="Rank ${lvl.rank} of ${lvl.of}">${lvl.name.toUpperCase()}${lvl.next ? raw(h`<em>· ${lvl.next.points_away} points to ${lvl.next.name}</em>`) : raw('<em>· top band</em>')}</span>`) : ''}${report.streak && report.streak.visible ? raw(h`<span class="streak ${report.streak.weeks ? 'on' : ''}" title="An on-plan week means you posted on at least ${report.streak.planned_days} days. A freeze covers a missed week.">${report.streak.weeks ? `🔥 ${report.streak.weeks}-week streak` : 'New streak starts this week'}${report.streak.freezes ? raw(h`<em>· ${report.streak.freezes} freeze${report.streak.freezes === 1 ? '' : 's'}</em>`) : ''}</span>`) : ''}
                   ${followers ? raw(h`<span class="f">${fmtN(followers)} followers</span>`) : ''}
                 </div></div>
@@ -889,6 +896,7 @@
                 <div class="dims">${raw((s.dimensions || []).map(d => dimRow({ label: d.label, score: d.score }, d.category_avg, gradeIn({ score: clamp(d.score, 0, 100), label: d.label }, s.summary)[0])).join(''))}</div>
                 ${raw((() => { const facts = []; const cons = (s.dimensions || []).find(d => /consisten/i.test(d.label)); const ppw = cons && /([\d.]+)\/week/.exec(cons.evidence || ''); if (ppw) facts.push([ppw[1], 'posts a week']); if (pi && pi.avg_engagement) facts.push([fmtN(pi.avg_engagement), pi.metric === 'median' ? 'likes + comments on a typical post' : 'likes + comments per post']); const w = report.best_times && report.best_times.confident && report.best_times.windows && report.best_times.windows[0]; if (w) facts.push([w.label, 'your best window']); return facts.length ? h`<div class="facts">${raw(facts.map(([v, l]) => h`<div class="fact"><b>${v}</b><span>${l}</span></div>`).join(''))}</div>` : ''; })())}
                 <div class="fine">${(s.dimensions || []).some(d => d.category_avg != null) ? `Marker = ${niche} average.` : ''} Each dimension is explained below.</div>
+                ${raw(marginaliaHTML(report))}
               </div>`) : ''}
               ${s.category_percentile && s.category_percentile.n >= 25 ? raw(h`<div class="pct">Scores higher than <b>${s.category_percentile.beats_pct}%</b> of ${niche} accounts we've scored ${raw(confPill(s.category_confidence))}</div>`) : ''}
               ${raw(historyChartHTML(hist))}
@@ -916,6 +924,7 @@
               ${nextPhase && opp === thisWeek ? raw(h`<div class="next">Next: Day 31 — ${nextPhase.label}</div>`) : ''}
             </div>`; })()) : ''}
           </div>
+          ${paid || isSample ? raw(feedGridHTML(report, phases)) : (report.posts || []).length >= 6 ? raw(h`<div class="card feedcard locked"><div class="fh"><h2>Your feed, annotated</h2><span class="fine">Growth Plan</span></div><p>Your last ${(report.posts || []).length} posts as a grid, tinted by how each did against your typical post, with the plan's moves marked on the posts they use.</p><button type="button" class="btn ghost sm" data-action="unlock">See it with the plan →</button></div>`) : ''}
 
         ${showGoalAsk ? raw(h`<div class="card goalcard ask" id="goalAsk"><div class="eb">ONE QUESTION</div><h2>What's the goal?</h2><p>The plan, your Monday move and the posts we write all lean toward it. You can change it later.</p>${raw(goalPickerHTML(null, null, followers, { first: true }))}</div>`) : ''}
         <div class="roastwrap" id="roastWrap" hidden></div>
@@ -925,7 +934,7 @@
         </div>
         <div class="brief" id="briefWrap" hidden></div>
         ${paid && !isSample && (report.post_reviews || []).length ? raw(h`<details class="card acc reviews"><summary>Your posts, 48 hours in <span class="fine">${report.post_reviews.length} reviewed</span></summary>
-          <div class="rlist">${raw(report.post_reviews.map(r => h`<div class="rv" id="rv-${r.post_id}"><div class="h"><span class="when">${fmtDate(r.posted_at)} · ${String(r.type || '').toUpperCase()}</span><span class="vs ${r.metrics?.vs_avg >= 1.05 ? 'up' : r.metrics?.vs_avg < 0.8 ? 'down' : ''}">${r.metrics?.vs_avg != null ? `${r.metrics.vs_avg}× your average` : ''}</span></div>
+          <div class="rlist">${raw(report.post_reviews.map(r => h`<div class="rv" id="rv-${r.post_id}"><div class="h"><span class="when">${postDay(report, r.posted_at, { year: 'numeric' })} · ${String(r.type || '').toUpperCase()}</span><span class="vs ${r.metrics?.vs_avg >= 1.05 ? 'up' : r.metrics?.vs_avg < 0.8 ? 'down' : ''}">${r.metrics?.vs_avg != null ? `${r.metrics.vs_avg}× your average` : ''}</span></div>
             ${r.caption ? raw(h`<div class="cap">“${r.caption.slice(0, 120)}${r.caption.length > 120 ? '…' : ''}”</div>`) : ''}
             <p><b>How it did.</b> ${r.review?.performance || ''}</p><p><b>Likely why.</b> ${r.review?.likely_reason || ''}</p><p><b>Next post.</b> ${r.review?.next || ''}</p>
             <div class="fine">${fmtN(r.metrics?.likes)} likes · ${fmtN(r.metrics?.comments)} comments${r.metrics?.views ? ` · ${fmtN(r.metrics.views)} views` : ''}${r.permalink ? raw(h` · <a href="${r.permalink}" target="_blank" rel="noopener">Open the post</a>`) : ''}</div></div>`).join(''))}</div>
@@ -936,7 +945,7 @@
             <summary>The four dimensions</summary>
             <div class="body">
               ${raw((s.dimensions || []).map(d => { const sc = clamp(d.score, 0, 100); const [g, gcc] = gradeIn({ score: sc, label: d.label }, s.summary); const hue = hueOf(d.label); const dd = hist?.delta_dimensions?.find(x => x.label === d.label);
-                return h`<div class="dimcard bd${hue}"><div class="top"><span class="n">${d.label}</span><span class="s hue${hue}">${sc} · ${g}${dd && dd.delta ? raw(h`<span class="dd g-${dd.delta > 0 ? 'strong' : 'weak'}">${dd.delta > 0 ? '+' : ''}${dd.delta}</span>`) : ''}</span></div>
+                return h`<div class="dimcard bd${hue}"><div class="top"><span class="n">${raw(glyph(d.label))}${d.label}</span><span class="s hue${hue}">${sc} · ${g}${dd && dd.delta ? raw(h`<span class="dd g-${dd.delta > 0 ? 'strong' : 'weak'}">${dd.delta > 0 ? '+' : ''}${dd.delta}</span>`) : ''}</span></div>
                   <div class="bar in"><div class="fill bg${hue}" style="width:${sc}%"></div>${d.category_avg != null ? raw(h`<div class="mark" style="left:${clamp(d.category_avg, 0, 100)}%"></div>`) : ''}</div>
                   <p>${d.explanation || ''}</p>${raw(checklistHTML(d.evidence))}${raw(evidenceHTML(d.evidence_posts))}${(() => { const ph = phaseForDim(d.label, phases); return ph ? raw(h`<a class="todo" href="#" data-dim-fix="${ph.key}m1">What to do about this →</a>`) : ''; })()}</div>`; }).join(''))}
               <div class="fine">${s.category_avg != null ? raw(h`The marker is your ${niche} average. ${raw(confPill(s.category_confidence || { level: s.category_sample_size >= 100 ? 'high' : s.category_sample_size >= 25 ? 'some' : 'low', label: s.category_sample_size >= 100 ? 'High confidence' : s.category_sample_size >= 25 ? 'Some evidence' : 'Needs more data', n: s.category_sample_size }))}`) : pending ? `The marker is your niche average. Your ${niche} average appears once ${pending.min_n} accounts are scored — ${pending.n} so far.` : nicheKnown ? 'The marker is your niche average.' : `Scored against all creators — we don't have enough ${niche} accounts yet.`}</div>
@@ -948,7 +957,7 @@
             <div class="body">
               <div class="postmeta"><span class="pill tone">${pi.metric === 'median' ? 'MEDIAN' : 'AVG'} ${fmtN(pi.avg_engagement)} per post</span>${pi.patterns?.best_format ? raw(h`<span class="pill tone">${String(pi.patterns.best_format.format).toUpperCase()}S ${pi.patterns.best_format.vs_avg}×</span>`) : ''}${pi.patterns?.best_day ? raw(h`<span class="pill green">${String(pi.patterns.best_day.day).toUpperCase()} IS YOUR STRONGEST DAY</span>`) : ''}</div>
               <div class="posts">${raw([...pi.top.map(p => [p, 'top']), ...pi.bottom.map(p => [p, 'low'])].map(([p, k]) => h`<div class="post ${k}">
-                <div class="k"><div class="x ${k === 'top' ? 'g-strong' : 'g-weak'}">${p.vs_avg}×</div><div class="t">${k === 'top' ? 'TOP' : 'LOW'} · ${String(p.format).toUpperCase()}</div><div class="d">${p.weekday ? p.weekday + ' ' : ''}${p.date ? fmtShort(p.date) : ''}</div></div>
+                <div class="k"><div class="x ${k === 'top' ? 'g-strong' : 'g-weak'}">${p.vs_avg}×</div><div class="t">${k === 'top' ? 'TOP' : 'LOW'} · ${String(p.format).toUpperCase()}</div><div class="d">${p.weekday ? p.weekday + ' ' : ''}${p.date ? postDay(report, p.date) : ''}</div></div>
                 <div class="c"><p>“${p.caption || 'no caption'}”</p><div class="n">${p.likes === 0 && (p.comments > 5 || p.views > 100) ? 'likes hidden' : fmtN(p.likes) + ' likes'} · ${fmtN(p.comments)} comments${p.views ? ` · ${fmtN(p.views)} views` : ''}${p.url ? raw(h` · <a href="${p.url}" target="_blank" rel="noopener">open</a>`) : ''}</div></div></div>`).join(''))}</div>
               ${pi.note ? raw(h`<p class="postnote">${pi.note}</p>`) : ''}
             </div>
@@ -1041,6 +1050,8 @@
       if (!isSample) { report.moves_done = done; sset('sc_report_' + report.report_id, report); }
       $view.querySelectorAll('.phase').forEach((ph, i) => { const p = phases[i]; if (!p || !paid) return; const total = 1 + p.moves.length; const dn = (isDone(p.key + 'm1') ? 1 : 0) + p.moves.filter(m => isDone(p.key + 'm' + m.n)).length; const el = ph.querySelector('.prog'); if (el) el.textContent = `${dn} of ${total} done`; });
     }));
+    tintFor(report).then(t => { applyTint($view.querySelector('.report'), t); setFaviconShape(s.dimensions, t); }).catch(() => { });
+    bindFeedHover($view);
     bindCta($view, { paid, reportId: report.report_id, openPost: i => { const det = $view.querySelector('#nextPosts')?.closest('details'); if (det) det.open = true; const art = $view.querySelector(`#nextPosts [data-post="${i}"]`); if (art) { art.scrollIntoView({ behavior: 'smooth', block: 'center' }); art.classList.add('flash'); setTimeout(() => art.classList.remove('flash'), 1600); } else toast('Your written posts arrive with the plan.'); } });
     $view.querySelectorAll('[data-dim-fix]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); const row = $view.querySelector(`[data-row="${a.dataset.dimFix}"]`); const det = row?.closest('details'); if (det) det.open = true; if (row) { row.classList.add('open'); row.scrollIntoView({ behavior: 'smooth', block: 'center' }); } }));
     $view.querySelector('[data-action=share]').addEventListener('click', () => { if (!isSample) track('share_clicked', { overall }, report.report_id); openShareSheet(report); });
@@ -1109,8 +1120,8 @@
       if (new URLSearchParams(location.hash.split('?')[1] || '').get('roast') === '1') { if (report.roast) reveal(report.roast); else pick(); }
     }
     // Both paid paths go through the 60-second intake first.
-    $view.querySelector('[data-action=unlock]')?.addEventListener('click', () => { if (!billingOpen()) { sset('sc_intent_tier', 'growth_plan'); sset('sc_unlock_report', report.report_id); go('#/pricing'); return; } sset('sc_intent_tier', 'growth_plan'); sset('sc_form', { handle: biz.handle, platform: biz.platform, category: biz.category, email: sget('sc_form', {}).email || report.email || '' }); go(`#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=subscribe`); });
-    $view.querySelector('[data-action=unlock-once]')?.addEventListener('click', () => { if (!billingOpen()) { go('#/pricing'); return; } sset('sc_once_price', oneTime); go(`#/plan-setup?report=${encodeURIComponent(report.report_id)}&path=once`); });
+    $view.querySelectorAll('[data-action=unlock]').forEach(b => b.addEventListener('click', () => { if (!billingOpen()) { sset('sc_intent_tier', 'growth_plan'); sset('sc_unlock_report', report.report_id); go('#/pricing'); return; } sset('sc_intent_tier', 'growth_plan'); sset('sc_form', { handle: biz.handle, platform: biz.platform, category: biz.category, email: sget('sc_form', {}).email || report.email || '' }); go(); }));
+    $view.querySelector('[data-action=unlock-once]')?.addEventListener('click', () => { if (!billingOpen()) { go('#/pricing'); return; } sset('sc_once_price', oneTime); go(); });
     // Check-in "nothing changed" and nudge answers
     const answer = async (b, body, doneMsg) => {
       b.disabled = true;
@@ -1203,6 +1214,175 @@
         openPost(Number(b.dataset.post) || 0);
       }
     }));
+  }
+  // ---- visual identity: dimension glyphs, the signature shape, their colour, the annotated feed
+  const DIM_GLYPHS = {
+    consistency: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M2 7h12M6 1.5v3M10 1.5v3" stroke="currentColor" stroke-width="1.6"/></svg>',
+    mix: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2l6 3-6 3-6-3 6-3z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M2 8l6 3 6-3M2 11l6 3 6-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>',
+    engagement: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3h10a1 1 0 011 1v6a1 1 0 01-1 1H7l-3 3v-3H3a1 1 0 01-1-1V4a1 1 0 011-1z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>',
+    profile: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="5.5" r="2.8" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M2.5 14c.8-3 3-4.5 5.5-4.5s4.7 1.5 5.5 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>',
+  };
+  const dimKind = l => /consisten/i.test(l) ? 'consistency' : /mix|content/i.test(l) ? 'mix' : /engage/i.test(l) ? 'engagement' : /profile/i.test(l) ? 'profile' : null;
+  const glyph = l => { const k = dimKind(l); return k ? `<span class="glyph g-${k}">${DIM_GLYPHS[k]}</span>` : ''; };
+  // The signature shape: four dimensions as a kite — consistency up, mix right, engagement down, profile left.
+  // With a previous score the old shape sits as a ghost and the new one draws itself from it.
+  function shapeSVG(dims, prev, { size = 120, cls = '', label = true } = {}) {
+    const order = [/consisten/i, /mix|content/i, /engage/i, /profile/i];
+    const R = size / 2 - 4;
+    const pts = ds => order.map((re, i) => { const d = (ds || []).find(x => re.test(x.label)); const v = d ? clamp(d.score, 0, 100) / 100 : 0; const r = R * Math.max(v, 0.06); const a = -Math.PI / 2 + i * Math.PI / 2; return `${(size / 2 + r * Math.cos(a)).toFixed(1)},${(size / 2 + r * Math.sin(a)).toFixed(1)}`; }).join(' ');
+    const now = pts(dims), was = prev ? pts(prev) : null;
+    const axes = order.map((_, i) => { const a = -Math.PI / 2 + i * Math.PI / 2; return `<line x1="${size / 2}" y1="${size / 2}" x2="${(size / 2 + R * Math.cos(a)).toFixed(1)}" y2="${(size / 2 + R * Math.sin(a)).toFixed(1)}"/>`; }).join('');
+    const title = label && dims ? (dims || []).map(d => `${d.label} ${d.score}`).join(', ') : '';
+    return (`<svg class="sigshape ${cls}" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" role="img" aria-label="${title ? 'Your shape: ' + esc(title) : 'Score shape'}"><g class="axes">${axes}</g><circle class="ring" cx="${size / 2}" cy="${size / 2}" r="${R}"/>${was ? `<polygon class="ghost" points="${was}"/>` : ''}<polygon class="now" points="${was || now}">${was ? `<animate attributeName="points" from="${was}" to="${now}" dur="0.9s" begin="0.2s" fill="freeze" calcMode="spline" keySplines="0.2 0.7 0.2 1"/>` : ''}</polygon></svg>`);
+  }
+  // Their colour: the dominant hue of the top three post thumbnails, softened into two tokens.
+  async function tintFor(report) {
+    const cached = sget('sc_tint_' + report.report_id, null); if (cached) return cached;
+    const posts = [...(report.posts || [])].filter(p => p.thumbnail_url).sort((a, b) => ((b.likes || 0) + (b.comments || 0)) - ((a.likes || 0) + (a.comments || 0))).slice(0, 3);
+    if (!posts.length) return null;
+    const c = document.createElement('canvas'); c.width = 24; c.height = 24; const ctx = c.getContext('2d', { willReadFrequently: true });
+    let sx = 0, sy = 0, sw = 0, sat = 0, n = 0;
+    for (const p of posts) {
+      try {
+        const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = p.thumbnail_url; });
+        ctx.drawImage(img, 0, 0, 24, 24); const d = ctx.getImageData(0, 0, 24, 24).data;
+        for (let i = 0; i < d.length; i += 4) { const r = d[i] / 255, g = d[i + 1] / 255, b = d[i + 2] / 255; const mx = Math.max(r, g, b), mn = Math.min(r, g, b); const l = (mx + mn) / 2; const sv = mx === mn ? 0 : (mx - mn) / (1 - Math.abs(2 * l - 1)); if (sv < 0.18 || l < 0.12 || l > 0.9) continue; let hh = 0; if (mx === r) hh = ((g - b) / (mx - mn)) % 6; else if (mx === g) hh = (b - r) / (mx - mn) + 2; else hh = (r - g) / (mx - mn) + 4; const ang = hh * Math.PI / 3; sx += Math.cos(ang) * sv; sy += Math.sin(ang) * sv; sw += sv; sat += sv; n++; }
+      } catch { }
+    }
+    if (n < 40) return null;
+    let hue = Math.round((Math.atan2(sy, sx) * 180 / Math.PI + 360) % 360); const s0 = Math.min(0.55, Math.max(0.3, sat / n));
+    const hsl = (l) => `hsl(${hue} ${Math.round(s0 * 100)}% ${l}%)`;
+    const hex = (() => { const l = 0.4, ss = s0; const k = t => (t + hue / 30) % 12; const f = t => l - ss * Math.min(l, 1 - l) * Math.max(-1, Math.min(k(t) - 3, 9 - k(t), 1)); return '#' + [f(0), f(8), f(4)].map(x => Math.round(x * 255).toString(16).padStart(2, '0')).join(''); })();
+    const t = { tint: hsl(40), soft: hsl(93), deep: hsl(28), hex };
+    sset('sc_tint_' + report.report_id, t); return t;
+  }
+  const applyTint = (el, t) => { if (!el || !t) return; el.style.setProperty('--their', t.tint); el.style.setProperty('--their-soft', t.soft); el.style.setProperty('--their-deep', t.deep); el.classList.add('tinted'); };
+  // The favicon becomes their shape while they're looking at their own report.
+  function setFaviconShape(dims, t) {
+    try {
+      const c = document.createElement('canvas'); c.width = 64; c.height = 64; const ctx = c.getContext('2d');
+      ctx.fillStyle = '#FFF6E9'; ctx.beginPath(); ctx.arc(32, 32, 32, 0, Math.PI * 2); ctx.fill();
+      const order = [/consisten/i, /mix|content/i, /engage/i, /profile/i]; ctx.beginPath();
+      order.forEach((re, i) => { const d = (dims || []).find(x => re.test(x.label)); const v = d ? clamp(d.score, 0, 100) / 100 : 0; const r = 26 * Math.max(v, 0.08); const a = -Math.PI / 2 + i * Math.PI / 2; const x = 32 + r * Math.cos(a), y = 32 + r * Math.sin(a); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+      ctx.closePath(); ctx.fillStyle = (t && t.hex) || '#B84E2A'; ctx.fill();
+      let link = document.querySelector('link[rel="icon"][data-shape]'); if (!link) { link = document.createElement('link'); link.rel = 'icon'; link.dataset.shape = '1'; document.head.appendChild(link); }
+      link.href = c.toDataURL('image/png');
+    } catch { }
+  }
+  // Your feed, annotated: the last 30 posts as a grid, tinted by how each did against the typical post,
+  // with a mark on every post the plan uses.
+  const FEED_INFO = new Map(); // post id → what the hover card says
+  function feedGridHTML(report, phases) {
+    FEED_INFO.clear();
+    const posts = [...(report.posts || [])].filter(p => p.posted_at).sort((a, b) => +new Date(b.posted_at) - +new Date(a.posted_at)).slice(0, 30);
+    if (posts.length < 6) return '';
+    const eng = p => (Number(p.likes) || 0) + (Number(p.comments) || 0);
+    const med = Number(report.post_insights?.avg_engagement) || (() => { const e = posts.filter(p => !p.is_pinned).map(eng).sort((a, b) => a - b); return e[Math.floor(e.length / 2)] || 1; })();
+    const marks = {};
+    const MARK = { pin: 'PIN', highlight: 'HL', repurpose: 'CUT', format: 'CUT', schedule: 'POST', bio_link: 'BIO', bio_cta: 'BIO', bio_rewrite: 'BIO', media_kit: 'KIT', other: 'PLAN' };
+    for (const ph of phases || []) for (const m of [ph.opener ? { ...ph.opener, topic: ph.opener.topic } : null, ...(ph.moves || [])]) { if (m && m.cta && m.cta.type === 'see_example' && m.cta.post_id) marks[m.cta.post_id] = MARK[m.topic] || 'PLAN'; }
+    // Marks, not tints: a flame on what did well, a snowflake on what didn't, and the plan's
+    // instruction on the posts it uses. All drawn in their colour on a cream disc.
+    const ratio = p => (med > 0 ? eng(p) / med : 1);
+    const best = [...posts].sort((a, b) => ratio(b) - ratio(a))[0];
+    const MARK_ICON = { pin: 'pin', highlight: 'ring', repurpose: 'cut', format: 'cut', schedule: 'cal', bio_link: 'link', bio_cta: 'link', bio_rewrite: 'link', media_kit: 'link' };
+    const MARK_TITLE = { pin: 'the plan pins this', ring: 'the plan puts this in a highlight', cut: 'the plan re-cuts this', cal: 'the plan schedules a post from this', link: 'a bio move cites this', pinned: 'pinned on your profile today' };
+    const icons = {};
+    const moveOf = {};
+    for (const ph of phases || []) { const list = [ph.opener ? { ...ph.opener, topic: ph.opener.topic, title: ph.label, action: ph.action, key: ph.key + 'm1', n: 1 } : null, ...(ph.moves || []).map(m => ({ ...m, key: ph.key + 'm' + m.n }))]; for (const m of list) { if (m && m.cta && m.cta.type === 'see_example' && m.cta.post_id && !icons[m.cta.post_id]) { icons[m.cta.post_id] = MARK_ICON[m.topic] || 'cut'; moveOf[m.cta.post_id] = m; } } }
+    const windows = (report.best_times && report.best_times.confident ? report.best_times.windows : []) || [];
+    const fmtAvg = report.post_insights?.patterns?.format_avg || {};
+    const mult = r => (r >= 10 ? Math.round(r) : r.toFixed(1)) + '×';
+    const use = (id, cls = '') => `<span class="disc ${cls}"><svg aria-hidden="true"><use href="#fm-${id}"/></svg></span>`;
+    const cells = posts.map(p => {
+      const r = ratio(p); const hidden = Number(p.likes) === 0 && (Number(p.comments) > 5 || Number(p.views) > 100);
+      const fmt = /reel|video/i.test(p.type) ? '▶' : /carousel/i.test(p.type) ? '▤' : '▪';
+      const perf = p === best && r >= 1.5 ? 'best' : r >= 2 ? 'hot' : r < 0.5 ? 'cold' : '';
+      const plan = icons[p.id] || (p.is_pinned ? 'pinned' : null);
+      const title = `${postDay(report, p.posted_at)} · ${String(p.type || 'post')} · ${hidden ? 'likes hidden' : fmtN(p.likes) + ' likes'} · ${fmtN(p.comments)} comments${p.views ? ' · ' + fmtN(p.views) + ' views' : ''} · ${mult(r)} your typical post${perf === 'best' ? ' · your best' : ''}${plan ? ' · ' + MARK_TITLE[plan] : ''}`;
+      const inner = p.thumbnail_url ? h`<img src="${p.thumbnail_url}" alt="" loading="lazy">` : h`<span class="ph">${fmt}</span>`;
+      // One mark per tile, always bottom-left. The plan's instruction wins over the flame
+      // (a re-cut implies it did well); the flame shows on winners the plan leaves alone;
+      // the snowflake on flops; the outline pin only when nothing else applies.
+      const mark = plan && plan !== 'pinned' ? use(plan, 'bl') : perf === 'best' ? use('flame', 'bl lg') : perf === 'hot' ? use('flame', 'bl') : perf === 'cold' ? use('snow', 'bl') : plan === 'pinned' ? use('pin-o', 'bl') : '';
+      // What the hover card says about this tile.
+      { const d = new Date(p.posted_at); const tz = report.tz || report.best_times?.tz || 'UTC';
+        // Day and hour in the account's own time zone — the same one the best windows use.
+        const parts = (() => { try { return Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short', hour: 'numeric', hour12: false }).formatToParts(d).map(x => [x.type, x.value])); } catch { return { weekday: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()], hour: String(d.getHours()) }; } })();
+        const day = parts.weekday; const hr = Number(parts.hour) % 24;
+        const inWin = windows.find(w => w.day === day && hr >= w.start_hour && hr < w.end_hour);
+        const fmtKey = /reel|video/i.test(p.type) ? 'reel' : /carousel/i.test(p.type) ? 'carousel' : 'static';
+        const others = Object.entries(fmtAvg).filter(([k]) => k !== fmtKey && fmtAvg[k] && fmtAvg[k].posts >= 2);
+        const mine = fmtAvg[fmtKey];
+        const lines = [];
+        lines.push({ k: 'result', v: `${hidden ? 'Likes hidden' : fmtN(p.likes) + ' likes'} · ${fmtN(p.comments)} comments${p.views ? ' · ' + fmtN(p.views) + ' views' : ''}`, s: r >= 2 ? `${mult(r)} your typical post${perf === 'best' ? ' — your best of the 30' : ''}` : r < 0.5 ? `${mult(r)} your typical post — under half` : `${mult(r)} your typical post` });
+        const when = (() => { try { return d.toLocaleString('en-GB', { timeZone: tz, weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }); } catch { return d.toLocaleString('en-GB'); } })();
+        lines.push({ k: 'timing', v: when, s: windows.length ? (inWin ? `in your best window (${inWin.label})` : `outside your best windows (${windows.map(w => w.label).join(', ')})`) : '' });
+        if (mine && others.length) { const best = others.sort((a, b) => b[1].avg_engagement - a[1].avg_engagement)[0]; const ratio = best[1].avg_engagement ? mine.avg_engagement / best[1].avg_engagement : null; lines.push({ k: 'format', v: fmtKey === 'static' ? 'Photo' : fmtKey.charAt(0).toUpperCase() + fmtKey.slice(1), s: ratio ? `your ${fmtKey === 'static' ? 'photos' : fmtKey + 's'} average ${fmtN(mine.avg_engagement)} vs ${fmtN(best[1].avg_engagement)} for ${best[0] === 'static' ? 'photos' : best[0] + 's'}` : '' }); }
+        const mv = moveOf[p.id];
+        if (mv) lines.push({ k: 'plan', v: MARK_TITLE[icons[p.id]].replace(/^the plan /, 'The plan '), s: mv.title || '', link: `#/path/${report.report_id}?open=${mv.key}`, cta: 'Open the move →' });
+        else if (p.is_pinned) lines.push({ k: 'plan', v: 'Pinned on your profile today', s: '' });
+        else if (perf === 'hot' || perf === 'best') lines.push({ k: 'plan', v: 'Not in the plan yet', s: 'the plan re-cuts winners it can build on; this one stands on its own' });
+        else if (perf === 'cold') lines.push({ k: 'plan', v: 'Not in the plan', s: 'the plan leaves flops alone rather than fixing them' });
+        FEED_INFO.set(String(p.id), { lines, url: p.permalink || null, thumb: p.thumbnail_url || null }); }
+      const tag = p.permalink ? 'a' : 'span';
+      return `<${tag} class="cell" data-pid="${esc(String(p.id))}" ${p.permalink ? `href="${esc(p.permalink)}" target="_blank" rel="noopener"` : ''} aria-label="${esc(title)}">${inner}${mark}</${tag}>`;
+    }).join('');
+    const topR = best ? ratio(best) : 0;
+    const marked = Object.keys(icons).length;
+    return h`<div class="card feedcard">
+      ${raw(FEED_SYMBOLS)}
+      <div class="fh"><h2>Your feed, annotated</h2><span class="fine">Your ${posts.length} latest posts. One mark per post: a flame on the ones that beat your typical post (${fmtN(med)} likes + comments) by 2× or more, a snowflake on the ones under half${marked ? `, and the plan's own mark on the ${marked} post${marked === 1 ? '' : 's'} it uses` : ''}.</span></div>
+      <div class="feedgrid">${raw(cells)}</div>
+      ${topR >= 3 ? raw(h`<p class="marg">↑ One post did ${mult(topR)} your typical. The plan re-cuts it, it doesn't chase it.</p>`) : ''}
+    </div>`;
+  }
+  // The hover card (tap on touch): what this post did, when, in what format, and what the plan does with it.
+  function bindFeedHover(root) {
+    const grid = root.querySelector('.feedgrid'); if (!grid) return;
+    let card = null, current = null, touch = false;
+    const hide = () => { if (card) card.remove(); card = null; current = null; };
+    const show = (cell) => {
+      const info = FEED_INFO.get(cell.dataset.pid); if (!info) return;
+      hide(); current = cell;
+      card = document.createElement('div'); card.className = 'hovercard'; card.setAttribute('role', 'tooltip');
+      card.innerHTML = h`${info.thumb ? raw(h`<img src="${info.thumb}" alt="">`) : ''}<div class="hc">${raw(info.lines.map(l => h`<div class="ln ${l.k}"><b>${l.v}</b>${l.s ? raw(h`<span>${l.s}</span>`) : ''}${l.link ? raw(h`<a href="${l.link}">${l.cta}</a>`) : ''}</div>`).join(''))}${info.url && touch ? raw(h`<a class="open" href="${info.url}" target="_blank" rel="noopener">Open on Instagram ↗</a>`) : ''}</div>`;
+      document.body.appendChild(card);
+      const r = cell.getBoundingClientRect(); const cw = card.offsetWidth, ch = card.offsetHeight;
+      let x = r.left + r.width / 2 - cw / 2; x = Math.max(8, Math.min(window.innerWidth - cw - 8, x));
+      let y = r.top - ch - 10; if (y < 8) y = r.bottom + 10;
+      card.style.left = x + window.scrollX + 'px'; card.style.top = y + window.scrollY + 'px';
+    };
+    grid.querySelectorAll('.cell').forEach(cell => {
+      cell.addEventListener('mouseenter', () => { if (!touch) show(cell); });
+      cell.addEventListener('mouseleave', () => { if (!touch) hide(); });
+      cell.addEventListener('focus', () => show(cell)); cell.addEventListener('blur', hide);
+      cell.addEventListener('touchstart', () => { touch = true; }, { passive: true });
+      cell.addEventListener('click', e => { if (touch) { e.preventDefault(); if (current === cell) hide(); else show(cell); } });
+    });
+    document.addEventListener('scroll', hide, { passive: true });
+    document.addEventListener('click', e => { if (card && !card.contains(e.target) && !e.target.closest('.feedgrid .cell')) hide(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') hide(); });
+  }
+  // The feed marks, drawn once per page on a 16px grid, 1.75px stroke.
+  const FEED_SYMBOLS = `<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+    <symbol id="fm-flame" viewBox="0 0 16 16"><path fill="currentColor" fill-rule="evenodd" d="M9.6 1.2c.2 1.9-.7 3-1.8 4.1-.6-.9-.7-1.9-.3-2.9C5.1 3.8 3.6 6 3.8 8.6c.2 3.2 2.3 5.4 4.7 5.9 2.6.5 5.1-1.4 5.3-4.3.2-2.3-1-4.1-2.3-5.5-.3.9-.8 1.5-1.5 1.9.1-1.9-.1-3.9-.4-5.4zM8.2 8.1c1.1 1 1.8 2 1.6 3.3-.1.8-.7 1.4-1.5 1.5-1 .1-1.9-.6-2-1.7-.1-1.3.9-2.2 1.9-3.1z"/></symbol>
+    <symbol id="fm-snow" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 1.8v12.4M2.6 4.9l10.8 6.2M2.6 11.1l10.8-6.2"/><path d="M6.4 3.2L8 4.4l1.6-1.2M6.4 12.8L8 11.6l1.6 1.2M3.2 7.1l1.9.5.5-1.9M12.8 8.9l-1.9-.5-.5 1.9M3.2 8.9l1.9-.5.5 1.9M12.8 7.1l-1.9.5-.5-1.9"/></g></symbol>
+    <symbol id="fm-cut" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="4.5" cy="4.5" r="2.2"/><circle cx="4.5" cy="11.5" r="2.2"/><path d="M6.3 5.8L14 12M6.3 10.2L14 4"/></g></symbol>
+    <symbol id="fm-pin" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9.8 1.8l4.4 4.4-1.6 1.6-.6-.6-3 3 .3 2.4-1.6 1.6L4.9 11.4 2 14.3M4.9 11.4l-2.9-2.9 1.6-1.6 2.4.3 3-3-.6-.6z"/></g></symbol>
+    <symbol id="fm-pin-o" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" opacity=".8"><path d="M9.8 1.8l4.4 4.4-1.6 1.6-.6-.6-3 3 .3 2.4-1.6 1.6L4.9 11.4 2 14.3M4.9 11.4l-2.9-2.9 1.6-1.6 2.4.3 3-3-.6-.6z"/></g></symbol>
+    <symbol id="fm-ring" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.75"><circle cx="8" cy="8" r="6"/><circle cx="8" cy="8" r="2.4" fill="currentColor" stroke="none"/></g></symbol>
+    <symbol id="fm-cal" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="2" y="3" width="12" height="11" rx="2"/><path d="M2 7h12M6 1.5v3M10 1.5v3"/><circle cx="8" cy="10.5" r="1.1" fill="currentColor" stroke="none"/></g></symbol>
+    <symbol id="fm-link" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M6.8 9.2a3 3 0 004.2 0l2-2a3 3 0 00-4.2-4.2l-1 1"/><path d="M9.2 6.8a3 3 0 00-4.2 0l-2 2a3 3 0 004.2 4.2l1-1"/></g></symbol>
+  </defs></svg>`;
+  // Marginalia: short pointer notes under the score box, from the data.
+  function marginaliaHTML(report) {
+    const s = report.scores || {}; const notes = [];
+    const cons = (s.dimensions || []).find(d => /consisten/i.test(d.label)); const m = cons && /([\d.]+)\/week vs ([\d.]+)\/week/.exec(cons.evidence || '');
+    if (m) notes.push(`${m[1]} posts a week against a ${report.calendar?.schedule?.per_week || m[2]}-a-week target. That's the number the plan moves first.`);
+    const bd = report.best_times?.best_days?.[0]; if (bd && bd.n >= 3 && bd.vs_avg >= 1.3) notes.push(`Your ${{ Mon: 'Monday', Tue: 'Tuesday', Wed: 'Wednesday', Thu: 'Thursday', Fri: 'Friday', Sat: 'Saturday', Sun: 'Sunday' }[bd.day] || bd.day} habit: ${bd.vs_avg}× your usual over ${bd.n} posts.`);
+    const prof = (s.dimensions || []).find(d => /profile/i.test(d.label)); if (prof && prof.score < 50) notes.push(`Profile is the cheapest points on the page: ${prof.score} today, ${prof.score < 50 ? 60 : 80} within reach in an afternoon.`);
+    return notes.length ? h`<ul class="marginalia">${raw(notes.slice(0, 3).map(n => h`<li>${n}</li>`).join(''))}</ul>` : '';
   }
   const targetLine = t => t ? h`<div class="target"><span class="tl">Target</span> ${t.dimension}${t.metric === 'score' ? '' : ' · ' + t.metric}: <b>${t.from}${t.unit || ''} → ${t.to}${t.unit || ''}</b></div>` : '';
   const confPill = c => c ? h`<span class="conf ${c.level}" title="${c.n} in the sample">${c.label} · ${c.n}</span>` : '';
@@ -1376,7 +1556,7 @@
   function viewSignin() {
     renderHeader('signin');
     const next = sget('sc_next', '#/');
-    $view.innerHTML = h`<div class="wrap"><div class="authwrap"><div class="brandname">Scalecraft</div>
+    $view.innerHTML = h`<div class="wrap"><div class="authwrap"><div class="brandname">Scalecraft Social</div>
       ${sget('sc_limit_msg', null) ? raw(h`<div class="notice" style="margin-top:16px">${sget('sc_limit_msg', '')}</div>`) : ''}
       <form class="card lightform" id="signinForm" novalidate><h1>Sign in</h1>
         <div class="field"><label for="siEmail">Email</label><input id="siEmail" type="email" name="email" autocomplete="email" placeholder="you@email.com" value="${sget('sc_form', {}).email || ''}"></div>
@@ -1402,7 +1582,7 @@
   function viewSignup() {
     renderHeader('signup');
     const next = sget('sc_next', '#/');
-    $view.innerHTML = h`<div class="wrap"><div class="authwrap"><div class="brandname">Scalecraft</div>
+    $view.innerHTML = h`<div class="wrap"><div class="authwrap"><div class="brandname">Scalecraft Social</div>
       <form class="card lightform" id="signupForm" novalidate><h1>Create account</h1>
         <div class="field"><label for="suName">Name or handle</label><input id="suName" type="text" name="company_name" placeholder="@yourhandle" autocapitalize="none"></div>
         <div class="field"><label for="suEmail">Email</label><input id="suEmail" type="email" name="email" autocomplete="email" placeholder="you@email.com" value="${sget('sc_form', {}).email || ''}"></div>
@@ -1568,7 +1748,7 @@
   function viewForgot() {
     renderHeader('signin');
     const last = sget('sc_forgot_email', '');
-    $view.innerHTML = h`<div class="wrap"><div class="authwrap"><div class="brandname">Scalecraft</div><form class="card lightform" id="forgotForm" novalidate>
+    $view.innerHTML = h`<div class="wrap"><div class="authwrap"><div class="brandname">Scalecraft Social</div><form class="card lightform" id="forgotForm" novalidate>
         <h1>Reset your password</h1>
         <p class="sub">Type the email you signed up with. If it has an account, we'll send a link that works once, for an hour.</p>
         <div class="field"><label for="fgEmail">Email</label><input id="fgEmail" type="email" name="email" autocomplete="email" value="${last}" placeholder="you@example.com"></div>
@@ -1587,7 +1767,7 @@
     renderHeader('signin');
     const tokenParam = new URLSearchParams(location.hash.split('?')[1] || '').get('token') || '';
     if (!tokenParam) { $view.innerHTML = h`<div class="center-msg"><h2>This reset link is missing its code.</h2><a href="#/forgot">Request a new one</a></div>`; return; }
-    $view.innerHTML = h`<div class="wrap"><div class="authwrap"><div class="brandname">Scalecraft</div><form class="card lightform" id="resetForm" novalidate>
+    $view.innerHTML = h`<div class="wrap"><div class="authwrap"><div class="brandname">Scalecraft Social</div><form class="card lightform" id="resetForm" novalidate>
         <h2>Choose a new password</h2>
         <div class="field"><label for="rsPass">New password</label><input id="rsPass" type="password" name="password" autocomplete="new-password" placeholder="At least 6 characters"></div>
         <div class="field"><label for="rsPass2">Again</label><input id="rsPass2" type="password" name="password2" autocomplete="new-password"></div>
@@ -1843,7 +2023,7 @@
         <header class="phead">
           <div class="l"><div class="eb">YOUR PATH · @${biz.handle}${path.plan_day ? raw(h` · DAY ${path.plan_day}`) : ''}</div>
             <h1>${path.free ? 'Start here.' : path.caught_up ? "You're caught up." : nowSteps.length > 1 ? `${nowSteps.length} things today.` : first && first.kind === 'slot' ? 'Post today.' : 'One thing today.'}</h1></div>
-          <div class="r"><a class="btn ghost sm" href="#/report/${report.report_id}">Your report</a></div>
+          <div class="r">${raw(shapeSVG((report.scores || {}).dimensions, null, { size: 44, cls: 'inhead', label: false }))}<button type="button" class="btn ghost sm" data-focus aria-pressed="${lget('sc_focus', false) ? 'true' : 'false'}">${lget('sc_focus', false) ? 'Exit focus' : 'Focus'}</button><a class="btn ghost sm" href="#/report/${report.report_id}">Your report</a></div>
         </header>
         <div class="pprog" role="progressbar" aria-valuemin="0" aria-valuemax="${path.progress.total}" aria-valuenow="${path.progress.done}" aria-label="Path progress">
           <div class="t"><span>${path.progress.done} of ${path.progress.total} done${path.progress.skipped ? raw(h` <em>· ${path.progress.skipped} skipped</em>`) : ''}</span><span>${path.phase ? `Days ${String(path.phase.range).replace('-', '–')} · ${path.phase.label} · ${path.phase.done}/${path.phase.total}` : ''}</span></div>
@@ -1863,13 +2043,14 @@
             <div class="plocked"><div class="eb">${locked.length} MORE STEPS IN YOUR GROWTH PLAN</div>${raw(locked.slice(0, 6).map((s, i) => h`<div class="prow ghost"><span class="k">${String(i + 4).padStart(2, '0')}</span><span class="t">${s.title}</span></div>`).join(''))}${locked.length > 6 ? raw(h`<div class="fine">…and ${locked.length - 6} more, plus your posting calendar and written posts.</div>`) : ''}
               <button class="btn" data-action="unlock-path">${billingOpen() ? raw(h`Start the plan · $${price}/mo${founders ? raw(h` <span class="fine">founders price</span>`) : ''}`) : 'Join the waitlist'}</button></div>
           </div>`) : ''}
-        ${!path.free && upcoming.length ? raw(h`<div class="pnext"><div class="eb">UP NEXT</div>${raw(upcoming.map(s => h`<button class="prow ${s.phase_open ? '' : 'ghost'}" data-open="${s.key}" ${s.phase_open ? '' : 'title="Opens with the next phase"'}><span class="k">${s.kind === 'slot' ? dueLabel(s.due) : `MOVE ${String(s.n).padStart(2, '0')}`}</span><span class="t">${s.kind === 'slot' && s.post ? s.post.hook : s.action || s.title}</span><span class="d">${s.kind === 'slot' ? `${s.day} · ${s.format}` : s.time || ''}</span></button>`).join(''))}</div>`) : ''}
-        ${doneSteps.length ? raw(h`<details class="pdone"><summary>Done and skipped <span class="fine">${doneSteps.length}</span></summary>${raw(doneSteps.map(s => h`<div class="prow done ${s.status}"><span class="k" aria-hidden="true">${s.status === 'done' ? '✓' : '→'}</span><span class="t">${s.action || s.title}${s.verified ? raw(h`<span class="fine ${s.verified.ok ? 'ok' : ''}">${s.verified.ok ? '✓✓ ' : ''}${s.verified.note}</span>`) : s.status === 'skipped' ? raw(h`<span class="fine">Skipped${s.skipped?.reason ? ' · ' + (PATH_SKIP_REASONS.find(r => r[0] === s.skipped.reason) || [])[1]?.toLowerCase() : ''}</span>`) : ''}</span><button class="undo" data-path="open" data-key="${s.key}">Undo</button></div>`).join(''))}</details>`) : ''}
+        ${!path.free && upcoming.length ? raw(h`<div class="pnext trail"><div class="eb">UP NEXT</div>${raw(upcoming.map(s => h`<button class="prow ${s.phase_open ? '' : 'ghost'}" data-open="${s.key}" ${s.phase_open ? '' : 'title="Opens with the next phase"'}><span class="k">${s.kind === 'slot' ? dueLabel(s.due) : `MOVE ${String(s.n).padStart(2, '0')}`}</span><span class="t">${s.kind === 'slot' && s.post ? s.post.hook : s.action || s.title}</span><span class="d">${s.kind === 'slot' ? `${s.day} · ${s.format}` : s.time || ''}</span></button>`).join(''))}</div>`) : ''}
+        ${doneSteps.length ? raw(h`<details class="pdone trail"><summary>Done and skipped <span class="fine">${doneSteps.length}</span></summary>${raw(doneSteps.map(s => h`<div class="prow done ${s.status}"><span class="k" aria-hidden="true">${s.status === 'done' ? '✓' : '→'}</span><span class="t">${s.action || s.title}${s.verified ? raw(h`<span class="fine ${s.verified.ok ? 'ok' : ''}">${s.verified.ok ? '✓✓ ' : ''}${s.verified.note}</span>`) : s.status === 'skipped' ? raw(h`<span class="fine">Skipped${s.skipped?.reason ? ' · ' + (PATH_SKIP_REASONS.find(r => r[0] === s.skipped.reason) || [])[1]?.toLowerCase() : ''}</span>`) : ''}</span><button class="undo" data-path="open" data-key="${s.key}">Undo</button></div>`).join(''))}</details>`) : ''}
       </div></div>${raw(footer())}`;
 
       const update = async (key, status, reason, momentFor) => {
         const btns = $view.querySelectorAll(`[data-key="${key}"]`); btns.forEach(b => { b.disabled = true; });
         try {
+          if (status === 'done') { const card = $view.querySelector('.pstep'); if (card && !matchMedia('(prefers-reduced-motion: reduce)').matches) { card.classList.add('leaving'); await new Promise(r => setTimeout(r, 220)); } }
           const before = path; path = await setStatus(key, status, reason);
           if (!isSample) { const cached = sget('sc_report_' + report.report_id, null); if (cached) { cached.moves_done = Object.fromEntries(path.steps.filter(s => s.status === 'done').map(s => [s.key, s.done_at || Date.now()])); sset('sc_report_' + report.report_id, cached); } track(status === 'done' ? 'path_done' : status === 'skip' ? 'path_skipped' : 'path_later', { key, reason }, report.report_id); }
           const step = before.steps.find(s => s.key === key);
@@ -1901,6 +2082,8 @@
       const openPost = (i) => { const slot = steps.find(x => x.kind === 'slot' && x.post && (x.post.n === i + 1 || x.post.n === i)); if (slot) showStep(slot.key); else go('#/report/' + report.report_id); };
       const bind = (root) => { bindCta(root, { paid: !path.free, reportId: report.report_id, openPost }); root.querySelector('[data-save-link]')?.addEventListener('click', () => saveLink(root)); root.querySelectorAll('[data-path]').forEach(b => b.addEventListener('click', () => { const key = b.dataset.key, st = b.dataset.path; if (st === 'skip') { const box = b.closest('.pstep').querySelector('.skipwhy'); box.hidden = !box.hidden; return; } update(key, st); })); root.querySelectorAll('[data-skip-reason]').forEach(b => b.addEventListener('click', () => update(b.dataset.key, 'skip', b.dataset.skipReason))); root.querySelectorAll('[data-skip-cancel]').forEach(b => b.addEventListener('click', () => { b.closest('.skipwhy').hidden = true; })); root.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', () => { const t = b.closest('.fld').querySelector('.txt, .hook')?.textContent || ''; navigator.clipboard?.writeText(t).then(() => toast('Copied.')).catch(() => toast('Select the text and copy it.')); })); };
       $view.querySelectorAll('[data-open], [data-ahead]').forEach(b => b.addEventListener('click', () => showStep(b.dataset.open || b.dataset.ahead)));
+      document.body.classList.toggle('focus', !!lget('sc_focus', false));
+      $view.querySelector('[data-focus]')?.addEventListener('click', e => { const on = !lget('sc_focus', false); lset('sc_focus', on); document.body.classList.toggle('focus', on); e.currentTarget.textContent = on ? 'Exit focus' : 'Focus'; e.currentTarget.setAttribute('aria-pressed', on ? 'true' : 'false'); });
       $view.querySelector('[data-save-link]')?.addEventListener('click', () => saveLink($view));
       bindCta($view, { paid: !path.free, reportId: report.report_id, openPost });
       if (qs.get('open') && !$view.dataset.opened) { $view.dataset.opened = '1'; const k = qs.get('open'); if (steps.some(x => x.key === k)) showStep(k); }
@@ -1930,7 +2113,7 @@
     const goalNow = knownGoal(r); const gp = goalNow ? goalProgress(goalNow, r.goal_target || sget('sc_goal', null)?.goal_target || null, r) : null;
     $view.innerHTML = h`<div class="wrap narrow"><div class="progress">
       <div class="ph"><div class="eb">@${r.business?.handle || ''} · ${hist ? `run ${hist.runs}` : 'first run'}</div><h1>${hist && hist.delta_overall != null ? (hist.delta_overall > 0 ? `Up ${hist.delta_overall} point${hist.delta_overall === 1 ? '' : 's'}.` : hist.delta_overall < 0 ? `Down ${-hist.delta_overall} point${hist.delta_overall === -1 ? '' : 's'}.` : 'Holding steady.') : 'Your trend starts at the first rescore.'}</h1></div>
-      <div class="card"><div class="bigrow"><span class="bignum">${r.scores?.overall ?? '—'}</span><div class="meta"><span class="fine">${hist ? `was ${hist.previous.overall} on ${fmtShort(hist.previous.generated_at)}` : 'scored ' + fmtDate(r.generated_at)}</span>${streak ? raw(h`<span class="streak ${streak.weeks ? 'on' : ''}">${streak.weeks ? `🔥 ${streak.weeks}-week streak` : 'Streak starts this week'}</span>`) : ''}</div></div>
+      <div class="card"><div class="bigrow"><span class="bignum">${r.scores?.overall ?? '—'}</span>${raw(shapeSVG(dims, hist ? dims.map(d => ({ label: d.label, score: clamp(d.score - (d.delta || 0), 0, 100) })) : null, { size: 96, cls: 'inbox' }))}<div class="meta"><span class="fine">${hist ? `was ${hist.previous.overall} on ${fmtShort(hist.previous.generated_at)}` : 'scored ' + fmtDate(r.generated_at)}</span>${streak ? raw(h`<span class="streak ${streak.weeks ? 'on' : ''}">${streak.weeks ? `🔥 ${streak.weeks}-week streak` : 'Streak starts this week'}</span>`) : ''}</div></div>
         ${raw(historyChartHTML(hist))}${!hist || !(hist.series || []).length ? raw('<div class="fine">The chart appears after your first weekly rescore.</div>') : ''}
         <div class="dims">${raw(dims.map(d => dimRow({ label: d.label, score: d.score }, null) + (d.delta != null ? h`<div class="fine dd">${d.delta > 0 ? '+' : ''}${d.delta} since last time</div>` : '')).join(''))}</div></div>
       <div class="card"><div class="eb">MOVES</div><div class="facts3"><div class="fact"><b>${Object.keys(done).length}</b><span>done</span></div><div class="fact"><b>${verified}</b><span>seen on your profile</span></div><div class="fact"><b>${Object.keys(skipped).length}</b><span>skipped</span></div></div>
@@ -1963,8 +2146,8 @@
   // ------------------------------------------------------------ legal (batch 3 template; copy is draft)
   const LEGAL = {
     terms: { title: 'Terms of Service', sections: [
-      ['What Scalecraft does', 'Scalecraft reads a public social media account, scores it out of 100 across four dimensions, and writes a plan of suggested moves. We are a measurement and recommendation service. We do not guarantee growth, reach, followers, sales or any other outcome.'],
-      ['Eligibility', 'You must be 18 or over to use Scalecraft. You may score an account you hold, or one you have the account holder’s consent to score.'],
+      ['What Scalecraft Social does', 'Scalecraft Social reads a public social media account, scores it out of 100 across four dimensions, and writes a plan of suggested moves. We are a measurement and recommendation service. We do not guarantee growth, reach, followers, sales or any other outcome.'],
+      ['Eligibility', 'You must be 18 or over to use Scalecraft Social. You may score an account you hold, or one you have the account holder’s consent to score.'],
       ['Your account', 'Keep your password to yourself. You are responsible for what happens under your account. Tell us at once if you think someone else has access to it.'],
       ['Free tier limits', 'One free Snapshot per email address. A second evaluation requires an account and a paid plan.'],
       ['Subscriptions, billing and refunds', 'Paid plans renew monthly or annually until cancelled. Billing is handled by Stripe; we never see your full card details. You can cancel in two clicks from your settings and keep access until the end of the period you paid for. If the plan is not useful in the first seven days, reply to any email from us and we refund it.' + (supportEmail() ? ` Questions about billing: ${supportEmail()}.` : '')],
@@ -1984,7 +2167,7 @@
       ['Retention', 'Reports are kept while your account exists. Delete your account from settings and they go with it. Anonymous free snapshots are kept for 90 days.'],
       ['Your rights', 'Access, correction and deletion of your data, on request or from settings. If you are in the EU/UK or California, the rights in GDPR and CCPA apply and we honour them. [Counsel to confirm disclosures.]'],
       ['Cookies', 'See the Cookie Notice.'],
-      ['Children', 'Scalecraft is not for anyone under 18.'],
+      ['Children', 'Scalecraft Social is not for anyone under 18.'],
       ['Changes and contact', 'We will email you before a material change. Questions: reply to any email from us.']
     ] },
     cookies: { title: 'Cookie Notice', sections: [
@@ -1992,7 +2175,7 @@
       ['Preferences', 'Your billing toggle and a few display settings, stored in your browser.'],
       ['Analytics', '[None yet — if we add a tool, we will name it here.]'],
       ['Advertising', 'None. We do not run advertising cookies.'],
-      ['How to control them', 'Clear your browser storage for scalecraft.com, or sign out.']
+      ['How to control them', 'Clear your browser storage for scalecraftsocial.com, or sign out.']
     ] },
     use: { title: 'Acceptable Use', sections: [
       ['Do not', 'Score an account you intend to harass. Scrape, resell or redistribute our scores, plans or calendars. Attempt to reverse the engine or build a competing dataset from it. Use the service for anyone under 18 without consent.'],
@@ -2021,6 +2204,7 @@
   // ------------------------------------------------------------ router
   function route() {
     stopPolling(); window.scrollTo(0, 0);
+    if (!/^#\/path\//.test(location.hash || '')) document.body.classList.remove('focus');
     const hash = location.hash || '#/';
     const parts = hash.slice(1).split('?')[0].split('/').filter(Boolean);
     if (parts.length === 0) return viewLanding();

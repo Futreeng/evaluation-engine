@@ -10,7 +10,7 @@ way, study this next — eventually has to answer whether the advice does anythi
 none of them can, because they only record what people did, never what they were told and
 ignored. Assay records both, so the question has an answer.
 
-A FutureEng product. Scalecraft is the first thing it measures; nothing in the core knows
+A FutureEng product. Scalecraft Social is the first thing it measures; nothing in the core knows
 what Instagram is.
 
 ## The idea in one paragraph
@@ -123,7 +123,7 @@ later without dragging the product's schema along.
 
 | Domain | subject | recommendation | score | external |
 |---|---|---|---|---|
-| Scalecraft | social account | a plan move | account score /100 | follower delta |
+| Scalecraft Social | social account | a plan move | account score /100 | follower delta |
 | Sales | rep | a coaching action | pipeline health | closed revenue |
 | Fitness | client | a programme change | adherence score | strength gain |
 | Education | student | a study action | mastery score | assessment result |
@@ -140,5 +140,5 @@ because the decliners were excluded.
 
 ## Status
 
-Core and tests complete. Not yet wired into Scalecraft — that needs an `offer()` call where
+Core and tests complete. Not yet wired into Scalecraft Social — that needs an `offer()` call where
 plan moves are generated, which is the only part that can't be backfilled.

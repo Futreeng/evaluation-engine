@@ -25,7 +25,7 @@ const TYPES = ["transactional", "weekly_score", "monday_move", "milestones", "po
 const PREF_TYPES = TYPES.filter((t) => t !== "transactional");
 const DEFAULT_PREFS = { weekly_score: true, monday_move: true, milestones: true, post_reviews: true, product_news: true };
 const APP = (process.env.APP_URL || "http://localhost:3005").replace(/\/$/, "");
-const FROM = process.env.MAIL_FROM || "Scalecraft <onboarding@resend.dev>";
+const FROM = process.env.MAIL_FROM || "Scalecraft Social <onboarding@resend.dev>";
 // Replies land with a person. MAIL_FROM stays on the verified sending domain
 // (send.futreeng.com, nothing reads it); REPLY_TO is the inbox that does.
 const REPLY_TO = process.env.REPLY_TO || process.env.SUPPORT_EMAIL || "hello@futreeng.com";
@@ -75,7 +75,7 @@ async function allowed(userId, type) {
 // Footer every email gets: postal address, support, unsubscribe.
 function footer(userId, type, optOutUrl = null) {
   const unsub = !userId && optOutUrl && type !== "transactional" ? ` · <a href="${optOutUrl}" style="color:#7A6A57">Unsubscribe</a>` : userId && type !== "transactional" ? ` · <a href="${unsubscribeLink(userId, type)}" style="color:#7A6A57">Unsubscribe from these</a> · <a href="${unsubscribeLink(userId, "all")}" style="color:#7A6A57">Pause all but receipts</a>` : "";
-  const addr = POSTAL ? esc(POSTAL) : "Scalecraft";
+  const addr = POSTAL ? esc(POSTAL) : "Scalecraft Social";
   return `<tr><td style="padding:14px 28px 22px;border-top:1px solid #EADFCB;font-size:11px;line-height:1.7;color:#7A6A57">${addr}${SUPPORT ? ` · <a href="mailto:${esc(SUPPORT)}" style="color:#7A6A57">${esc(SUPPORT)}</a>` : ""} · <a href="${APP}/#/legal/privacy" style="color:#7A6A57">Privacy</a>${unsub}</td></tr>`;
 }
 

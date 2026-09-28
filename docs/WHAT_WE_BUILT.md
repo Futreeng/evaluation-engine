@@ -1,4 +1,4 @@
-# What we built — Scalecraft, Waves 1–5
+# What we built — Scalecraft Social, Waves 1–5
 
 Plain-language record of every feature on `feat/next-build` (PR #6): what it does for the user, why it exists, how it works, and where the code lives. Spec numbers match `SCALECRAFT_BUILD_SPEC.md`.
 
@@ -312,6 +312,28 @@ answers on when to post, Instagram steps that don't exist. Two parts:
 - Every email now sets `Reply-To` (`REPLY_TO`, default `SUPPORT_EMAIL`, then hello@futreeng.com); `MAIL_FROM` stays on the verified `send.futreeng.com`. The footer says "Reply to this email and a person answers."
 - Email design pass in `server/mailer.js`: tables only (Gmail and Outlook drop flex), a masthead with a colour mark and an eyebrow naming the email, the account line, a preheader for the inbox preview, the score set large with its grade, the four dimensions as bars (with deltas on the weekly rescore), moves with why, how-steps and done-when, a 2.4× figure on post reviews, and a data-window note. Report-ready and score-changed now receive the dimension scores from the job queue.
 - `node scripts/email_preview.js [dir]` renders all ten templates with sample data, footer included, without sending — for design review and Resend tests.
+
+### Visual identity (27 Sept)
+- **Your feed, annotated.** The last 30 posts as a grid under the score, each tinted by how it
+  did against the typical post (2×+, above, typical, under half), with a mark on every post the
+  plan uses (PIN, CUT, HL, POST, BIO) and a note on the outlier. Every post links out. The
+  sample ships all 30 thumbnails.
+- **The signature shape.** Four dimensions as a kite (consistency up, mix right, engagement
+  down, profile left), in the score box, the Path header, the Progress screen (the old shape
+  sits as a ghost and the new one draws from it), the share poster and the browser favicon.
+- **Their colour.** The dominant hue of the top three thumbnails, softened into `--their`,
+  `--their-soft`, `--their-deep` on the report: a stripe and tint on the score box, the shape
+  fill, the feed heat, and the share poster background (passed to the server as `tint`).
+- **The trail** on the Path (waypoints on Up next and Done, a pulsing dot on the current step)
+  and connectors between phases on the report.
+- **Marginalia** under the score box: pointer notes from the data (cadence vs target, the
+  weekday habit, the cheapest points).
+- **Dimension glyphs** on every dimension name.
+- **Motion with meaning**: the niche marker settles last; a step slides off the Path when
+  done; reduced motion respected.
+- **Focus mode** on the Path (dark, one card, nothing else), remembered per browser.
+- **Share poster** carries the shape and their colour on both the client and server canvases.
+
 
 ## Also fixed along the way
 

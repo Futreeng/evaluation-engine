@@ -4,7 +4,7 @@
 
 ## In one line
 
-Across {{NICHES_READY}} niches, {{ACCOUNTS_TOTAL}} accounts and {{POSTS_TOTAL}} posts scored in the last {{WINDOW_DAYS}} days, the median Scalecraft score is **{{OVERALL_MEDIAN}}** out of 100.
+Across {{NICHES_READY}} niches, {{ACCOUNTS_TOTAL}} accounts and {{POSTS_TOTAL}} posts scored in the last {{WINDOW_DAYS}} days, the median Scalecraft Social score is **{{OVERALL_MEDIAN}}** out of 100.
 
 ## By niche
 
@@ -54,4 +54,4 @@ Share of posts by format, by niche.
 [Add: a trend section once two editions exist — median score movement per niche, format share movement. The export carries `generated_at`; keep each edition's JSON to diff.]
 
 ---
-*Scalecraft · scalecraft.app · aggregated and anonymised · {{DATE}}*
+*Scalecraft Social · scalecraftsocial.com · aggregated and anonymised · {{DATE}}*

@@ -19,7 +19,7 @@ function fonts() {
 const DISPLAY = '"Bricolage Grotesque", "Instrument Sans", Helvetica, Arial, sans-serif';
 const SANS = '"Instrument Sans", Helvetica, Arial, sans-serif';
 const COLORS = { bg: "#D2603A", ink: "#FFF6E9", track: "#E9977B" };
-const SITE = (process.env.CARD_SITE_LABEL || (process.env.APP_URL || "scalecraft.app").replace(/^https?:\/\//, "")).replace(/\/$/, "");
+const SITE = (process.env.CARD_SITE_LABEL || (process.env.APP_URL || "scalecraftsocial.com").replace(/^https?:\/\//, "")).replace(/\/$/, "");
 const NICHES = { fitness_creator: "Fitness", food_cooking: "Food & Cooking", fashion: "Fashion", beauty_skincare: "Beauty & Skincare", travel: "Travel", comedy_entertainment: "Comedy", education_howto: "Education", lifestyle_vlog: "Lifestyle", music: "Music", gaming: "Gaming", tech_gadgets: "Tech", finance_business: "Finance", parenting_family: "Parenting", art_design: "Art & Design", sports: "Sports", pets: "Pets", other: "Creator" };
 const nicheName = (k) => NICHES[k] || String(k || "").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) || "Creator";
 const clamp = (n) => Math.max(0, Math.min(100, Number(n) || 0));
@@ -27,10 +27,19 @@ const fmtDate = (ts) => { try { return new Date(ts).toLocaleDateString("en-GB", 
 function roundRect(ctx, x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
 
 // data: { handle, platform, niche, date, overall, dims:[{label,score}], niche_avg, prev, span }
+// The account's four-point shape, top right of the card.
+function drawShape(ctx, dims, cx, cy, R) {
+  const order = [/consisten/i, /mix|content/i, /engage/i, /profile/i];
+  ctx.save(); ctx.globalAlpha = 0.35; ctx.strokeStyle = COLORS.ink; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke();
+  ctx.globalAlpha = 0.9; ctx.beginPath();
+  order.forEach((re, i) => { const d = (dims || []).find((x) => re.test(x.label)); const v = d ? clamp(d.score) / 100 : 0; const r = R * Math.max(v, 0.06); const a = -Math.PI / 2 + i * Math.PI / 2; const x = cx + r * Math.cos(a), y = cy + r * Math.sin(a); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
+  ctx.closePath(); ctx.fillStyle = "rgba(255,246,233,0.28)"; ctx.fill(); ctx.strokeStyle = COLORS.ink; ctx.lineWidth = 5; ctx.stroke(); ctx.restore();
+}
 function drawScore(ctx, W, H, d, size) {
   const P = 84;
-  ctx.fillStyle = COLORS.bg; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = d.tint || COLORS.bg; ctx.fillRect(0, 0, W, H);
   ctx.fillStyle = COLORS.ink; ctx.textBaseline = "top";
+  drawShape(ctx, d.dims, W - P - (size === "square" ? 80 : 110), P + (size === "square" ? 80 : 110), size === "square" ? 80 : 110);
   const dsp = (px) => `700 ${px}px ${DISPLAY}`; const sans = (px, wt = 500) => `${wt} ${px}px ${SANS}`;
   ctx.font = sans(40, 600); ctx.globalAlpha = 0.9;
   ctx.fillText(`@${d.handle}  ·  ${nicheName(d.niche)}`.toUpperCase(), P, P); ctx.globalAlpha = 1;
@@ -48,7 +57,7 @@ function drawScore(ctx, W, H, d, size) {
   } else {
     ctx.font = dsp(M.num); ctx.fillText(String(d.overall), P - 14, y);
     y += M.num * 1.02;
-    ctx.font = sans(M.label, 600); ctx.fillText("My Scalecraft score", P, y); y += M.label * 1.45;
+    ctx.font = sans(M.label, 600); ctx.fillText("My Scalecraft Social score", P, y); y += M.label * 1.45;
     if (Number.isFinite(d.niche_avg)) { ctx.font = sans(M.sub, 500); ctx.globalAlpha = 0.85; ctx.fillText(`${nicheName(d.niche)} average ${Math.round(d.niche_avg)}`, P, y); ctx.globalAlpha = 1; y += M.sub * 1.5; }
     y += sq ? 14 : 30;
   }
@@ -57,7 +66,7 @@ function drawScore(ctx, W, H, d, size) {
     ctx.font = sans(M.dimLabel, 600); ctx.fillText(dim.label, P, y);
     ctx.textAlign = "right"; ctx.fillText(String(dim.score), W - P, y); ctx.textAlign = "left";
     y += M.gap;
-    ctx.fillStyle = COLORS.track; roundRect(ctx, P, y, bw, M.bar, M.bar / 2); ctx.fill();
+    ctx.fillStyle = d.tint ? "rgba(255,246,233,0.35)" : COLORS.track; roundRect(ctx, P, y, bw, M.bar, M.bar / 2); ctx.fill();
     ctx.fillStyle = COLORS.ink; roundRect(ctx, P, y, bw * clamp(dim.score) / 100, M.bar, M.bar / 2); ctx.fill();
     y += M.row - M.gap;
   }

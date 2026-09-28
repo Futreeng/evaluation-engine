@@ -60,7 +60,7 @@ const enabled = () => process.env.THUMBS_DISABLED !== "true";
 async function fetchAndShrink(url) {
   const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), TIMEOUT);
   try {
-    const res = await fetch(url, { signal: ctl.signal, headers: { "user-agent": "Mozilla/5.0 (compatible; Scalecraft/1.0)", accept: "image/*" } });
+    const res = await fetch(url, { signal: ctl.signal, headers: { "user-agent": "Mozilla/5.0 (compatible; Scalecraft Social/1.0)", accept: "image/*" } });
     if (!res.ok) throw new Error(`status ${res.status}`);
     const buf = Buffer.from(await res.arrayBuffer());
     if (!buf.length) throw new Error("empty");

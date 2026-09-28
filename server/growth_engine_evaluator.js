@@ -16,7 +16,7 @@ const planQuality = require("./growth_engine_plan_quality");
 // Persona prompts for each tier
 const PERSONA_PROMPTS = {
   tier0: {
-    growthScanner: `You are the Growth Scanner for Scalecraft, a social media evaluation for small-business owners.
+    growthScanner: `You are the Growth Scanner for Scalecraft Social, a social media evaluation for small-business owners.
 
 You will be given a business's recent public social media activity. Your job is to find what is ALREADY working and the single highest-leverage opportunity — not a list of problems.
 
@@ -33,7 +33,7 @@ Output, in this exact structure:
 
 Do not soften findings, but stay in "opportunity" framing — you are the optimistic read, the Gap Auditor persona covers what's wrong. If the input data is too sparse to support a real finding, say so explicitly rather than guessing.`,
 
-    gapAuditor: `You are the Gap Auditor for Scalecraft, a social media evaluation for small-business owners.
+    gapAuditor: `You are the Gap Auditor for Scalecraft Social, a social media evaluation for small-business owners.
 
 The four dimension scores have ALREADY been computed from the account's public data (method below). Your job is to explain each score to the owner in one or two plain sentences that cite the actual numbers, and to say what would move it. Do not change, re-derive or dispute the scores.
 
@@ -138,7 +138,7 @@ function planContextBlock(ctx, days = 90) {
 // a ready-to-paste example, a done-when check and a time cost — the part a
 // creator actually needs to act. Three smaller calls keep each response
 // inside the output budget of the fallback models.
-const PLAN_PHASE_PROMPT = `You are the Plan Writer for Scalecraft. A creator has paid for their Growth Plan. You have their public account data, category benchmarks, and the free snapshot (scores + the first move of each 30-day phase). Write phase {{PHASE_RANGE}} ("{{PHASE_LABEL}}") in full: implementation detail for its first move, then the {{MOVE_COUNT}} remaining moves (numbered {{MOVE_FIRST}} to {{MOVE_LAST}}).
+const PLAN_PHASE_PROMPT = `You are the Plan Writer for Scalecraft Social. A creator has paid for their Growth Plan. You have their public account data, category benchmarks, and the free snapshot (scores + the first move of each 30-day phase). Write phase {{PHASE_RANGE}} ("{{PHASE_LABEL}}") in full: implementation detail for its first move, then the {{MOVE_COUNT}} remaining moves (numbered {{MOVE_FIRST}} to {{MOVE_LAST}}).
 
 Be specific to THIS account: use its real posting days, formats, gaps, bio wording, caption themes, best/worst posts and numbers. Every move must cite a specific post, number, day or bio line from the data. No generic advice (no "run a giveaway", "engage with your audience"). Where the profile data shows a field as null or missing, say "empty" or "missing" — never write the word null.
 
@@ -178,7 +178,7 @@ Produce ONLY a JSON object, no prose, no markdown fences:
  "moves":[{"n":{{MOVE_FIRST}},"title":"under 6 words","action":"one imperative sentence, under 25 words","why":"one sentence under 25 words tied to a number, post or bio line from the data","how":["…","…","…"],"example":"…or null","done_when":"…","time":"…"}, … {{MOVE_COUNT}} moves total]}
 Valid JSON only.`;
 
-const PLAN_CALENDAR_PROMPT = `You are the Plan Writer for Scalecraft. Write a 12-week posting calendar for this account, built from its own best-performing formats and subjects.
+const PLAN_CALENDAR_PROMPT = `You are the Plan Writer for Scalecraft Social. Write a 12-week posting calendar for this account, built from its own best-performing formats and subjects.
 
 Handle: {{HANDLE}} ({{PLATFORM}})
 Category: {{CATEGORY}}
@@ -193,7 +193,7 @@ One slot per posting day per week. Formats: reel, carousel, static, story. "sour
 // Post writing (spec 1.12): the next N posts, written from the account's own
 // best posts and the current plan phase, each on a day/time from its best
 // windows. One call for the set; regeneration asks for one post at a time.
-const NEXT_POSTS_PROMPT = `You are the Post Writer for Scalecraft. A creator has paid for their Growth Plan. Write their next {{COUNT}} posts, ready to shoot and post. Every post must come from THIS account's own material and voice: reuse the hooks, subjects, locations, caption style and formats that already perform for them (see best posts), and serve the current plan phase. No generic advice, no invented facts, no numbers that aren't in the data. Scripts are plain wrapped text — no markdown, no bullet points, no code formatting.
+const NEXT_POSTS_PROMPT = `You are the Post Writer for Scalecraft Social. A creator has paid for their Growth Plan. Write their next {{COUNT}} posts, ready to shoot and post. Every post must come from THIS account's own material and voice: reuse the hooks, subjects, locations, caption style and formats that already perform for them (see best posts), and serve the current plan phase. No generic advice, no invented facts, no numbers that aren't in the data. Scripts are plain wrapped text — no markdown, no bullet points, no code formatting.
 
 Handle: {{HANDLE}} ({{PLATFORM}})
 Category: {{CATEGORY}}
@@ -635,13 +635,17 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
     postsLast14d = acts.filter((p) => { const t = +new Date(p.date || p.timestamp); return Number.isFinite(t) && Date.now() - t <= 14 * 86400000; }).length;
     // What the model sees: metrics + one compact row per post. No URLs,
     // thumbnails or full captions — 30 posts must still fit Groq's 8k TPM.
+    // Every date the model sees is the account's own calendar day, so "the Sep 16 reel" means the same
+    // thing on the report, in the hover card and in the plan.
+    const tz = inputParams.tz || "UTC";
+    const localDay = (iso) => planQuality.zonedKey(iso, tz) || iso;
     postSummary = JSON.stringify({
       ...realData, posts: undefined,
-      recent_activity: (realData.recent_activity || []).map((p) => { const o = { d: p.date, t: p.media_type, l: p.likes, c: p.comments }; if (p.video_views) o.v = p.video_views; if (p.saves) o.s = p.saves; if (p.shares) o.sh = p.shares; if (p.caption_preview) o.cap = p.caption_preview.slice(0, 60); return o; }),
+      recent_activity: (realData.recent_activity || []).map((p) => { const o = { d: localDay(p.date), t: p.media_type, l: p.likes, c: p.comments }; if (p.video_views) o.v = p.video_views; if (p.saves) o.s = p.saves; if (p.shares) o.sh = p.shares; if (p.caption_preview) o.cap = p.caption_preview.slice(0, 60); return o; }),
       recent_activity_key: "d=date t=type l=likes c=comments v=views s=saves sh=shares cap=caption start",
     });
     computed = scoreProfile(realData, category); // null for fetchers without the metric shape (Twitter)
-    postInsights = rankPosts(realData.recent_activity || realData.recent_posts);
+    postInsights = rankPosts(realData.recent_activity || realData.recent_posts, { tz });
   } catch (err) {
     console.warn("[Growth Engine] Real data fetch failed:", err.message);
     // No data, no report. A private/missing profile is the owner's to fix; a
@@ -663,8 +667,8 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
     CATEGORY_BENCHMARKS: JSON.stringify(benchmarks),
     POST_INSIGHTS: postInsights
       ? JSON.stringify({ avg_engagement: postInsights.avg_engagement, best_format: postInsights.patterns.best_format, best_day: postInsights.patterns.best_day,
-          top: postInsights.top.map((p) => ({ name: planQuality.postName({ caption: p.caption, type: p.format, posted_at: p.date }), date: String(p.date).slice(0, 10), format: p.format, day: p.weekday, vs_avg: p.vs_avg, caption: p.caption })),
-          bottom: postInsights.bottom.map((p) => ({ name: planQuality.postName({ caption: p.caption, type: p.format, posted_at: p.date }), date: String(p.date).slice(0, 10), format: p.format, day: p.weekday, vs_avg: p.vs_avg, caption: p.caption })) })
+          top: postInsights.top.map((p) => ({ name: planQuality.postName({ caption: p.caption, type: p.format, posted_at: p.date }, tz), date: planQuality.zonedKey(p.date, tz) || String(p.date).slice(0, 10), format: p.format, day: p.weekday, vs_avg: p.vs_avg, caption: p.caption })),
+          bottom: postInsights.bottom.map((p) => ({ name: planQuality.postName({ caption: p.caption, type: p.format, posted_at: p.date }, tz), date: planQuality.zonedKey(p.date, tz) || String(p.date).slice(0, 10), format: p.format, day: p.weekday, vs_avg: p.vs_avg, caption: p.caption })) })
       : "not available",
     COMPUTED_SCORES: computed
       ? JSON.stringify({ overall: computed.overall, dimensions: computed.dimensions.map((d) => ({ label: d.label, score: d.score, evidence: d.evidence, parts: d.parts })) })
@@ -871,8 +875,8 @@ async function evaluateTier1(accountId, inputParams, onStage = () => {}, { tier:
     RECENT_POST_SUMMARY: postSummary, CATEGORY_BENCHMARKS: JSON.stringify(benchmarks), SNAPSHOT_JSON: snapshotJson,
     POST_INSIGHTS: reportBody.post_insights
       ? JSON.stringify({ best_format: reportBody.post_insights.patterns?.best_format, best_day: reportBody.post_insights.patterns?.best_day,
-          top: reportBody.post_insights.top.map((p) => ({ date: String(p.date).slice(0, 10), format: p.format, vs_avg: p.vs_avg, caption: p.caption })),
-          bottom: reportBody.post_insights.bottom.map((p) => ({ date: String(p.date).slice(0, 10), format: p.format, vs_avg: p.vs_avg, caption: p.caption })) })
+          top: reportBody.post_insights.top.map((p) => ({ name: planQuality.postName({ caption: p.caption, type: p.format, posted_at: p.date }, reportBody.tz || "UTC"), date: planQuality.zonedKey(p.date, reportBody.tz || "UTC"), format: p.format, vs_avg: p.vs_avg, caption: p.caption })),
+          bottom: reportBody.post_insights.bottom.map((p) => ({ name: planQuality.postName({ caption: p.caption, type: p.format, posted_at: p.date }, reportBody.tz || "UTC"), date: planQuality.zonedKey(p.date, reportBody.tz || "UTC"), format: p.format, vs_avg: p.vs_avg, caption: p.caption })) })
       : "not available",
   };
   const sys = "You write specific, data-grounded social media growth plans. Output JSON only.";
@@ -1175,7 +1179,7 @@ function nextPostsPrompt(reportBody, { count, regenerate = null } = {}) {
   const others = regenerate != null ? (b.next_posts || []).filter((_, i) => i !== regenerate).map((p) => p.hook).filter(Boolean) : [];
   return interpolateTemplate(NEXT_POSTS_PROMPT, {
     COUNT: count, HANDLE: b.business?.handle || "", PLATFORM: b.business?.platform || "instagram", CATEGORY: b.business?.category || "",
-    POST_INSIGHTS: JSON.stringify({ best_format: pi.patterns?.best_format, best_day: pi.patterns?.best_day, top: (pi.top || []).map((p) => ({ date: String(p.date).slice(0, 10), format: p.format, vs_avg: p.vs_avg, caption: p.caption })), bottom: (pi.bottom || []).map((p) => ({ date: String(p.date).slice(0, 10), format: p.format, vs_avg: p.vs_avg, caption: p.caption })) }),
+    POST_INSIGHTS: JSON.stringify({ best_format: pi.patterns?.best_format, best_day: pi.patterns?.best_day, top: (pi.top || []).map((p) => ({ name: planQuality.postName({ caption: p.caption, type: p.format, posted_at: p.date }, b.tz || "UTC"), date: planQuality.zonedKey(p.date, b.tz || "UTC"), format: p.format, vs_avg: p.vs_avg, caption: p.caption })), bottom: (pi.bottom || []).map((p) => ({ name: planQuality.postName({ caption: p.caption, type: p.format, posted_at: p.date }, b.tz || "UTC"), date: planQuality.zonedKey(p.date, b.tz || "UTC"), format: p.format, vs_avg: p.vs_avg, caption: p.caption })) }),
     BIO: (b.bio || b.profile?.biography || "").slice(0, 300) || "not available",
     PHASE: phase ? `${phase.label} (days ${phase.range}) — first move: ${phase.visible_action}` : "phase 1",
     SLOTS: wk.length ? wk.join(" | ") : "none yet",

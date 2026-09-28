@@ -14,7 +14,7 @@ Stance: **Stop posting into the void. Growth is a system, not luck.**
 
 **H1:** Stop posting into the void.
 
-**Sub:** Growth is a system, not luck. Scalecraft scores your account out of 100 from what you actually post, shows exactly where the points went, and writes the next 90 days — move by move, week by week.
+**Sub:** Growth is a system, not luck. Scalecraft Social scores your account out of 100 from what you actually post, shows exactly where the points went, and writes the next 90 days — move by move, week by week.
 
 **CTA:** Score my account — free
 
@@ -28,7 +28,7 @@ Stance: **Stop posting into the void. Growth is a system, not luck.**
 
 ### Meta
 
-- `<title>`: Scalecraft — Stop posting into the void
+- `<title>`: Scalecraft Social — Stop posting into the void
 - `description`: Growth is a system, not luck. Score your social account out of 100, see exactly why, and get the 90-day plan written from your own posts.
 - `og:title`: Stop posting into the void.
 - `og:description`: Growth is a system, not luck. Your account scored out of 100, explained, with the next 90 days written for you.
@@ -38,7 +38,7 @@ Stance: **Stop posting into the void. Growth is a system, not luck.**
 - Pricing page lede: "Pay when the plan is worth doing." — keep.
 - Report ready email subject: unchanged (it names the score).
 - Share page CTA: "Score my account — free" — keep; add the sub-line "Growth is a system, not luck."
-- Roast card footer: "Get roasted at scalecraft.app" — keep.
+- Roast card footer: "Get roasted at scalecraftsocial.com" — keep.
 
 ### Notes
 

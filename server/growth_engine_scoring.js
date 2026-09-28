@@ -1,7 +1,7 @@
 /**
  * Deterministic dimension scoring.
  *
- * The four Scalecraft scores are computed here from the fetched metrics, so
+ * The four Scalecraft Social scores are computed here from the fetched metrics, so
  * the same profile on the same day always gets the same number. The LLM
  * personas receive these scores and write the explanations and moves; they
  * never set or adjust the numbers.
@@ -227,7 +227,8 @@ function scoreProfile(realData, category) {
  *
  * @param posts  fetcher posts (recent_posts) or formatted recent_activity
  */
-function rankPosts(posts, { top = 3, bottom = 3 } = {}) {
+const weekdayIn = (iso, tz) => { try { return new Intl.DateTimeFormat("en-US", { timeZone: tz || "UTC", weekday: "short" }).format(new Date(iso)); } catch { return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][new Date(iso).getUTCDay()]; } };
+function rankPosts(posts, { top = 3, bottom = 3, tz = "UTC" } = {}) {
   const rows = (posts || [])
     .map((p) => {
       const likes = num(p.like_count ?? p.likes);
@@ -239,7 +240,7 @@ function rankPosts(posts, { top = 3, bottom = 3 } = {}) {
         : String(p.media_type || "").toUpperCase() === "CAROUSEL" ? "carousel" : "static";
       return {
         date, format,
-        weekday: date ? ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][new Date(date).getDay()] : null,
+        weekday: date ? weekdayIn(date, tz) : null,
         likes, comments, views,
         engagement: likes + comments,
         caption: String(p.caption ?? p.caption_preview ?? "").replace(/\s+/g, " ").trim().slice(0, 140),

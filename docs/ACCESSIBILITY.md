@@ -1,6 +1,6 @@
 # Accessibility — WCAG 2.2 AA pass (2026-09-22)
 
-Scalecraft targets **WCAG 2.2 Level AA**. This is what was checked, what changed, and what's still open.
+Scalecraft Social targets **WCAG 2.2 Level AA**. This is what was checked, what changed, and what's still open.
 
 ## How it was checked
 - **Automated:** axe-core 4 (rules tagged wcag2a/wcag2aa/wcag21a/wcag21aa/wcag22aa + best-practice) run in a headless Chromium on every page: landing, pricing, sign in, sign up, forgot/reset, how, business, legal, free report (mock), paid report (real data), sample report, reports page, admin, the public share page, the unsubscribe/opt-out pages, and with the share sheet and cancel dialog open. **0 violations** at the end of the pass (started at ~45 across 9 pages).

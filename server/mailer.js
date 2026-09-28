@@ -3,8 +3,8 @@
  *
  *   RESEND_API_KEY   from resend.com; when unset every send is a no-op that
  *                    logs the subject, so local runs never email anyone
- *   MAIL_FROM        e.g. "Scalecraft <hello@scalecraft.app>" (verified domain)
- *   APP_URL          public origin for links, e.g. https://scalecraft.app
+ *   MAIL_FROM        e.g. "Scalecraft Social <hello@scalecraftsocial.com>" (verified domain)
+ *   APP_URL          public origin for links, e.g. https://scalecraftsocial.com
  *
  * Every email is built here in the Field Guide identity (600px, inline
  * styles). The HTML in server/emails/ is the design reference for these.
@@ -14,7 +14,7 @@ const crypto = require("crypto");
 const geDb = require("./growth_engine_db_select");
 const email = require("./growth_engine_email");
 
-const FROM = process.env.MAIL_FROM || "Scalecraft <onboarding@resend.dev>";
+const FROM = process.env.MAIL_FROM || "Scalecraft Social <onboarding@resend.dev>";
 const APP = (process.env.APP_URL || "http://localhost:3005").replace(/\/$/, "");
 const SUPPORT = process.env.SUPPORT_EMAIL || "";
 
@@ -47,13 +47,13 @@ ${preheader ? `<div style="display:none;max-height:0;overflow:hidden;font-size:1
 <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="max-width:600px;width:100%;background:${F.card};border:1px solid ${F.line};border-radius:24px">
 <tr><td style="padding:20px 28px 18px;border-bottom:1px solid ${F.line}">
   <table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr>
-    ${mark}<td style="padding-left:10px;font-family:${DISPLAY};font-size:18px;font-weight:700;letter-spacing:-0.02em;color:${F.ink}">Scalecraft</td>
+    ${mark}<td style="padding-left:10px;font-family:${DISPLAY};font-size:18px;font-weight:700;letter-spacing:-0.02em;color:${F.ink}">Scalecraft Social</td>
     <td align="right" style="font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:${F.muted};white-space:nowrap">${esc(eyebrow || title)}</td>
   </tr></table>
 </td></tr>
 ${handle ? `<tr><td style="padding:16px 28px 0;font-size:13px;color:${F.muted}">@${esc(handle)}${platform ? ` · ${esc(platform)}` : ""}</td></tr>` : ""}
 <tr><td style="padding:${handle ? "10px" : "28px"} 28px 28px">${inner}</td></tr>
-<tr><td style="padding:16px 28px 6px;border-top:1px solid ${F.line};font-size:12px;line-height:1.7;color:${F.muted}">${footerNote ? esc(footerNote) + "<br>" : ""}Reply to this email and a person answers. <a href="${APP}/#/reports" style="color:${F.muted}">Your reports</a></td></tr>
+<tr><td style="padding:16px 28px 6px;border-top:1px solid ${F.line};font-size:12px;line-height:1.7;color:${F.muted}">${footerNote ? esc(footerNote) + "<br>" : ""}Reply to this email and a person answers. <a href="${APP}/#/reports" style="color:${F.muted}">Your reports</a></td></tr>
 <!--footer-->
 </table></td></tr></table></body></html>`;
 }
@@ -114,7 +114,7 @@ function reportReady({ to, handle, platform, reportId, overall, grade, summary, 
     + (paid ? "" : p("Every move beyond the first, and your 12-week calendar, unlock with the Growth Plan.", "font-size:13px;color:#7A6A57"))
     + (dataWindow ? note(esc(dataWindow), F.card, F.muted) : "");
   const preheader = `${overall} out of 100${lead ? ` — ${lead.label} is the biggest gap` : ""}. First move inside.`;
-  return send({ to, subject: `Your Scalecraft score: ${overall} for @${handle}`, html: layout("Your report is ready", inner, { eyebrow: "Report ready", preheader, handle, platform, tint: lead ? dimColour(lead.label) : null }), tag: "report_ready" });
+  return send({ to, subject: `Your Scalecraft Social score: ${overall} for @${handle}`, html: layout("Your report is ready", inner, { eyebrow: "Report ready", preheader, handle, platform, tint: lead ? dimColour(lead.label) : null }), tag: "report_ready" });
 }
 
 // Day 28 / 58 → "Phase N starts Monday. Anything change?"
@@ -217,7 +217,7 @@ function planEnded({ to, userId, handle, reportId, overall, price }) {
 // Password reset (route wiring is separate).
 function passwordReset({ to, resetUrl }) {
   const inner = h2("Reset your password") + p("This link works once and expires in one hour. If you didn't ask for it, ignore this email.") + button(resetUrl, "Choose a new password");
-  return send({ to, subject: "Reset your Scalecraft password", html: layout("Reset your password", inner, { eyebrow: "Account", preheader: "One link, one hour." }), tag: "password_reset", devLink: resetUrl });
+  return send({ to, subject: "Reset your Scalecraft Social password", html: layout("Reset your password", inner, { eyebrow: "Account", preheader: "One link, one hour." }), tag: "password_reset", devLink: resetUrl });
 }
 
 module.exports = { send, reportReady, F, dimColour, checkin, scoreChanged, planEnded, passwordReset, moment, mondayMove, postReview, winback, annualOffer, moveDoneUrl, optOutUrl, reportUrl, pauseSig, layout, configured: () => email.configured() };
