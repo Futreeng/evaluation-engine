@@ -101,7 +101,8 @@ class BillingManager {
     // Otherwise the plan price (a variant may override Growth's monthly).
     const ent = await geDb.getOrCreateEntitlement(accountId);
     let amount, founder = false;
-    const keeps = ent.currentTier === tier && ent.priceCents != null && !ent.lapsedAt;
+    // A locked price only carries over on the same cycle: a monthly founder asking for annual gets the annual founders price, not $12 a year.
+    const keeps = ent.currentTier === tier && ent.priceCents != null && !ent.lapsedAt && (!ent.billingCycle || ent.billingCycle === cycle);
     if (keeps) amount = ent.priceCents;
     else if (tier === "growth_plan" && (await this.foundersLeft()) > 0) { amount = cycle === "annual" ? plans.FOUNDERS.growth_annual : plans.FOUNDERS.growth_monthly; founder = true; }
     else if (tier === "growth_plan" && priceOverride && cycle === "monthly") amount = priceOverride;
@@ -115,7 +116,7 @@ class BillingManager {
     if (this.isProduction && this.stripe) {
       // Production: use real Stripe (pass promo.stripeCouponId as the coupon).
       // New Price objects per price (P.3) — never edit existing ones.
-      const r = await this._createStripeSubscription(accountId, tier, stripeCustomerId, charged, cycle, promo);
+      const r = await this._createStripeSubscription(accountId, tier, stripeCustomerId, charged, cycle, promo, founder);
       await lock();
       return { ...r, founder, priceCents: amount };
     }
@@ -197,7 +198,57 @@ class BillingManager {
   // entitlement is granted in handleWebhook when Stripe confirms payment. The
   // redirect back is not proof of anything — the customer can close the tab,
   // and the success_url can be visited by hand.
-  async _createStripeSubscription(accountId, tier, customerId, amountInCents, billingCycle, promo = null) {
+  // One Stripe customer per account, created on first checkout and remembered
+  // on the entitlement, so the portal, receipts and later charges all land on
+  // the same customer.
+  async stripeCustomerFor(accountId) {
+    const ent = await geDb.getOrCreateEntitlement(accountId);
+    if (ent.stripeCustomerId) {
+      // A remembered id can point at a customer deleted in the dashboard (or a different mode's key). Check, and start over if so.
+      try { const c = await this.stripe.customers.retrieve(ent.stripeCustomerId); if (!c.deleted) return ent.stripeCustomerId; }
+      catch (e) { if (e.code !== "resource_missing") throw e; }
+      console.warn(`[Billing] Stripe customer ${ent.stripeCustomerId} for ${accountId} no longer exists — creating a new one`);
+    }
+    const user = await geDb.getUserById(accountId).catch(() => null);
+    const c = await this.stripe.customers.create({ email: user?.email || undefined, metadata: { accountId } });
+    if (geDb.setStripeIds) await geDb.setStripeIds(accountId, { customerId: c.id });
+    return c.id;
+  }
+
+  // The line item for a checkout. A dashboard Price (STRIPE_PRICES_JSON, from
+  // scripts/stripe_products.js) is used when its amount and interval match what
+  // the app quoted; otherwise the amount rides on the session itself, attached
+  // to the catalogue product (STRIPE_PRODUCTS_JSON) or an ad-hoc one. Every
+  // product carries a tax code: Managed Payments (Stripe as merchant of record,
+  // the default on our account) refuses a line without one.
+  async stripeLineItem(tier, cycle, amountInCents, founder = false) {
+    const jsonEnv = (k) => { try { return process.env[k] ? JSON.parse(process.env[k]) : {}; } catch { console.warn(`[Billing] ${k} is not valid JSON — ignored`); return {}; } };
+    const priceIds = jsonEnv("STRIPE_PRICES_JSON"), productIds = jsonEnv("STRIPE_PRODUCTS_JSON");
+    const key = founder && tier === "growth_plan" ? "growth_plan_founders" : tier;
+    const id = typeof priceIds[key] === "string" ? priceIds[key] : priceIds[key]?.[cycle];
+    if (id) {
+      try {
+        const price = await this.stripe.prices.retrieve(id);
+        if (price.active && price.unit_amount === amountInCents && price.currency === "usd" && price.recurring?.interval === (cycle === "annual" ? "year" : "month")) return { price: id, quantity: 1 };
+        console.warn(`[Billing] Stripe price ${id} is ${price.unit_amount}/${price.recurring?.interval}; app quoted ${amountInCents}/${cycle} — sending the amount instead`);
+      } catch (e) { console.warn(`[Billing] Stripe price ${id} unreadable (${e.message}) — sending the amount instead`); }
+    }
+    const price_data = { currency: "usd", unit_amount: amountInCents, recurring: { interval: cycle === "annual" ? "year" : "month" } };
+    if (productIds[key] || productIds[tier]) price_data.product = productIds[key] || productIds[tier];
+    else price_data.product_data = { name: `Scalecraft Social — ${plans.TIERS?.[tier]?.name || tier}${founder ? " · founders price" : ""}`, tax_code: process.env.STRIPE_TAX_CODE || "txcd_10103000" };
+    return { price_data, quantity: 1 };
+  }
+
+  // Stripe's customer portal: card on file, invoices, cancel.
+  async portalUrl(accountId) {
+    if (!this.isProduction || !this.stripe) throw Object.assign(new Error("Billing isn't running through Stripe here"), { code: "NOT_STRIPE", status: 404 });
+    const app = String(process.env.APP_URL || "").replace(/\/$/, "");
+    const customer = await this.stripeCustomerFor(accountId);
+    const s = await this.stripe.billingPortal.sessions.create({ customer, return_url: `${app}/#/reports` });
+    return s.url;
+  }
+
+  async _createStripeSubscription(accountId, tier, customerId, amountInCents, billingCycle, promo = null, founder = false) {
     const cycle = billingCycle === "annual" ? "annual" : "monthly";
     const app = String(process.env.APP_URL || "").replace(/\/$/, "");
     if (!app) throw Object.assign(new Error("APP_URL is not set, so Stripe has nowhere to send the customer back to."), { code: "APP_URL_MISSING", status: 500 });
@@ -205,18 +256,10 @@ class BillingManager {
     const session = await this.stripe.checkout.sessions.create({
       mode: "subscription",
       client_reference_id: accountId,
-      customer: customerId || undefined,
+      customer: customerId || (await this.stripeCustomerFor(accountId)),
       allow_promotion_codes: promo?.stripeCouponId ? undefined : true,
       discounts: promo?.stripeCouponId ? [{ coupon: promo.stripeCouponId }] : undefined,
-      line_items: [{
-        quantity: 1,
-        price_data: {
-          currency: "usd",
-          unit_amount: amountInCents,
-          recurring: { interval: cycle === "annual" ? "year" : "month" },
-          product_data: { name: `Scalecraft Social — ${plans.TIERS?.[tier]?.name || tier}` },
-        },
-      }],
+      line_items: [await this.stripeLineItem(tier, cycle, amountInCents, founder)],
       // Both places: the session metadata covers checkout.session.completed,
       // the subscription metadata covers every later invoice and cancellation,
       // which arrive without any reference to the original session.
@@ -480,6 +523,8 @@ class BillingManager {
       // false while production has no real Stripe key: nothing can be charged, so the
       // app shows "join the waitlist" instead of Start buttons. Real checkout replaces it.
       billing_available: !this.mockInProduction,
+      // "stripe": subscribe returns a hosted Checkout URL and the webhook grants. "mock": subscribe grants directly.
+      checkout: this.isProduction && this.stripe ? "stripe" : "mock",
       pause: { months: Array.from({ length: Number(process.env.PAUSE_MAX_MONTHS || 3) }, (_, i) => i + 1) },
       maintenance: { ...plans.publicTier("maintenance"), hidden: true },
       tiers: [free, growth, pro],

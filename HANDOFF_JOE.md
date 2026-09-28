@@ -124,11 +124,7 @@ Discovery for competitors, new signals folded into the existing dimensions.
 
 1. **Merge #7** → Render redeploys → set the env below → `SMOKE_BASE=https://scalecraft.onrender.com node server/scripts/smoke.js` (or dispatch the `smoke` job in `.github/workflows/ci.yml`). Then re-run `scripts/baselines_sync.js` once for the scorer change.
 1b. **A real primary model.** Claude is unconfigured on Render (401) and the Gemini/Groq free tiers refused five runs in a row. Put a paid key on one of them before any customer runs a paid report; the pipeline degrades to a partial plan without one.
-2. **Stripe for real** — `growth_engine_billing.js` is mock unless `STRIPE_API_KEY` looks real. **Pricing add-on (P.1–P.7) is in:** Growth $19/$190, Pro $39/$390, Maintenance $5, founders $12/$108 for the first 400 (live counter), pre-update subscribers keep their price, weekly fair-use limits, downgrades at period end. All of it in `growth_engine_plans.js` (env overrides `PLAN_PRICES_JSON` / `PLAN_LIMITS_JSON`). In Stripe create **new** Price objects for 1900/19000/3900/39000/500 and founders 1200/10800 — never edit or delete the existing $12 prices. Stubs for you, each already receiving the right arguments (`priceCents`, `cycle`, `founder` are on the entitlement after every subscribe):
-   - `_createStripeSubscription` (monthly and annual; annual amount is precomputed).
-   - `pauseSubscription` / `unpauseSubscription` already call `subscriptions.update({ pause_collection… })` when live — just needs the subscription id stored on the entitlement.
-   - `switchTier` throws when live: swap the subscription item to the maintenance / growth_plan price ids.
-   - Webhook `POST /billing/webhook` is a stub: payment failed → `setCancelAt(accountId, now)`.
+2. **Stripe — your #23 is in; the account needed three more things** (`docs/STRIPE_SETUP.md`): the account has Managed Payments on (Stripe as merchant of record), so the SDK is now v22 and every product carries a tax code; the catalogue exists in the sandbox from `scripts/stripe_products.js` with ids in `STRIPE_PRODUCTS_JSON` / `STRIPE_PRICES_JSON`; a Stripe customer per account and the portal. Haron is putting the sandbox key, webhook secret and the two id lines on Render. Still yours: `switchTier` when live (swap the subscription item's price; downgrade at period end), the one-time plan through Checkout if we keep selling it, and the free Render plan's cold start on webhooks before live money.
 3. **Resend** — `RESEND_API_KEY`, verified domain in `MAIL_FROM`, `APP_URL` for links, and the postal address in `EMAIL_POSTAL_ADDRESS` (Haron is sending it). Until then every send is a log line, including password reset and the one-tap Monday link emails.
 4. **Thumbnail storage** — `THUMB_STORAGE=local` works on Render but the disk is ephemeral; `THUMB_STORAGE=s3` + `npm i @aws-sdk/client-s3` for anything durable. Your call.
 5. **Official API access** — see the section above; the connect flow is built once the Meta app and test users exist.
@@ -137,7 +133,8 @@ Discovery for competitors, new signals folded into the existing dimensions.
 
 ### Render env (beyond what's already there)
 
-`SUPPORT_EMAIL=hello@futreeng.com` · `MAIL_FROM="Scalecraft Social <hello@send.futreeng.com>"` · `REPLY_TO=hello@futreeng.com` · `EMAIL_POSTAL_ADDRESS` · `APP_URL=https://scalecraft.onrender.com` (or the domain) · `ADMIN_EMAILS` (you + Haron) · `ADMIN_TOKEN` · promo codes only for comps/campaigns (`node scripts/promo.js create …`) — founders pricing is automatic, no code · `SCRAPE_POSTS=30` · `BASELINE_MIN_N=10`. Everything else has a default; `server/.env.example` documents every knob by spec item.
+`SUPPORT_EMAIL=hello@futreeng.com` · `MAIL_FROM="Scalecraft Social <hello@send.futreeng.com>"` · `REPLY_TO=hello@futreeng.com` · `EMAIL_POSTAL_ADDRESS` · `APP_URL=https://scalecraft.onrender.com` (or the domain) · `ADMIN_EMAILS` (you + Haron) · `ADMIN_TOKEN` · promo codes only for comps/campaigns (`node scripts/promo.js create …`) — founders pricing is automatic, no code · `SCRAPE_POSTS=30` · `BASELINE_MIN_N=10`. Everything else has a default; `server/.env.example` documents every knob by spec item.
+
 
 Cost guardrails already on: `PAID_RUNS_PER_DAY`, `COMPETITOR_PULLS_PER_DAY`, `FREE_RUNS_PER_DAY_GLOBAL`, `EVALS_PER_IP_PER_HOUR`, `ROASTS_PER_IP_PER_HOUR`, `POST_REVIEW_*`, `WINBACK_BATCH`. Every scrape and LLM call lands in `growth_engine_costs`; `#/admin` shows spend vs revenue.
 

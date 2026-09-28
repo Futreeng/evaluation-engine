@@ -1142,6 +1142,12 @@ router.get("/billing/estimate", async (req, res) => {
   }
 });
 
+// Stripe's customer portal: card on file, invoices, cancel.
+router.post("/billing/portal", authMiddleware, async (req, res) => {
+  try { res.json({ url: await billingManager.portalUrl(req.user.id) }); }
+  catch (err) { sendError(res, err.status || 500, err.code || "PORTAL_ERROR", err.message); }
+});
+
 // Stripe webhook. This endpoint is public and grants paid tiers, so the
 // signature is the only thing standing between it and a forged
 // "payment succeeded". Without STRIPE_WEBHOOK_SECRET we refuse outright
