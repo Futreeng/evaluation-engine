@@ -1,4 +1,4 @@
-# Where Scalecraft stands — 27 Sep 2026
+# Where Scalecraft Social stands — 27 Sep 2026
 
 Written for Haron. Plain language on the backend parts; the sections marked **yours** are the
 ones that need you specifically.
@@ -7,7 +7,7 @@ ones that need you specifically.
 
 ## The short version
 
-Scalecraft generates reports and now emails them to users. That works end to end, confirmed on
+Scalecraft Social generates reports and now emails them to users. That works end to end, confirmed on
 production tonight with a real report and a real inbox.
 
 It cannot take money. Not "the payment page needs polish" — no payment code was ever written.
@@ -44,7 +44,7 @@ recorded it as a real sale — so any conversion numbers you've seen are wrong.
 That hole is closed now: the server refuses paid flows instead of giving the product away.
 
 But closing it isn't the same as fixing it. The code that would actually charge a card is an
-empty stub — it was never built. **Scalecraft cannot accept a payment today.** Building it is
+empty stub — it was never built. **Scalecraft Social cannot accept a payment today.** Building it is
 backend work (Stripe, webhooks, making sure nobody gets double-charged or charged without
 getting a report) and it sits with Joe.
 
@@ -79,7 +79,7 @@ from the outside, and it's the kind of thing a tester would report as "it just h
 2. **Email templates** — they're live and going to real inboxes. If the design isn't what you
    want, now is cheap; after they're in people's inboxes it isn't. They're in `server/emails/`,
    and Joe can send you a real one to look at.
-3. **The from-address.** Mail shows as "Scalecraft" from `hello@send.futreeng.com`. Nobody reads
+3. **The from-address.** Mail shows as "Scalecraft Social" from `hello@send.futreeng.com`. Nobody reads
    replies there — replies bounce. Support goes to `hello@futreeng.com`. Say if you'd rather
    that was different; it's a one-line change now and a mess later.
 

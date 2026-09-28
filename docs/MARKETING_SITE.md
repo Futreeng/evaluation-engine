@@ -50,8 +50,8 @@ score, the band bar and the top-quartile cadence, and the CTA into the app.
 Link into the app with UTM parameters and/or a `src` tag:
 
 ```
-https://scalecraft.app/?utm_source=marketing&utm_medium=blog&utm_campaign=state-of-creators&src=joe-site
-https://scalecraft.app/?src=joe-site#/pricing
+https://scalecraftsocial.com/?utm_source=marketing&utm_medium=blog&utm_campaign=state-of-creators&src=joe-site
+https://scalecraftsocial.com/?src=joe-site#/pricing
 ```
 
 What happens:

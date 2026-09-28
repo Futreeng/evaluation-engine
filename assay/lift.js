@@ -5,7 +5,7 @@
  * improve more than comparable subjects who were offered it and did not?
  *
  * Everything here is deterministic arithmetic over observations. No model
- * decides a number. That is the same rule the Scalecraft scorer keeps, and it
+ * decides a number. That is the same rule the Scalecraft Social scorer keeps, and it
  * matters more here: a measurement layer that can be argued with is worthless.
  */
 

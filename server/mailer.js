@@ -3,8 +3,8 @@
  *
  *   RESEND_API_KEY   from resend.com; when unset every send is a no-op that
  *                    logs the subject, so local runs never email anyone
- *   MAIL_FROM        e.g. "Scalecraft <hello@scalecraft.app>" (verified domain)
- *   APP_URL          public origin for links, e.g. https://scalecraft.app
+ *   MAIL_FROM        e.g. "Scalecraft Social <hello@scalecraftsocial.com>" (verified domain)
+ *   APP_URL          public origin for links, e.g. https://scalecraftsocial.com
  *
  * Every email is built here in the Field Guide identity (600px, inline
  * styles). The HTML in server/emails/ is the design reference for these.
@@ -14,7 +14,7 @@ const crypto = require("crypto");
 const geDb = require("./growth_engine_db_select");
 const email = require("./growth_engine_email");
 
-const FROM = process.env.MAIL_FROM || "Scalecraft <onboarding@resend.dev>";
+const FROM = process.env.MAIL_FROM || "Scalecraft Social <onboarding@resend.dev>";
 const APP = (process.env.APP_URL || "http://localhost:3005").replace(/\/$/, "");
 const SUPPORT = process.env.SUPPORT_EMAIL || "";
 
@@ -32,7 +32,7 @@ function layout(title, inner, { footerNote, userId } = {}) {
 <body style="margin:0;background:#FFF6E9;font-family:'Instrument Sans',Helvetica,Arial,sans-serif;color:#2A2118">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#FFF6E9"><tr><td align="center" style="padding:24px 12px">
 <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="max-width:600px;width:100%;background:#FFFDF8;border:1px solid #EADFCB;border-radius:24px;overflow:hidden">
-<tr><td style="padding:22px 28px;border-bottom:1px solid #EADFCB;font-family:'Bricolage Grotesque',Helvetica,Arial,sans-serif;font-size:18px;font-weight:700;letter-spacing:-0.02em">Scalecraft</td></tr>
+<tr><td style="padding:22px 28px;border-bottom:1px solid #EADFCB;font-family:'Bricolage Grotesque',Helvetica,Arial,sans-serif;font-size:18px;font-weight:700;letter-spacing:-0.02em">Scalecraft Social</td></tr>
 <tr><td style="padding:28px">${inner}</td></tr>
 <tr><td style="padding:18px 28px 6px;font-size:12px;line-height:1.7;color:#7A6A57">${footerNote ? esc(footerNote) + " · " : ""}<a href="${APP}/#/reports" style="color:#7A6A57">Your reports</a></td></tr>
 <!--footer-->
@@ -65,7 +65,7 @@ function reportReady({ to, handle, reportId, overall, grade, summary, firstMove,
     + (firstMove ? moveCard("MOVE 01 · THIS WEEK", firstMove.action, firstMove.why) : "")
     + button(url, paid ? "Open your Growth Plan" : "Open your report")
     + (paid ? "" : p("Every move beyond the first, and your 12-week calendar, unlock with the Growth Plan."));
-  return send({ to, subject: `Your Scalecraft score: ${overall} for @${handle}`, html: layout("Your report is ready", inner), tag: "report_ready" });
+  return send({ to, subject: `Your Scalecraft Social score: ${overall} for @${handle}`, html: layout("Your report is ready", inner), tag: "report_ready" });
 }
 
 // Day 28 / 58 → "Phase N starts Monday. Anything change?"
@@ -166,7 +166,7 @@ function planEnded({ to, userId, handle, reportId, overall, price }) {
 // Password reset (route wiring is separate).
 function passwordReset({ to, resetUrl }) {
   const inner = h2("Reset your password") + p("This link works once and expires in one hour. If you didn't ask for it, ignore this email.") + button(resetUrl, "Choose a new password");
-  return send({ to, subject: "Reset your Scalecraft password", html: layout("Reset your password", inner), tag: "password_reset", devLink: resetUrl });
+  return send({ to, subject: "Reset your Scalecraft Social password", html: layout("Reset your password", inner), tag: "password_reset", devLink: resetUrl });
 }
 
 module.exports = { send, reportReady, checkin, scoreChanged, planEnded, passwordReset, moment, mondayMove, postReview, winback, annualOffer, moveDoneUrl, optOutUrl, reportUrl, pauseSig, layout, configured: () => email.configured() };

@@ -19,7 +19,7 @@ function fonts() {
 const DISPLAY = '"Bricolage Grotesque", "Instrument Sans", Helvetica, Arial, sans-serif';
 const SANS = '"Instrument Sans", Helvetica, Arial, sans-serif';
 const COLORS = { bg: "#D2603A", ink: "#FFF6E9", track: "#E9977B" };
-const SITE = (process.env.CARD_SITE_LABEL || (process.env.APP_URL || "scalecraft.app").replace(/^https?:\/\//, "")).replace(/\/$/, "");
+const SITE = (process.env.CARD_SITE_LABEL || (process.env.APP_URL || "scalecraftsocial.com").replace(/^https?:\/\//, "")).replace(/\/$/, "");
 const NICHES = { fitness_creator: "Fitness", food_cooking: "Food & Cooking", fashion: "Fashion", beauty_skincare: "Beauty & Skincare", travel: "Travel", comedy_entertainment: "Comedy", education_howto: "Education", lifestyle_vlog: "Lifestyle", music: "Music", gaming: "Gaming", tech_gadgets: "Tech", finance_business: "Finance", parenting_family: "Parenting", art_design: "Art & Design", sports: "Sports", pets: "Pets", other: "Creator" };
 const nicheName = (k) => NICHES[k] || String(k || "").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) || "Creator";
 const clamp = (n) => Math.max(0, Math.min(100, Number(n) || 0));
@@ -48,7 +48,7 @@ function drawScore(ctx, W, H, d, size) {
   } else {
     ctx.font = dsp(M.num); ctx.fillText(String(d.overall), P - 14, y);
     y += M.num * 1.02;
-    ctx.font = sans(M.label, 600); ctx.fillText("My Scalecraft score", P, y); y += M.label * 1.45;
+    ctx.font = sans(M.label, 600); ctx.fillText("My Scalecraft Social score", P, y); y += M.label * 1.45;
     if (Number.isFinite(d.niche_avg)) { ctx.font = sans(M.sub, 500); ctx.globalAlpha = 0.85; ctx.fillText(`${nicheName(d.niche)} average ${Math.round(d.niche_avg)}`, P, y); ctx.globalAlpha = 1; y += M.sub * 1.5; }
     y += sq ? 14 : 30;
   }

@@ -1,10 +1,10 @@
-/* Scalecraft — creator-first front end over the Growth Engine API.
+/* Scalecraft Social — creator-first front end over the Growth Engine API.
    Design: "Field Guide" (Claude Design batch 1).
    Routes: #/  #/evaluating/:jobId  #/report/:reportId  #/pricing  #/signin  #/signup  #/reports  #/business */
 (function () {
   'use strict';
   const CFG = window.SCALECRAFT_CONFIG || {};
-  // Promo code from a link: scalecraft.app/?promo=CODE or #/pricing?promo=CODE.
+  // Promo code from a link: scalecraftsocial.com/?promo=CODE or #/pricing?promo=CODE.
   (() => { try {
     const fromSearch = new URLSearchParams(location.search).get('promo');
     const fromHash = new URLSearchParams((location.hash.split('?')[1] || '')).get('promo');
@@ -190,7 +190,7 @@
   function renderHeader(kind) {
     $header.innerHTML = h`
       <div class="wrap"><div class="topbar">
-        <a class="brand" href="#/">Scalecraft</a>
+        <a class="brand" href="#/">Scalecraft Social</a>
         <nav class="nav">
           ${token()
             ? raw(h`${lget('sc_path_home', null) ? raw(h`<a href="#/path/${lget('sc_path_home', '')}" class="${kind === 'path' ? 'strong' : ''}">Path</a>`) : ''}<a href="#/reports" class="${kind === 'reports' ? 'strong' : ''}">Reports</a><a href="#/progress" class="${kind === 'progress' ? 'strong' : ''}">Progress</a>${lget('sc_admin', false) ? raw(h`<a href="#/admin" class="${kind === 'admin' ? 'strong' : ''}">Admin</a>`) : ''}<a href="#" data-action="signout">Sign out</a>`)
@@ -203,7 +203,7 @@
   const footer = () => h`<div class="wrap"><div class="footer">
     <a href="#/how">How the score works</a><a href="#/business">For businesses</a><a href="#/pricing">Pricing</a>
     <a href="#/legal/terms">Terms</a><a href="#/legal/privacy">Privacy</a><a href="#/legal/cookies">Cookies</a>${supportEmail() ? raw(h`<a href="mailto:${supportEmail()}">Contact</a>`) : ''}
-    <span style="margin-left:auto">© ${new Date().getFullYear()} Scalecraft</span>
+    <span style="margin-left:auto">© ${new Date().getFullYear()} Scalecraft Social</span>
   </div></div>`;
 
   // ------------------------------------------------------------ shared pieces
@@ -259,7 +259,7 @@
         <section class="hero">
           <div class="l">
             <h1>Stop posting into the void.</h1>
-            <p class="sub">Growth is a system, not luck. Scalecraft scores your account out of 100 from what you actually post, shows exactly where the points went, and writes the next 90 days — move by move, week by week.</p>
+            <p class="sub">Growth is a system, not luck. Scalecraft Social scores your account out of 100 from what you actually post, shows exactly where the points went, and writes the next 90 days — move by move, week by week.</p>
             <form class="darkform" id="evalForm" novalidate>
               <div class="ql formlead">Score your account. See exactly why. Get the plan.</div>
               <div class="steps2" aria-hidden="true"><span class="on"></span><span></span></div>
@@ -567,7 +567,7 @@
     } else {
       ctx.font = dsp(size === 'square' ? 420 : 520); ctx.fillText(String(s.overall), P - 14, y);
       y += size === 'square' ? 420 : 520;
-      ctx.font = sans(48, 600); ctx.fillText('My Scalecraft score', P, y); y += 110;
+      ctx.font = sans(48, 600); ctx.fillText('My Scalecraft Social score', P, y); y += 110;
     }
     const bw = W - P * 2;
     for (const d of s.dims) {
@@ -579,7 +579,7 @@
       y += 78;
     }
     ctx.font = sans(34, 500); ctx.globalAlpha = .85;
-    ctx.fillText(`${fmtDate(s.date)}  ·  scored by scalecraft`, P, H - P - 30); ctx.globalAlpha = 1;
+    ctx.fillText(`${fmtDate(s.date)}  ·  scored by scalecraft social`, P, H - P - 30); ctx.globalAlpha = 1;
   }
   function roundRect(ctx, x, y, w, hh, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + hh, r); ctx.arcTo(x + w, y + hh, x, y + hh, r); ctx.arcTo(x, y + hh, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
 
@@ -618,7 +618,7 @@
     y += sq ? 20 : 40; ctx.font = `600 ${sq ? 40 : 52}px Inter, system-ui, sans-serif`; ctx.fillText(m.line || '', P, y); y += (sq ? 40 : 52) * 1.7;
     ctx.font = `700 ${sq ? 150 : 240}px Inter, system-ui, sans-serif`; ctx.fillText(String(m.score ?? s.overall), P - 8, y);
     ctx.font = `600 ${sq ? 32 : 40}px Inter, system-ui, sans-serif`; ctx.fillText('MY SCALECRAFT SCORE', P + (sq ? 220 : 340), y + (sq ? 100 : 160));
-    ctx.font = `500 ${sq ? 28 : 34}px Inter, system-ui, sans-serif`; ctx.fillText(`${fmtDate(m.at || Date.now())} · Score yours at scalecraft.app`, P, sq ? H - 62 : H - P - 30);
+    ctx.font = `500 ${sq ? 28 : 34}px Inter, system-ui, sans-serif`; ctx.fillText(`${fmtDate(m.at || Date.now())} · Score yours at scalecraftsocial.com`, P, sq ? H - 62 : H - P - 30);
   }
   function openShareSheet(report, moment = null) {
     const s = { handle: report.business?.handle, platform: report.business?.platform, niche: report.business?.category, date: report.created_at, overall: report.scores.overall, dims: report.scores.dimensions };
@@ -658,11 +658,11 @@
     const toBlob = async () => { if (share) { try { const r = await fetch(share.png[size]); if (r.ok) return await r.blob(); } catch { } } return new Promise(r => canvas.toBlob(r, 'image/png')); };
     el.querySelector('[data-share=save]').addEventListener('click', async () => {
       if (report.report_id !== 'sample') track('card_downloaded', { size }, report.report_id);
-      const blob = await toBlob(); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `scalecraft-${s.handle}-${size}.png`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      const blob = await toBlob(); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `scalecraftsocial-${s.handle}-${size}.png`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
     });
     el.querySelector('[data-share=post]').addEventListener('click', async () => {
-      const blob = await toBlob(); const file = new File([blob], `scalecraft-${s.handle}.png`, { type: 'image/png' });
-      if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file], text: moment ? (moment.kind === 'roast' ? `I got roasted by Scalecraft: “${moment.title}”` : `${moment.title} — ${moment.line} on Scalecraft`) : `My account scored ${s.overall}/100 on Scalecraft`, url: share ? share.url : undefined }); return; } catch { } }
+      const blob = await toBlob(); const file = new File([blob], `scalecraftsocial-${s.handle}.png`, { type: 'image/png' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file], text: moment ? (moment.kind === 'roast' ? `I got roasted by Scalecraft Social: “${moment.title}”` : `${moment.title} — ${moment.line} on Scalecraft Social`) : `My account scored ${s.overall}/100 on Scalecraft Social`, url: share ? share.url : undefined }); return; } catch { } }
       el.querySelector('[data-share=save]').click(); toast('Saved — post it from your camera roll.');
     });
     el.querySelector('[data-share=copy]').addEventListener('click', async () => {
@@ -1351,7 +1351,7 @@
   function viewSignin() {
     renderHeader('signin');
     const next = sget('sc_next', '#/');
-    $view.innerHTML = h`<div class="wrap"><div class="authwrap"><div class="brandname">Scalecraft</div>
+    $view.innerHTML = h`<div class="wrap"><div class="authwrap"><div class="brandname">Scalecraft Social</div>
       ${sget('sc_limit_msg', null) ? raw(h`<div class="notice" style="margin-top:16px">${sget('sc_limit_msg', '')}</div>`) : ''}
       <form class="card lightform" id="signinForm" novalidate><h1>Sign in</h1>
         <div class="field"><label for="siEmail">Email</label><input id="siEmail" type="email" name="email" autocomplete="email" placeholder="you@email.com" value="${sget('sc_form', {}).email || ''}"></div>
@@ -1377,7 +1377,7 @@
   function viewSignup() {
     renderHeader('signup');
     const next = sget('sc_next', '#/');
-    $view.innerHTML = h`<div class="wrap"><div class="authwrap"><div class="brandname">Scalecraft</div>
+    $view.innerHTML = h`<div class="wrap"><div class="authwrap"><div class="brandname">Scalecraft Social</div>
       <form class="card lightform" id="signupForm" novalidate><h1>Create account</h1>
         <div class="field"><label for="suName">Name or handle</label><input id="suName" type="text" name="company_name" placeholder="@yourhandle" autocapitalize="none"></div>
         <div class="field"><label for="suEmail">Email</label><input id="suEmail" type="email" name="email" autocomplete="email" placeholder="you@email.com" value="${sget('sc_form', {}).email || ''}"></div>
@@ -1543,7 +1543,7 @@
   function viewForgot() {
     renderHeader('signin');
     const last = sget('sc_forgot_email', '');
-    $view.innerHTML = h`<div class="wrap"><div class="authwrap"><div class="brandname">Scalecraft</div><form class="card lightform" id="forgotForm" novalidate>
+    $view.innerHTML = h`<div class="wrap"><div class="authwrap"><div class="brandname">Scalecraft Social</div><form class="card lightform" id="forgotForm" novalidate>
         <h1>Reset your password</h1>
         <p class="sub">Type the email you signed up with. If it has an account, we'll send a link that works once, for an hour.</p>
         <div class="field"><label for="fgEmail">Email</label><input id="fgEmail" type="email" name="email" autocomplete="email" value="${last}" placeholder="you@example.com"></div>
@@ -1562,7 +1562,7 @@
     renderHeader('signin');
     const tokenParam = new URLSearchParams(location.hash.split('?')[1] || '').get('token') || '';
     if (!tokenParam) { $view.innerHTML = h`<div class="center-msg"><h2>This reset link is missing its code.</h2><a href="#/forgot">Request a new one</a></div>`; return; }
-    $view.innerHTML = h`<div class="wrap"><div class="authwrap"><div class="brandname">Scalecraft</div><form class="card lightform" id="resetForm" novalidate>
+    $view.innerHTML = h`<div class="wrap"><div class="authwrap"><div class="brandname">Scalecraft Social</div><form class="card lightform" id="resetForm" novalidate>
         <h2>Choose a new password</h2>
         <div class="field"><label for="rsPass">New password</label><input id="rsPass" type="password" name="password" autocomplete="new-password" placeholder="At least 6 characters"></div>
         <div class="field"><label for="rsPass2">Again</label><input id="rsPass2" type="password" name="password2" autocomplete="new-password"></div>
@@ -1938,8 +1938,8 @@
   // ------------------------------------------------------------ legal (batch 3 template; copy is draft)
   const LEGAL = {
     terms: { title: 'Terms of Service', sections: [
-      ['What Scalecraft does', 'Scalecraft reads a public social media account, scores it out of 100 across four dimensions, and writes a plan of suggested moves. We are a measurement and recommendation service. We do not guarantee growth, reach, followers, sales or any other outcome.'],
-      ['Eligibility', 'You must be 18 or over to use Scalecraft. You may score an account you hold, or one you have the account holder’s consent to score.'],
+      ['What Scalecraft Social does', 'Scalecraft Social reads a public social media account, scores it out of 100 across four dimensions, and writes a plan of suggested moves. We are a measurement and recommendation service. We do not guarantee growth, reach, followers, sales or any other outcome.'],
+      ['Eligibility', 'You must be 18 or over to use Scalecraft Social. You may score an account you hold, or one you have the account holder’s consent to score.'],
       ['Your account', 'Keep your password to yourself. You are responsible for what happens under your account. Tell us at once if you think someone else has access to it.'],
       ['Free tier limits', 'One free Snapshot per email address. A second evaluation requires an account and a paid plan.'],
       ['Subscriptions, billing and refunds', 'Paid plans renew monthly or annually until cancelled. Billing is handled by Stripe; we never see your full card details. You can cancel in two clicks from your settings and keep access until the end of the period you paid for. If the plan is not useful in the first seven days, reply to any email from us and we refund it.' + (supportEmail() ? ` Questions about billing: ${supportEmail()}.` : '')],
@@ -1959,7 +1959,7 @@
       ['Retention', 'Reports are kept while your account exists. Delete your account from settings and they go with it. Anonymous free snapshots are kept for 90 days.'],
       ['Your rights', 'Access, correction and deletion of your data, on request or from settings. If you are in the EU/UK or California, the rights in GDPR and CCPA apply and we honour them. [Counsel to confirm disclosures.]'],
       ['Cookies', 'See the Cookie Notice.'],
-      ['Children', 'Scalecraft is not for anyone under 18.'],
+      ['Children', 'Scalecraft Social is not for anyone under 18.'],
       ['Changes and contact', 'We will email you before a material change. Questions: reply to any email from us.']
     ] },
     cookies: { title: 'Cookie Notice', sections: [
@@ -1967,7 +1967,7 @@
       ['Preferences', 'Your billing toggle and a few display settings, stored in your browser.'],
       ['Analytics', '[None yet — if we add a tool, we will name it here.]'],
       ['Advertising', 'None. We do not run advertising cookies.'],
-      ['How to control them', 'Clear your browser storage for scalecraft.com, or sign out.']
+      ['How to control them', 'Clear your browser storage for scalecraftsocial.com, or sign out.']
     ] },
     use: { title: 'Acceptable Use', sections: [
       ['Do not', 'Score an account you intend to harass. Scrape, resell or redistribute our scores, plans or calendars. Attempt to reverse the engine or build a competing dataset from it. Use the service for anyone under 18 without consent.'],

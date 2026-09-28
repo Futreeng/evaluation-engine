@@ -1,4 +1,4 @@
-// Scalecraft mock API — serves the @sunrisefitnessbk sample from the design
+// Scalecraft Social mock API — serves the @sunrisefitnessbk sample from the design
 // through the same routes as the real Growth Engine backend, so app.js needs
 // no branches. Installed as window.scalecraftMockFetch(path, init) → Response-like.
 (function () {

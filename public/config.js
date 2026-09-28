@@ -1,4 +1,4 @@
-// Scalecraft runtime config.
+// Scalecraft Social runtime config.
 //
 // Mock mode (sample data, no backend) is OFF by default. Turn it on with
 // `?mock=1` on the URL (sticks for the tab; `?mock=0` turns it off), or list a
