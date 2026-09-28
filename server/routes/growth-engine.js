@@ -773,7 +773,7 @@ router.post("/reports/:reportId/unlock", authMiddleware, async (req, res) => {
     if (promo) events.track("promo_applied", { ...events.attribution(req), props: { code: promo.code, product: "plan_unlock" } });
     res.json({ job_id: jobId, status: "queued", tier: "growth_plan", one_time: true, payment: { id: payment.paymentId, amount: payment.amountFormatted } });
   } catch (err) {
-    sendError(res, 500, "UNLOCK_ERROR", err.message);
+    sendError(res, err.status || 500, err.code || "UNLOCK_ERROR", err.message);
   }
 });
 
@@ -1105,7 +1105,7 @@ router.post("/billing/subscribe", authMiddleware, validateSubscriptionRequest, a
 
     res.json(result);
   } catch (err) {
-    sendError(res, 500, "SUBSCRIPTION_ERROR", err.message);
+    sendError(res, err.status || 500, err.code || "SUBSCRIPTION_ERROR", err.message);
   }
 });
 

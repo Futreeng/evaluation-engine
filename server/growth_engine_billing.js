@@ -39,6 +39,12 @@ class BillingManager {
     this.stripeApiKey = looksReal ? stripeApiKey : null;
     this.isProduction = looksReal;
 
+    // Mock mode grants a paid tier without taking a payment. That is correct
+    // for development and a giveaway in production, so refuse paid flows there
+    // rather than hand out the product. Free tiers and $0 promos still work.
+    this.mockInProduction = !looksReal && process.env.NODE_ENV === "production";
+    if (this.mockInProduction) console.warn("[Billing] production without a real Stripe key — paid flows will be refused, not mocked");
+
     if (this.isProduction) {
       // Initialize Stripe SDK in production
       try {
@@ -65,6 +71,7 @@ class BillingManager {
       console.log(`[Billing] ${product} free via ${promo?.code} for ${accountId}`);
       return { paymentId, product, amountInCents: 0, amountFormatted: "$0.00", status: "succeeded", free: true, promo: promo?.code || null };
     }
+    if (this.mockInProduction) throw Object.assign(new Error("Billing isn't available yet — no payment can be taken, so we won't unlock this."), { code: "BILLING_UNAVAILABLE", status: 503 });
     if (this.isProduction && this.stripe) {
       const intent = await this.stripe.paymentIntents.create({ amount: cents, currency: "usd", customer: stripeCustomerId || undefined, metadata: { accountId, product, promo: promo?.code || "" } });
       return { paymentId: intent.id, product, amountInCents: cents, amountFormatted: fmt, status: intent.status, promo: promo?.code || null };
@@ -86,6 +93,7 @@ class BillingManager {
     }
 
     if (!TIER_PRICING[tier]) throw new Error(`Unknown tier: ${tier}`);
+    if (this.mockInProduction) throw Object.assign(new Error("Billing isn't available yet — no payment can be taken, so we won't start a plan."), { code: "BILLING_UNAVAILABLE", status: 503 });
     const cycle = billingCycle === "annual" ? "annual" : "monthly";
 
     // P.3: a current subscriber who re-subscribes without lapsing keeps their price.
