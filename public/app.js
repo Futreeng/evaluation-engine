@@ -308,6 +308,7 @@
                 <button class="btn" type="submit">Score my account — free</button>
                 <button class="btn ghost light sm" type="button" data-prev-step>Back</button>
                 <div class="reassure">A few minutes · We email you when it's ready</div>
+                <div class="reassure fine">One free Snapshot per account and per email. Scoring the same account again is part of a Growth Plan.</div>
               </div>
               </div>
             </form>
@@ -425,7 +426,11 @@
       if (e.status === 402 && e.body?.code === 'FREE_LIMIT_REACHED') {
         sset('sc_intent_tier', e.body.upgrade_tier || 'growth_plan');
         sset('sc_limit_msg', e.body.message || e.message);
-        if (e.body.report_id) { toast(`@${payload.handle} was scored on ${fmtDate(e.body.generated_at)} — here it is.`); go('#/report/' + encodeURIComponent(e.body.report_id)); return; }
+        // A toast vanishes in seconds and the report we land on looks exactly
+        // like a fresh one, so people assume a new run happened and wait for an
+        // email that was never going to come. Flag the report so it can say so
+        // on the page itself.
+        if (e.body.report_id) { sset('sc_existing_report', { id: e.body.report_id, handle: payload.handle, at: e.body.generated_at || null }); toast(`@${payload.handle} was scored on ${fmtDate(e.body.generated_at)} — here it is.`); go('#/report/' + encodeURIComponent(e.body.report_id)); return; }
         go(token() ? '#/pricing' : '#/signin');
         return;
       }
@@ -869,10 +874,16 @@
     if (isSample) sset('sc_once_price', oneTime);
 
     if (!isSample && !sget('sc_viewed_' + report.report_id, false)) { sset('sc_viewed_' + report.report_id, true); track('report_viewed', { tier: report.tier, paid }, report.report_id); }
+    // Landed here because the free Snapshot for this account already existed:
+    // say so on the page, and say why no email is coming. Shown once.
+    const existingHit = sget('sc_existing_report', null);
+    const reusedNote = existingHit && existingHit.id === report.report_id ? existingHit : null;
+    if (reusedNote) sessionStorage.removeItem('sc_existing_report');
     renderHeader('report');
     $view.innerHTML = h`
       <div class="wrap">
         ${isSample ? raw(h`<div class="samplebar"><b>Sample report.</b> A real Growth Plan for a real account, scored ${fmtDate(report.created_at)}. Yours is written from your own posts. <a href="#/" data-scroll="evalForm">Score my account →</a></div>`) : ''}
+        ${reusedNote ? raw(h`<div class="samplebar"><span><b>This is the Snapshot from ${fmtDate(reusedNote.at || report.created_at)}.</b> Each account gets one free Snapshot, so nothing was re-scored and no email is on its way. A Growth Plan re-scores @${reusedNote.handle || biz.handle || ''} every week.</span> <a href="#/pricing">See the Growth Plan →</a></div>`) : ''}
         <div class="rhead">
           <div class="l"><h1 class="h">@${biz.handle || ''}</h1><span class="ctx">${platName(biz.platform)} · ${niche} · ${fmtDate(report.created_at)}</span>${paid ? raw(h`<span class="tag dark">${once ? '60-DAY PLAN' : 'GROWTH PLAN'}</span>`) : ''}</div>
           <div class="r">${isSample ? '' : raw(h`<button class="btn ghost sm" data-action="email-report">Email me this report</button>`)}${isSample || !CFG.roast ? '' : raw(h`<button class="btn sm roastbtn" data-action="roast">${report.roast ? 'See my roast' : 'Roast me'} 🔥</button>`)}<button class="btn ghost sm" data-action="share">${isSample ? 'Share this sample' : 'Share my score'}</button></div>
