@@ -635,13 +635,17 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
     postsLast14d = acts.filter((p) => { const t = +new Date(p.date || p.timestamp); return Number.isFinite(t) && Date.now() - t <= 14 * 86400000; }).length;
     // What the model sees: metrics + one compact row per post. No URLs,
     // thumbnails or full captions — 30 posts must still fit Groq's 8k TPM.
+    // Every date the model sees is the account's own calendar day, so "the Sep 16 reel" means the same
+    // thing on the report, in the hover card and in the plan.
+    const tz = inputParams.tz || "UTC";
+    const localDay = (iso) => planQuality.zonedKey(iso, tz) || iso;
     postSummary = JSON.stringify({
       ...realData, posts: undefined,
-      recent_activity: (realData.recent_activity || []).map((p) => { const o = { d: p.date, t: p.media_type, l: p.likes, c: p.comments }; if (p.video_views) o.v = p.video_views; if (p.saves) o.s = p.saves; if (p.shares) o.sh = p.shares; if (p.caption_preview) o.cap = p.caption_preview.slice(0, 60); return o; }),
+      recent_activity: (realData.recent_activity || []).map((p) => { const o = { d: localDay(p.date), t: p.media_type, l: p.likes, c: p.comments }; if (p.video_views) o.v = p.video_views; if (p.saves) o.s = p.saves; if (p.shares) o.sh = p.shares; if (p.caption_preview) o.cap = p.caption_preview.slice(0, 60); return o; }),
       recent_activity_key: "d=date t=type l=likes c=comments v=views s=saves sh=shares cap=caption start",
     });
     computed = scoreProfile(realData, category); // null for fetchers without the metric shape (Twitter)
-    postInsights = rankPosts(realData.recent_activity || realData.recent_posts);
+    postInsights = rankPosts(realData.recent_activity || realData.recent_posts, { tz });
   } catch (err) {
     console.warn("[Growth Engine] Real data fetch failed:", err.message);
     // No data, no report. A private/missing profile is the owner's to fix; a
@@ -663,8 +667,8 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
     CATEGORY_BENCHMARKS: JSON.stringify(benchmarks),
     POST_INSIGHTS: postInsights
       ? JSON.stringify({ avg_engagement: postInsights.avg_engagement, best_format: postInsights.patterns.best_format, best_day: postInsights.patterns.best_day,
-          top: postInsights.top.map((p) => ({ name: planQuality.postName({ caption: p.caption, type: p.format, posted_at: p.date }), date: String(p.date).slice(0, 10), format: p.format, day: p.weekday, vs_avg: p.vs_avg, caption: p.caption })),
-          bottom: postInsights.bottom.map((p) => ({ name: planQuality.postName({ caption: p.caption, type: p.format, posted_at: p.date }), date: String(p.date).slice(0, 10), format: p.format, day: p.weekday, vs_avg: p.vs_avg, caption: p.caption })) })
+          top: postInsights.top.map((p) => ({ name: planQuality.postName({ caption: p.caption, type: p.format, posted_at: p.date }, tz), date: planQuality.zonedKey(p.date, tz) || String(p.date).slice(0, 10), format: p.format, day: p.weekday, vs_avg: p.vs_avg, caption: p.caption })),
+          bottom: postInsights.bottom.map((p) => ({ name: planQuality.postName({ caption: p.caption, type: p.format, posted_at: p.date }, tz), date: planQuality.zonedKey(p.date, tz) || String(p.date).slice(0, 10), format: p.format, day: p.weekday, vs_avg: p.vs_avg, caption: p.caption })) })
       : "not available",
     COMPUTED_SCORES: computed
       ? JSON.stringify({ overall: computed.overall, dimensions: computed.dimensions.map((d) => ({ label: d.label, score: d.score, evidence: d.evidence, parts: d.parts })) })
@@ -871,8 +875,8 @@ async function evaluateTier1(accountId, inputParams, onStage = () => {}, { tier:
     RECENT_POST_SUMMARY: postSummary, CATEGORY_BENCHMARKS: JSON.stringify(benchmarks), SNAPSHOT_JSON: snapshotJson,
     POST_INSIGHTS: reportBody.post_insights
       ? JSON.stringify({ best_format: reportBody.post_insights.patterns?.best_format, best_day: reportBody.post_insights.patterns?.best_day,
-          top: reportBody.post_insights.top.map((p) => ({ date: String(p.date).slice(0, 10), format: p.format, vs_avg: p.vs_avg, caption: p.caption })),
-          bottom: reportBody.post_insights.bottom.map((p) => ({ date: String(p.date).slice(0, 10), format: p.format, vs_avg: p.vs_avg, caption: p.caption })) })
+          top: reportBody.post_insights.top.map((p) => ({ name: planQuality.postName({ caption: p.caption, type: p.format, posted_at: p.date }, reportBody.tz || "UTC"), date: planQuality.zonedKey(p.date, reportBody.tz || "UTC"), format: p.format, vs_avg: p.vs_avg, caption: p.caption })),
+          bottom: reportBody.post_insights.bottom.map((p) => ({ name: planQuality.postName({ caption: p.caption, type: p.format, posted_at: p.date }, reportBody.tz || "UTC"), date: planQuality.zonedKey(p.date, reportBody.tz || "UTC"), format: p.format, vs_avg: p.vs_avg, caption: p.caption })) })
       : "not available",
   };
   const sys = "You write specific, data-grounded social media growth plans. Output JSON only.";
@@ -1175,7 +1179,7 @@ function nextPostsPrompt(reportBody, { count, regenerate = null } = {}) {
   const others = regenerate != null ? (b.next_posts || []).filter((_, i) => i !== regenerate).map((p) => p.hook).filter(Boolean) : [];
   return interpolateTemplate(NEXT_POSTS_PROMPT, {
     COUNT: count, HANDLE: b.business?.handle || "", PLATFORM: b.business?.platform || "instagram", CATEGORY: b.business?.category || "",
-    POST_INSIGHTS: JSON.stringify({ best_format: pi.patterns?.best_format, best_day: pi.patterns?.best_day, top: (pi.top || []).map((p) => ({ date: String(p.date).slice(0, 10), format: p.format, vs_avg: p.vs_avg, caption: p.caption })), bottom: (pi.bottom || []).map((p) => ({ date: String(p.date).slice(0, 10), format: p.format, vs_avg: p.vs_avg, caption: p.caption })) }),
+    POST_INSIGHTS: JSON.stringify({ best_format: pi.patterns?.best_format, best_day: pi.patterns?.best_day, top: (pi.top || []).map((p) => ({ name: planQuality.postName({ caption: p.caption, type: p.format, posted_at: p.date }, b.tz || "UTC"), date: planQuality.zonedKey(p.date, b.tz || "UTC"), format: p.format, vs_avg: p.vs_avg, caption: p.caption })), bottom: (pi.bottom || []).map((p) => ({ name: planQuality.postName({ caption: p.caption, type: p.format, posted_at: p.date }, b.tz || "UTC"), date: planQuality.zonedKey(p.date, b.tz || "UTC"), format: p.format, vs_avg: p.vs_avg, caption: p.caption })) }),
     BIO: (b.bio || b.profile?.biography || "").slice(0, 300) || "not available",
     PHASE: phase ? `${phase.label} (days ${phase.range}) — first move: ${phase.visible_action}` : "phase 1",
     SLOTS: wk.length ? wk.join(" | ") : "none yet",

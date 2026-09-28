@@ -798,7 +798,7 @@ router.post("/reports/:reportId/share", optionalAuth, async (req, res) => {
       if (!report.reportBody?.roast?.lines?.length) return sendError(res, 404, "NO_ROAST", "This report hasn't been roasted");
       data = cards.roastDataFrom(report.reportBody);
       events.track("roast_shared", { ...events.attribution(req), reportId: report.reportId, props: { heat: data.heat_label } });
-    } else data = cards.scoreDataFrom(report.reportBody || {}, { thenNow: !!req.body?.then_now });
+    } else { data = cards.scoreDataFrom(report.reportBody || {}, { thenNow: !!req.body?.then_now }); if (/^#[0-9a-f]{6}$/i.test(String(req.body?.tint || ""))) data.tint = String(req.body.tint); }
     if (!Number.isFinite(data.overall)) return sendError(res, 400, "NO_SCORE", "This report has no score to share");
     const ref = req.user?.id ? await geDb.ensureRefCode(req.user.id).catch(() => null) : null;
     const share = await geDb.createShare({ accountId: anon ? null : report.accountId, reportId: report.reportId, kind, data, ref });

@@ -306,6 +306,27 @@ answers on when to post, Instagram steps that don't exist. Two parts:
 - **One primary button per screen**: Share and Roast are secondary on the report, "See the
   plan" is secondary on the reports page, the opportunity card's Start this move is primary.
 
+### Visual identity (27 Sept)
+- **Your feed, annotated.** The last 30 posts as a grid under the score, each tinted by how it
+  did against the typical post (2×+, above, typical, under half), with a mark on every post the
+  plan uses (PIN, CUT, HL, POST, BIO) and a note on the outlier. Every post links out. The
+  sample ships all 30 thumbnails.
+- **The signature shape.** Four dimensions as a kite (consistency up, mix right, engagement
+  down, profile left), in the score box, the Path header, the Progress screen (the old shape
+  sits as a ghost and the new one draws from it), the share poster and the browser favicon.
+- **Their colour.** The dominant hue of the top three thumbnails, softened into `--their`,
+  `--their-soft`, `--their-deep` on the report: a stripe and tint on the score box, the shape
+  fill, the feed heat, and the share poster background (passed to the server as `tint`).
+- **The trail** on the Path (waypoints on Up next and Done, a pulsing dot on the current step)
+  and connectors between phases on the report.
+- **Marginalia** under the score box: pointer notes from the data (cadence vs target, the
+  weekday habit, the cheapest points).
+- **Dimension glyphs** on every dimension name.
+- **Motion with meaning**: the niche marker settles last; a step slides off the Path when
+  done; reduced motion respected.
+- **Focus mode** on the Path (dark, one card, nothing else), remembered per browser.
+- **Share poster** carries the shape and their colour on both the client and server canvases.
+
 ## Also fixed along the way
 
 - Stored report bodies carried a provisional `report_id` (share sheet broke).
