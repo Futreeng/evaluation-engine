@@ -1,10 +1,10 @@
-# Scalecraft — Complete Build Spec
+# Scalecraft Social — Complete Build Spec
 
 Creators first; businesses are phase 2.
 
 ## Context
 
-Scalecraft is our social account evaluator. The front end is app.js, mock-api.js, config.js and styles.css. The backend is server/routes/growth-engine.js (Growth Engine API, hosted on Railway, with a Vercel copy calling it). mock-api.js mirrors the real routes so app.js needs no branches. Keep it that way: every new route gets a matching mock.
+Scalecraft Social is our social account evaluator. The front end is app.js, mock-api.js, config.js and styles.css. The backend is server/routes/growth-engine.js (Growth Engine API, hosted on Railway, with a Vercel copy calling it). mock-api.js mirrors the real routes so app.js needs no branches. Keep it that way: every new route gets a matching mock.
 
 ## Working rules
 

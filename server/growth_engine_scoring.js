@@ -1,7 +1,7 @@
 /**
  * Deterministic dimension scoring.
  *
- * The four Scalecraft scores are computed here from the fetched metrics, so
+ * The four Scalecraft Social scores are computed here from the fetched metrics, so
  * the same profile on the same day always gets the same number. The LLM
  * personas receive these scores and write the explanations and moves; they
  * never set or adjust the numbers.

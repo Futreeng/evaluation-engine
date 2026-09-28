@@ -1,4 +1,4 @@
-# What we built — Scalecraft, Waves 1–5
+# What we built — Scalecraft Social, Waves 1–5
 
 Plain-language record of every feature on `feat/next-build` (PR #6): what it does for the user, why it exists, how it works, and where the code lives. Spec numbers match `SCALECRAFT_BUILD_SPEC.md`.
 

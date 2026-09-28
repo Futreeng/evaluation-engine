@@ -1,4 +1,4 @@
-# Scalecraft API Keys Setup Guide
+# Scalecraft Social API Keys Setup Guide
 
 This guide walks you through acquiring and configuring all necessary API keys for Instagram and TikTok evaluation.
 
@@ -16,7 +16,7 @@ This guide walks you through acquiring and configuring all necessary API keys fo
 2. Click **"Create App"** (top right)
 3. Select **"Consumer"** as the app type
 4. Fill in:
-   - **App Name**: "Scalecraft" (or whatever you want)
+   - **App Name**: "Scalecraft Social" (or whatever you want)
    - **App Purpose**: Select any option (e.g., "Social Media")
    - **App Contact Email**: your email
 5. Click **"Create App"**
@@ -69,7 +69,7 @@ Or, use Railway if you prefer:
 
 ## TikTok API Keys (via Apify)
 
-Scalecraft currently uses **Apify** to scrape TikTok (direct TikTok API doesn't provide post-level metrics easily).
+Scalecraft Social currently uses **Apify** to scrape TikTok (direct TikTok API doesn't provide post-level metrics easily).
 
 ### Prerequisites
 - An Apify account (free tier available)
@@ -87,7 +87,7 @@ Scalecraft currently uses **Apify** to scrape TikTok (direct TikTok API doesn't 
 1. Go to **Settings** (avatar → Settings)
 2. Click **"API tokens"** (left sidebar)
 3. Click **"Create token"**
-4. Name it: "Scalecraft"
+4. Name it: "Scalecraft Social"
 5. Copy the token
 6. **Save as:** `APIFY_TOKEN`
 
