@@ -208,6 +208,19 @@
     el.textContent = from; requestAnimationFrame(tick);
   }
   function rememberPricing(p) { try { const g = (p.tiers || []).find(t => t.tier === 'growth_plan'); sset('sc_pricing', { at: Date.now(), billing_available: p.billing_available !== false, checkout: p.checkout || 'mock', cta: p.cta || null, variant: p.variant || 'control', growth_plan: g?.monthlyPrice, plan_unlock: p.one_time?.[0]?.price, one_time_sold: !!(p.one_time || []).length, founders: p.founders && p.founders.left > 0 ? p.founders : null, pro: (p.tiers || []).find(t => t.tier === 'growth_plan_pro')?.monthlyPrice, rescore: Object.fromEntries(Object.entries(p.limits || {}).map(([k, v]) => [k, v && v.rescore_days])) }); } catch { } }
+  // Connected accounts (official Instagram / TikTok APIs).
+  const PLAT_LABEL = { instagram: 'Instagram', tiktok: 'TikTok' };
+  async function startConnect(platform, returnTo) {
+    try { const r = await api('/connect/' + platform + '/url', { method: 'POST', body: JSON.stringify({ return_to: returnTo || location.hash }) }); location.href = r.url; }
+    catch (e) { if (e.status === 401) return; toast(e.message || 'Could not start the connection.'); }
+  }
+  // The platform sends the browser back with ?connected= or ?connect_error= on the hash.
+  function connectNotice() {
+    const q = new URLSearchParams(location.hash.split('?')[1] || '');
+    if (q.get('connected')) toast(`${PLAT_LABEL[q.get('connected')] || 'Account'} connected${q.get('handle') ? ' as @' + q.get('handle') : ''}. Your next score reads from it.`);
+    if (q.get('connect_error')) toast(`${PLAT_LABEL[q.get('platform')] || 'Connection'}: ${q.get('connect_error')}`);
+    if (q.get('connected') || q.get('connect_error')) history.replaceState(null, '', location.hash.split('?')[0]);
+  }
   // False while production has no payment provider: every Start button becomes "Join the waitlist".
   function billingOpen() { const pv = sget('sc_pricing', null); return !pv || pv.billing_available !== false; }
   // The waitlist form that stands in for a Start button while billing is closed. `tier` is what they wanted.
@@ -1098,7 +1111,7 @@
             </div>
           </details>
 
-          <div class="datawindow">${report.data_window || `Based on your last ${pi?.sample || 12} posts. We can't see saves, reach or story views.`}</div>
+          <div class="datawindow">${report.data_window || `Based on your last ${pi?.sample || 12} posts. We can't see saves, reach or story views.`}${!isSample && token() && (biz.platform === 'instagram' || biz.platform === 'tiktok') ? raw(h`<div class="connectline" data-connectline="${biz.platform}" data-handle="${biz.handle || ''}" hidden></div>`) : ''}</div>
 
           ${!paid && sget('sc_limit_msg', null) ? raw(h`<div class="notice">${sget('sc_limit_msg', '')} <a href="#/pricing">See the plan →</a></div>`) : ''}
           ${isSample ? raw(h`<div class="refresh"><div class="t"><h2>This is what $${price} a month gets you${founders ? " (founders price)" : ""}</h2><p>Every move with the reason behind it, a week-by-week posting calendar and posts written from the account's own material, competitors scored the same way, and a fresh score every week. Yours starts with a free Snapshot.</p></div><a class="btn green" href="#/" data-scroll="evalForm">Score my account free</a></div>`)
@@ -1199,6 +1212,19 @@
       $view.querySelector('[data-action=roast]')?.addEventListener('click', () => { if (report.roast) reveal(report.roast); else pick(); });
       if (new URLSearchParams(location.hash.split('?')[1] || '').get('roast') === '1') { if (report.roast) reveal(report.roast); else pick(); }
     }
+    // Connected-account line under the data window: connect, or rescore through the API once connected.
+    (async () => {
+      const line = $view.querySelector('[data-connectline]'); if (!line) return;
+      let conns = null; try { conns = await api('/account/connections', {}, { allow401: true }); } catch { return; }
+      const p = line.dataset.connectline, c = (conns.connections || []).find(x => x.platform === p);
+      const mine = c && (!c.handle || !line.dataset.handle || c.handle === line.dataset.handle.toLowerCase());
+      if (report.data_source === 'api') return;
+      if (mine) { line.hidden = false; line.innerHTML = h`Connected as @${c.handle || c.display_name}. <button type="button" class="linkbtn" data-action="rescore-connected">Score again from the API →</button>`; }
+      else if (conns.available?.[p]) { line.hidden = false; line.innerHTML = h`<button type="button" class="linkbtn" data-action="connect-here">Connect ${PLAT_LABEL[p]}</button> to read saves, reach and views straight from your account.`; }
+      line.querySelector('[data-action=connect-here]')?.addEventListener('click', e => { e.currentTarget.disabled = true; startConnect(p, '#/report/' + report.report_id); });
+      line.querySelector('[data-action=rescore-connected]')?.addEventListener('click', async e => { e.currentTarget.disabled = true; const last = sget('sc_form', {}); await submitEvaluation({ handle: biz.handle, platform: biz.platform, category: biz.category, email: last.email || report.email || '' }, null); });
+    })();
+    connectNotice();
     // Both paid paths go through the 60-second intake first.
     $view.querySelectorAll('[data-action=unlock]').forEach(b => b.addEventListener('click', () => { if (!billingOpen()) { sset('sc_intent_tier', 'growth_plan'); sset('sc_unlock_report', report.report_id); go('#/pricing'); return; } sset('sc_intent_tier', 'growth_plan'); sset('sc_form', { handle: biz.handle, platform: biz.platform, category: biz.category, email: sget('sc_form', {}).email || report.email || '' }); go(); }));
     $view.querySelector('[data-action=unlock-once]')?.addEventListener('click', () => { if (!billingOpen()) { go('#/pricing'); return; } sset('sc_once_price', oneTime); go(); });
@@ -1710,7 +1736,8 @@
     if (!token()) { sset('sc_next', '#/reports'); go('#/signin'); return; }
     $view.innerHTML = h`<div class="center-msg">Loading your reports…</div>`;
     let list, subn = null, refs = null, me;
-    try { [list, subn, refs, me] = await Promise.all([api('/account/reports'), api('/account/subscription-status').catch(() => null), api('/account/referrals').catch(() => null), api('/auth/me').catch(() => null)]); } catch (e) { if (e.status === 401) return; $view.innerHTML = h`<div class="center-msg"><h2>Couldn’t load reports.</h2>${e.message}</div>`; return; }
+    let conns = null;
+    try { [list, subn, refs, me, conns] = await Promise.all([api('/account/reports'), api('/account/subscription-status').catch(() => null), api('/account/referrals').catch(() => null), api('/auth/me').catch(() => null), api('/account/connections').catch(() => null)]); } catch (e) { if (e.status === 401) return; $view.innerHTML = h`<div class="center-msg"><h2>Couldn’t load reports.</h2>${e.message}</div>`; return; }
     // Email preferences (spec 1.6): four toggles + pause all. Receipts, report-ready and password emails always send.
     const PREF_LABELS = [['weekly_score', 'Weekly score', 'Your re-score and what changed'], ['monday_move', 'Plan check-ins and Monday move', 'Day-30/60 check-ins, the week\'s move'], ['post_reviews', 'Post reviews', 'Each new post, reviewed 48 hours in'], ['milestones', 'Milestones', 'Rank-ups and personal records'], ['product_news', 'Product news', 'What\'s new, occasionally']];
     const emailPrefsHTML = prefs => {
@@ -1741,6 +1768,9 @@
     $view.innerHTML = h`<div class="wrap"><div class="history">
       <div class="ph"><h1>Your reports</h1><a class="btn pillbtn" href="#/" data-scroll="evalForm">Run a new evaluation</a></div>
       ${raw(planCard())}
+      ${conns && (conns.available?.instagram || conns.available?.tiktok || (conns.connections || []).length) ? raw(h`<div class="card conncard"><div class="t"><div class="n">Connected accounts</div><h2>Read your numbers straight from the platform</h2>
+        <p>Connect the account you're scoring and the report reads it through the official API instead of the public profile: ${'Instagram adds saves, reach and shares; TikTok uses its own counts.'} Nothing is posted. Disconnect any time.</p></div>
+        <div class="connrows">${raw(['instagram', 'tiktok'].filter(p => conns.available?.[p] || (conns.connections || []).some(c => c.platform === p)).map(p => { const c = (conns.connections || []).find(x => x.platform === p); return h`<div class="connrow"><span class="pl">${PLAT_LABEL[p]}</span>${c ? raw(h`<span class="who">@${c.handle || c.display_name || 'connected'}${c.last_error ? raw(h` <span class="fine warn">needs reconnecting</span>`) : ''}</span><button type="button" class="btn ghost sm" data-disconnect="${p}">Disconnect</button>`) : raw(h`<span class="who fine">Not connected</span><button type="button" class="btn sm" data-connect="${p}">Connect ${PLAT_LABEL[p]}</button>`)}</div>`; }).join(''))}</div></div>`) : ''}
       ${raw((() => { const g = me && me.goal ? me.goal : sget('sc_goal', null)?.goal; const t = me && me.goal_target != null ? me.goal_target : sget('sc_goal', null)?.goal_target; const gp = g && latestRep ? goalProgress(g, t, latestRep) : null;
         return h`<div class="card goalcard" id="goalCard"><div class="t"><div class="n">Your goal</div><h2>${g ? goalLabel(g) : 'Not set yet'}</h2></div>
           ${gp ? raw(h`<div class="goalbar"><div class="t"><span class="v">${gp.label}</span></div><div class="bar"><div class="fill" style="width:${gp.pct}%"></div></div><div class="fine">${gp.sub}</div></div>`) : g ? raw('<p class="fine">Progress shows once a report is open in this session.</p>') : raw('<p class="fine">Pick one and the plan, Monday moves and post writing lean toward it.</p>')}
@@ -1764,6 +1794,9 @@
       <div class="card settings"><div class="n">Settings · your data</div><p>Delete my account and reports — removes your account, every report we've written for you and your score history. Payment records we're required to keep are retained by Stripe.</p><button type="button" class="btn danger" data-action="delete-account">Delete my account</button></div>
     </div></div>${raw(footer())}`;
     $view.querySelector('[data-action=delete-account]').addEventListener('click', () => openDeleteDialog(reports.length));
+    $view.querySelectorAll('[data-connect]').forEach(b => b.addEventListener('click', () => { b.disabled = true; startConnect(b.dataset.connect, '#/reports'); }));
+    $view.querySelectorAll('[data-disconnect]').forEach(b => b.addEventListener('click', async () => { b.disabled = true; try { await api('/account/connections/' + b.dataset.disconnect, { method: 'DELETE' }); toast(`${PLAT_LABEL[b.dataset.disconnect]} disconnected.`); viewReports(); } catch (e) { toast(e.message); b.disabled = false; } }));
+    connectNotice();
     $view.querySelector('[data-action=copy-ref]')?.addEventListener('click', async () => { try { await navigator.clipboard.writeText(refs.link); toast('Link copied.'); } catch { toast(refs.link); } });
     { const gc = $view.querySelector('#goalCard'); if (gc) { const ed = gc.querySelector('.goaledit'); gc.querySelector('[data-action=edit-goal]')?.addEventListener('click', () => { ed.hidden = false; }); bindGoalPicker(ed, async (goal, target) => { try { const res = await api('/account/goal', { method: 'PUT', body: JSON.stringify({ goal, goal_target: target }) }); sset('sc_goal', { goal: res.goal, goal_target: res.goal_target }); track('goal_set', { goal }); toast('Goal saved.'); viewReports(); } catch (e) { toast('Could not save the goal: ' + e.message); } }); } }
     $view.querySelector('[data-action=cancel-plan]')?.addEventListener('click', () => openCancelDialog(subn));

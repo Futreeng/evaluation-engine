@@ -75,31 +75,15 @@ function normalizeVideo(v) {
     mentions: v.mentions || [],
     location: v.locationMeta?.city || v.locationMeta?.locationName || null,
     is_pinned: !!v.isPinned,
+    original_sound: !!v.musicMeta?.musicOriginal,
     permalink: v.webVideoUrl || null,
     thumbnail_url: v.videoMeta?.coverUrl || v.videoMeta?.originalCoverUrl || null,
   };
 }
 
-async function analyzeTikTokAccountViaApify(rawHandle) {
-  const handle = String(rawHandle || "").replace(/^@/, "").trim().toLowerCase();
-  if (!/^[a-z0-9._]{1,30}$/.test(handle)) throw new Error(`"${rawHandle}" is not a valid TikTok handle`);
-
-  const hit = cache.get(handle);
-  if (hit && Date.now() - hit.at < CACHE_TTL_MS) { console.log(`[TikTok/Apify] Cache hit for @${handle}`); return hit.data; }
-  try {
-    const c = await geDb.getCachedProfile("tiktok", handle, CACHE_TTL_MS);
-    if (c && (c.data?.recent_posts?.length || 0) >= Math.min(VIDEOS, c.data?.post_count || VIDEOS)) { console.log(`[TikTok/Apify] DB cache hit for @${handle}`); cache.set(handle, { at: c.fetchedAt, data: c.data }); return c.data; }
-  } catch { /* cache is best-effort */ }
-
-  console.log(`[TikTok/Apify] Fetching @${handle}...`);
-  const items = await fetchVideosFromApify(handle);
-  require("./growth_engine_costs").scrape({ unit: "apify:tiktok-video", quantity: Math.max(1, items.length), handle, platform: "tiktok" });
-  const author = items.find((it) => it.authorMeta)?.authorMeta || {};
-  if (author.privateAccount) throw new Error(`TikTok returned the profile @${handle} as private, so there are no public posts for us to score.`);
-
-  const posts = items.map(normalizeVideo);
-  if (!posts.length) throw new Error(`No public posts found for @${handle}`);
-
+// Everything after the videos are in hand. Shared with the official-API fetcher
+// (growth_engine_connect.js) so a connected account scores exactly like a scraped one.
+function buildTikTokData(author, posts, handle, source = "apify/tiktok-scraper") {
   const user = { followers_count: Number(author.fans) || 0, follows_count: Number(author.following) || 0 };
   const feed = posts.filter((p) => !p.is_pinned);
   // Cadence is judged on a fixed recent window so scrape depth doesn't move
@@ -141,7 +125,9 @@ async function analyzeTikTokAccountViaApify(rawHandle) {
   metrics.content.long_videos_over_60s = durations.filter((d) => d > 60).length;
   metrics.content.pinned_posts = posts.filter((p) => p.is_pinned).length;
   metrics.content.avg_hashtags = +(posts.reduce((n, p) => n + p.hashtags.length, 0) / posts.length).toFixed(1);
-  metrics.content.original_sound_share = +(items.filter((it) => it.musicMeta?.musicOriginal).length / items.length).toFixed(2);
+  // Original-sound share is a scrape-only signal; the API fetcher passes it on the posts when it knows it.
+  const withSound = posts.filter((p) => p.original_sound != null);
+  metrics.content.original_sound_share = withSound.length ? +(withSound.filter((p) => p.original_sound).length / withSound.length).toFixed(2) : null;
 
   const bio = author.signature || "";
   const link = author.bioLink?.link || author.bioLink || null;
@@ -177,11 +163,35 @@ async function analyzeTikTokAccountViaApify(rawHandle) {
     verified: !!author.verified,
     recent_posts: posts,
     analysis: metrics,
-    source: "clockworks/tiktok-scraper",
+    source,
   };
+  return data;
+}
+
+async function analyzeTikTokAccountViaApify(rawHandle) {
+  const handle = String(rawHandle || "").replace(/^@/, "").trim().toLowerCase();
+  if (!/^[a-z0-9._]{1,30}$/.test(handle)) throw new Error(`"${rawHandle}" is not a valid TikTok handle`);
+
+  const hit = cache.get(handle);
+  if (hit && Date.now() - hit.at < CACHE_TTL_MS) { console.log(`[TikTok/Apify] Cache hit for @${handle}`); return hit.data; }
+  try {
+    const c = await geDb.getCachedProfile("tiktok", handle, CACHE_TTL_MS);
+    if (c && (c.data?.recent_posts?.length || 0) >= Math.min(VIDEOS, c.data?.post_count || VIDEOS)) { console.log(`[TikTok/Apify] DB cache hit for @${handle}`); cache.set(handle, { at: c.fetchedAt, data: c.data }); return c.data; }
+  } catch { /* cache is best-effort */ }
+
+  console.log(`[TikTok/Apify] Fetching @${handle}...`);
+  const items = await fetchVideosFromApify(handle);
+  require("./growth_engine_costs").scrape({ unit: "apify:tiktok-video", quantity: Math.max(1, items.length), handle, platform: "tiktok" });
+  const author = items.find((it) => it.authorMeta)?.authorMeta || {};
+  if (author.privateAccount) throw new Error(`TikTok returned the profile @${handle} as private, so there are no public posts for us to score.`);
+
+  const posts = items.map(normalizeVideo);
+  if (!posts.length) throw new Error(`No public posts found for @${handle}`);
+
+  const data = buildTikTokData(author, posts, handle);
   cache.set(handle, { at: Date.now(), data });
   try { await geDb.putCachedProfile("tiktok", handle, data); } catch { /* best-effort */ }
   return data;
 }
 
-module.exports = { analyzeTikTokAccountViaApify, normalizeVideo };
+module.exports = { analyzeTikTokAccountViaApify, normalizeVideo, buildTikTokData };

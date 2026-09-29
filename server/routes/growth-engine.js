@@ -12,6 +12,7 @@ const events = require("../growth_engine_events");
 const entitlements = require("../growth_engine_entitlements");
 const costs = require("../growth_engine_costs");
 const pricingAB = require("../growth_engine_pricing");
+const connect = require("../growth_engine_connect");
 // Which price variant this request sees: the account's stored one, else a
 // stable hash of the anonymous browser id (so the same visitor keeps it).
 async function variantFor(req) {
@@ -403,6 +404,40 @@ router.post("/billing/resume", authMiddleware, async (req, res) => {
 });
 
 // GET /account/reports
+// ---- Connected accounts (official Instagram / TikTok APIs). See growth_engine_connect.js.
+router.get("/account/connections", authMiddleware, async (req, res) => {
+  try { res.json({ available: connect.available(), connections: (await geDb.listConnections(req.user.id)).map(connect.publicView) }); }
+  catch (err) { sendError(res, 500, "CONNECTIONS_ERROR", err.message); }
+});
+// The browser can't carry a Bearer token through a redirect, so it asks for the URL then navigates.
+router.post("/connect/:platform/url", authMiddleware, async (req, res) => {
+  try {
+    const returnTo = /^#\/[A-Za-z0-9/_?=&.-]{0,180}$/.test(String(req.body?.return_to || "")) ? String(req.body.return_to) : "";
+    res.json({ url: connect.authUrl(req.params.platform, req.user.id, { returnTo }) });
+  } catch (err) { sendError(res, err.status || 500, err.code || "CONNECT_ERROR", err.message); }
+});
+// Where the platform sends the browser back. Public by nature; the signed state names the account.
+router.get("/connect/:platform/callback", async (req, res) => {
+  const app = (process.env.APP_URL || `${req.protocol}://${req.get("host")}`).replace(/\/$/, "");
+  const back = (dest, params) => res.redirect(`${app}/${dest || "#/reports"}${(dest || "#/reports").includes("?") ? "&" : "?"}${new URLSearchParams(params)}`);
+  try {
+    const r = await connect.handleCallback(req.params.platform, req.query);
+    events.track("account_connected", { accountId: r.accountId, props: { platform: r.platform, handle: r.handle } });
+    return back(r.returnTo, { connected: r.platform, handle: r.handle || "" });
+  } catch (err) {
+    console.warn(`[Connect] ${req.params.platform} callback failed: ${err.message}`);
+    return back(err.returnTo, { connect_error: err.message.slice(0, 160), platform: connect.platformOf(req.params.platform) || "" });
+  }
+});
+router.delete("/account/connections/:platform", authMiddleware, async (req, res) => {
+  try {
+    const p = connect.platformOf(req.params.platform); if (!p) return sendError(res, 400, "BAD_PLATFORM", "Unknown platform");
+    const c = await geDb.getConnection(req.user.id, p);
+    if (c) { await connect.revoke(c); await geDb.deleteConnection(req.user.id, p); }
+    res.json({ deleted: !!c });
+  } catch (err) { sendError(res, 500, "DISCONNECT_ERROR", err.message); }
+});
+
 router.get("/account/reports", authMiddleware, async (req, res) => {
   try {
     const reports = await geDb.listReportsByAccount(req.user.id);
@@ -581,7 +616,10 @@ router.post("/evaluate/social-snapshot", evaluateLimiter, optionalAuth, validate
     // The free Snapshot is one per account (handle + platform), not per email —
     // an email is free to invent, a handle is the thing that costs us money.
     // If it's already been scored we point at that report instead of a wall.
-    if (tier === "social_snapshot" && process.env.FREE_SNAPSHOTS_PER_EMAIL !== "unlimited") {
+    // A connected account is the owner's own; rescoring it through the API costs no scrape,
+    // so the one-free-Snapshot rule steps aside for that handle.
+    const ownConnection = req.user?.id ? await connect.connectionFor(req.user.id, platform, handle) : null;
+    if (tier === "social_snapshot" && process.env.FREE_SNAPSHOTS_PER_EMAIL !== "unlimited" && !ownConnection) {
       const existing = await geDb.findFreeSnapshotForHandle(handle, platform);
       if (existing && existing.reportId) {
         return res.status(402).json({

@@ -318,6 +318,9 @@
       if (path === '/auth/login' && body.password === 'wrong') return json(401, { error: 'Invalid email or password', code: 'AUTH_FAILED' });
       return json(200, { token: 'mock.' + btoa(body.email) + '.' + Date.now(), user: { user_id: 'usr_mock', email: body.email, company_name: body.company_name || null } });
     }
+    if (method === 'GET' && path === '/account/connections') return json(200, { available: { instagram: true, tiktok: true }, connections: [{ platform: 'instagram', handle: 'sunrisefitnessbk', display_name: 'Sunrise Fitness', connected_at: Date.now() - 86400000, expires_at: Date.now() + 50 * 86400000, scopes: 'instagram_business_basic,instagram_business_manage_insights', last_error: null }] });
+    if (method === 'POST' && /^\/connect\/(instagram|tiktok)\/url$/.test(path)) return json(200, { url: '#/reports?connected=' + path.split('/')[2] + '&handle=sunrisefitnessbk' });
+    if (method === 'DELETE' && path.startsWith('/account/connections/')) return json(200, { deleted: true });
     if (method === 'GET' && path === '/auth/me') return json(200, { user_id: 'usr_mock', email: 'maya@sunrisefitness.co', company_name: 'Sunrise Fitness BK', is_admin: false, is_business: false, niche: 'fitness_creator', ref_code: 'mockref1', goal: mockGoal.goal, goal_target: mockGoal.goal_target });
     if (method === 'PUT' && path === '/account/goal') { mockGoal = { goal: body.goal, goal_target: body.goal === 'followers' ? Number(body.goal_target) || null : null }; return json(200, mockGoal); }
     return json(404, { error: 'No mock route for ' + method + ' ' + path });
