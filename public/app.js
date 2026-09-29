@@ -290,11 +290,13 @@
   </div></div>`;
 
   // ------------------------------------------------------------ shared pieces
-  function dimRow(d, avg, label) {
+  // "16 above the Travel average" / "at the Travel average" — the tick, in words.
+  function vsAvgText(score, avg, niche) { if (avg == null) return ''; const gap = Math.round(score - avg); if (Math.abs(gap) <= 2) return `at the ${niche} average`; return `${Math.abs(gap)} ${gap > 0 ? 'above' : 'below'} the ${niche} average`; }
+  function dimRow(d, avg, label, avgLabel = null) {
     const sc = clamp(d.score, 0, 100); const gl = label || grade(sc)[0]; const hue = hueOf(d.label);
     return h`<div class="dimrow">
       <div class="lbl"><span class="hue${hue}">${raw(glyph(d.label))}${d.label}</span><b>${sc} · ${gl}</b></div>
-      <div class="bar"><div class="fill bg${hue}" style="width:${sc}%"></div>${avg != null ? raw(h`<div class="mark" style="left:${clamp(avg, 0, 100)}%"></div>`) : ''}</div>
+      <div class="bar ${avg != null && avgLabel ? 'cap' : ''}"><div class="fill bg${hue}" style="width:${sc}%"></div>${avg != null ? raw(h`<div class="mark" style="left:${clamp(avg, 0, 100)}%"></div>${avgLabel ? raw(h`<span class="marklbl" style="left:${clamp(avg, 0, 100)}%">${avgLabel}</span>`) : ''}`) : ''}</div>
     </div>`;
   }
   // The shipped sample report (public/sample-report.js) — a real Growth Plan
@@ -315,7 +317,7 @@
       <div class="head"><b>@${s.handle}</b><span>${platName(s.platform)} · ${fmtDate(s.date)}</span></div>
       <div class="bigrow"><span class="bigwrap"><span class="bignum">${s.overall}</span><sup class="of">/100</sup></span>
         <div class="meta"><span class="tag ${gc}">${gl.toUpperCase()}</span><span class="f">${fmtN(s.followers)} followers</span></div></div>
-      <div class="dims">${raw(s.dims.map(d => dimRow(d, d.category_avg)).join(''))}</div>
+      <div class="dims">${raw(s.dims.map((d, i) => dimRow(d, d.category_avg, null, i === 0 ? 'niche avg' : null)).join(''))}</div>
       <p class="why">${s.summary}</p>
       <div class="foot"><span>Marker = niche average</span><a href="${s.link || '#/report/sample'}">See the full report →</a></div>
     </div>`;
@@ -969,7 +971,7 @@
                 </div></div>
               <p class="why">${s.summary || ''}</p>
               ${(s.dimensions || []).length ? raw(h`<div class="glance">
-                <div class="dims">${raw((s.dimensions || []).map(d => dimRow({ label: d.label, score: d.score }, d.category_avg, gradeIn({ score: clamp(d.score, 0, 100), label: d.label }, s.summary)[0])).join(''))}</div>
+                <div class="dims">${raw((s.dimensions || []).map((d, i) => dimRow({ label: d.label, score: d.score }, d.category_avg, gradeIn({ score: clamp(d.score, 0, 100), label: d.label }, s.summary)[0], i === 0 ? `${niche} avg` : null)).join(''))}</div>
                 ${raw(factTiles(report, s, pi, phases))}
                 <div class="fine">${(s.dimensions || []).some(d => d.category_avg != null) ? `Marker = ${niche} average.` : ''} Each dimension is explained below.</div>
                 ${raw(marginaliaHTML(report))}
@@ -1020,9 +1022,10 @@
           <details class="card acc" open>
             <summary>The four dimensions</summary>
             <div class="body">
-              ${raw((s.dimensions || []).map(d => { const sc = clamp(d.score, 0, 100); const [g, gcc] = gradeIn({ score: sc, label: d.label }, s.summary); const hue = hueOf(d.label); const dd = hist?.delta_dimensions?.find(x => x.label === d.label);
+              ${raw((s.dimensions || []).map((d, i) => { const sc = clamp(d.score, 0, 100); const [g, gcc] = gradeIn({ score: sc, label: d.label }, s.summary); const hue = hueOf(d.label); const dd = hist?.delta_dimensions?.find(x => x.label === d.label); const av = d.category_avg;
                 return h`<div class="dimcard bd${hue}"><div class="top"><span class="n">${raw(glyph(d.label))}${d.label}</span><span class="s hue${hue}">${sc} · ${g}${dd && dd.delta ? raw(h`<span class="dd g-${dd.delta > 0 ? 'strong' : 'weak'}">${dd.delta > 0 ? '+' : ''}${dd.delta}</span>`) : ''}</span></div>
-                  <div class="bar in"><div class="fill bg${hue}" style="width:${sc}%"></div>${d.category_avg != null ? raw(h`<div class="mark" style="left:${clamp(d.category_avg, 0, 100)}%"></div>`) : ''}</div>
+                  ${av != null ? raw(h`<div class="vsavg">${vsAvgText(sc, av, niche)}</div>`) : ''}
+                  <div class="bar in ${av != null && i === 0 ? 'cap' : ''}"><div class="fill bg${hue}" style="width:${sc}%"></div>${av != null ? raw(h`<div class="mark" style="left:${clamp(av, 0, 100)}%"></div>${i === 0 ? raw(h`<span class="marklbl" style="left:${clamp(av, 0, 100)}%">${niche} avg</span>`) : ''}`) : ''}</div>
                   <p>${d.explanation || ''}</p>${raw(checklistHTML(d.evidence))}${raw(evidenceHTML(d.evidence_posts))}${(() => { const ph = phaseForDim(d.label, phases); return ph ? raw(h`<a class="todo" href="#" data-dim-fix="${ph.key}m1">What to do about this →</a>`) : ''; })()}</div>`; }).join(''))}
               <div class="fine">${s.category_avg != null ? raw(h`The marker is your ${niche} average. ${raw(confPill(s.category_confidence || { level: s.category_sample_size >= 100 ? 'high' : s.category_sample_size >= 25 ? 'some' : 'low', label: s.category_sample_size >= 100 ? 'High confidence' : s.category_sample_size >= 25 ? 'Some evidence' : 'Needs more data', n: s.category_sample_size }))}`) : pending ? `The marker is your niche average. Your ${niche} average appears once ${pending.min_n} accounts are scored — ${pending.n} so far.` : nicheKnown ? 'The marker is your niche average.' : `Scored against all creators — we don't have enough ${niche} accounts yet.`}</div>
             </div>
