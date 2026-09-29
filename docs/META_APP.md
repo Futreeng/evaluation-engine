@@ -17,7 +17,7 @@ https://developers.facebook.com/apps/1617940326404118/
 | App domain | scalecraftsocial.com; website platform `https://scalecraftsocial.com/` |
 | Privacy / Terms / Data deletion URLs | `https://scalecraftsocial.com/#/legal/privacy`, `/#/legal/terms`, `/#/legal/privacy` |
 | Category | Business and pages |
-| Business portfolio | **Scalecraft Social** (portfolio id 381235392320983, the former "werunnewyork" portfolio, renamed) — owns the app since 29 Sept. Legal details entered as "FutureEng LLC" (spelling to confirm), business verification **in review** |
+| Business portfolio | **Scalecraft Social** (portfolio id 381235392320983, the former "werunnewyork" portfolio, renamed) — owns the app since 29 Sept. Legal details entered as "FutureEng LLC" (confirmed: the formation document says FutureEng), business verification **in review** |
 | Status | Unpublished. Works for accounts given the Instagram Tester role until app review passes |
 
 ## What "Ready for testing" means
@@ -66,9 +66,9 @@ and a written explanation per permission. Budget 6–8 weeks (`docs/` notes of 2
 - Second try: "werunnewyork" (id 381235392320983) renamed **Scalecraft Social**,
   app attached (auto-approved), business details filled, verification submitted.
   App Review waits on this verification.
-- Legal name typed into both was "FutureEng LLC". The domain, email and legal
-  pages say "FutreEng". Confirm which spelling is on the formation document; the
-  legal pages must match it.
+- Legal name in both portfolios is "FutureEng LLC", which Haron confirmed is the
+  formation-document spelling. The legal pages were corrected to match (PR
+  "Legal name is FutureEng LLC"); the domain and email keep "futreeng".
 
 ## Still to do in the dashboard (Haron)
 
