@@ -17,7 +17,7 @@ https://developers.facebook.com/apps/1617940326404118/
 | App domain | scalecraftsocial.com; website platform `https://scalecraftsocial.com/` |
 | Privacy / Terms / Data deletion URLs | `https://scalecraftsocial.com/#/legal/privacy`, `/#/legal/terms`, `/#/legal/privacy` |
 | Category | Business and pages |
-| Business portfolio | **none attached yet** (Haron to decide: create FutreEng LLC and verify, or attach We Move New York which is already verified) |
+| Business portfolio | **Scalecraft Social** (portfolio id 381235392320983, the former "werunnewyork" portfolio, renamed) — owns the app since 29 Sept. Legal details entered as "FutureEng LLC" (spelling to confirm), business verification **in review** |
 | Status | Unpublished. Works for accounts given the Instagram Tester role until app review passes |
 
 ## What "Ready for testing" means
@@ -54,10 +54,25 @@ and a written explanation per permission. Budget 6–8 weeks (`docs/` notes of 2
 5. Env on Render: `IG_APP_ID=1036695342742623`, `IG_APP_SECRET=<dashboard>`,
    `IG_REDIRECT_URI=https://scalecraftsocial.com/api/growth-engine/v1/connect/instagram/callback`.
 
+## Business portfolios, what happened on 29 Sept
+
+- Meta blocked creating a sixth portfolio, so an unused one was repurposed.
+- First try: "Old Inurse america" (id 636830694381525) renamed FutreEng LLC and verified
+  (came back **Verified** the same day) — but it carries an old advertising
+  restriction and Meta refuses app ownership on it ("prohibited from advertising,
+  including app sharing"). Meta also refuses names containing "restricted", so it is
+  still called FutreEng LLC. Appeal the restriction under Account Quality if it's
+  ever wanted for ads; not needed for Scalecraft.
+- Second try: "werunnewyork" (id 381235392320983) renamed **Scalecraft Social**,
+  app attached (auto-approved), business details filled, verification submitted.
+  App Review waits on this verification.
+- Legal name typed into both was "FutureEng LLC". The domain, email and legal
+  pages say "FutreEng". Confirm which spelling is on the formation document; the
+  legal pages must match it.
+
 ## Still to do in the dashboard (Haron)
 
-- Attach or create the business portfolio and complete business verification
-  (Meta Business Suite → Settings → Security Center). Needed before review.
+- Wait for the Scalecraft Social portfolio's verification (in review since 29 Sept).
 - Upload a 1024×1024 app icon (App settings → Basic).
 - Data Protection Officer block: email is hello@futreeng.com, but Meta requires
   the postal address to save it.
