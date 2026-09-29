@@ -73,9 +73,8 @@ and a written explanation per permission. Budget 6–8 weeks (`docs/` notes of 2
 ## Still to do in the dashboard (Haron)
 
 - Wait for the Scalecraft Social portfolio's verification (in review since 29 Sept).
-- Upload a 1024×1024 app icon (App settings → Basic).
-- Data Protection Officer block: email is hello@futreeng.com, but Meta requires
-  the postal address to save it.
+- Upload the app icon: `~/Desktop/scalecraft-app-icon.png` (generated 29 Sept; Meta's uploader needs a manual drag).
+- Data Protection Officer block: done (hello@futreeng.com, 5900 Balcones Drive, Ste 100, Austin, TX 78731).
 - Add Joe as an app admin (App roles → Roles) so he can read the secret and
   submit review.
 - Add test accounts as Instagram Testers (your own and talon__wilson with permission).
