@@ -77,7 +77,7 @@ Not yet done: a human click-through on the live site with card 4242 4242 4242 42
    Without it every webhook is refused (500) and only the browser's return grants.
 3. **Settings → Billing → Customer portal**: turn on; allow cancel, update
    payment method, invoice history. Return URL is set by the app.
-4. **Settings → Business**: legal name FutreEng LLC, support email
+4. **Settings → Business**: legal name FutureEng LLC, support email
    hello@futreeng.com, statement descriptor `SCALECRAFT`.
 5. **Products**: `node scripts/stripe_products.js` creates or finds the
    catalogue with tax codes and prints the two env lines. Checkout falls back to
