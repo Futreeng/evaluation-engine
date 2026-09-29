@@ -2229,43 +2229,58 @@
   }
 
   // ------------------------------------------------------------ legal (batch 3 template; copy is draft)
+  // Legal pages. Plain text only (escaped on render). [Counsel: …] marks what a
+  // lawyer still has to set; everything else describes the product as it runs.
   const LEGAL = {
     terms: { title: 'Terms of Service', sections: [
-      ['What Scalecraft Social does', 'Scalecraft Social reads a public social media account, scores it out of 100 across four dimensions, and writes a plan of suggested moves. We are a measurement and recommendation service. We do not guarantee growth, reach, followers, sales or any other outcome.'],
-      ['Eligibility', 'You must be 18 or over to use Scalecraft Social. You may score an account you hold, or one you have the account holder’s consent to score.'],
+      ['Who we are', 'Scalecraft Social is operated by FutreEng LLC ("we", "us"). Contact: hello@futreeng.com. [Counsel: add the registered postal address.] By using the service you agree to these terms and to the Privacy Policy.'],
+      ['What Scalecraft Social does', 'Scalecraft Social reads a public social media account, scores it from 0 to 100 across four dimensions, and writes a plan of suggested moves, posting calendars and draft captions. We are a measurement and recommendation service. We do not guarantee growth, reach, followers, sales or any other outcome.'],
+      ['Eligibility', 'You must be 18 or over. You need an account to use anything beyond the free Snapshot.'],
+      ['Scoring public accounts', 'You may score any public account, including your own, a competitor\'s, or one you manage. Scores of accounts you do not hold are for your own use in planning your content; do not publish them to harass, defame or mislead. We only read what the platform shows a logged-out visitor. Private accounts cannot be scored. An account holder who wants their public data removed from our systems can ask at hello@futreeng.com and we will do it.'],
+      ['Free Snapshot', 'One free Snapshot per account handle and one per email address. Scoring the same handle again, or another handle from the same email, needs a paid plan.'],
+      ['Paid plans and renewal', 'Paid plans are subscriptions billed monthly or yearly in US dollars and renew automatically at the end of each period until you cancel. The price you see at checkout is the price you are charged each period; a founders price stays yours for as long as the subscription is not cancelled or lapsed. If we change a plan\'s price we email you at least 30 days before it applies to you. Prices exclude any sales tax, which is added at checkout where it applies. Plans carry weekly fair-use limits on written posts, rewrites, post reviews and competitor handles; the limits are shown on the pricing page.'],
+      ['Cancelling, pausing, downgrading', 'Cancel any time from your account page. Cancellation takes effect at the end of the period already paid for; you keep access until then and are not charged again. You can pause a plan for one to three months; nothing is charged and nothing runs while paused. A downgrade takes effect at the end of the current period. Your reports stay in your account after you cancel.'],
+      ['Refunds', 'If a paid plan is not useful in the first 7 days, reply to any email from us and we refund it. After that, cancellation stops future charges but periods already started are not refunded, except where the law requires otherwise.'],
+      ['How payment works', 'Payments are processed by Stripe. Stripe (through its Link service) acts as the seller of record for your purchase and handles card processing and applicable taxes under its own terms; we never see or store your full card number. Refund requests come to us, not to Stripe.'],
+      ['Suggested content', 'Captions, scripts, hooks and moves are drafts written by a language model from your own posts and numbers. They are suggestions, not instructions. You decide what you post and you are responsible for it, including for any claims it makes, any music or material it uses, and platform rules. We do not warrant that a draft is original or free of third-party rights.'],
+      ['Roast mode', 'Roast mode is deliberately blunt commentary on a public account, at the heat level you choose. It is opinion for entertainment. Do not use it on an account you intend to harass.'],
+      ['Sharing', 'Share cards and share pages you create are public by link and show the handle and its scores. Do not share a card of an account you do not hold in a way that harasses or misleads.'],
+      ['Data and accuracy', 'Scores are computed from the public data a platform exposes at the time of scoring. That data can be incomplete, delayed or wrong, and we cannot see saves, reach, story views or anything private. Niche averages appear only once enough accounts in a niche have been scored and are marked with their confidence.'],
       ['Your account', 'Keep your password to yourself. You are responsible for what happens under your account. Tell us at once if you think someone else has access to it.'],
-      ['Free tier limits', 'One free Snapshot per email address. A second evaluation requires an account and a paid plan.'],
-      ['Subscriptions, billing and refunds', 'Paid plans renew monthly or annually until cancelled. Billing is handled by Stripe; we never see your full card details. You can cancel in two clicks from your settings and keep access until the end of the period you paid for. If the plan is not useful in the first seven days, reply to any email from us and we refund it.' + (supportEmail() ? ` Questions about billing: ${supportEmail()}.` : '')],
-      ['Acceptable use', 'Do not score an account you intend to harass. Do not scrape, resell or redistribute our scores, plans or calendars. Do not attempt to reverse the engine or use the service to build a competing dataset.'],
-      ['Intellectual property', 'Your content and your data stay yours. The scores, plans and calendars we produce are licensed to you for your own use for as long as your account exists.'],
-      ['Disclaimers', 'Recommendations are suggestions, not instructions, and results vary. We are not affiliated with, endorsed by or operated by Instagram, TikTok or any other platform.'],
-      ['Liability', 'To the extent the law allows, our liability to you is limited to the amount you paid us in the twelve months before the claim. [Counsel to confirm wording.]'],
+      ['Acceptable use', 'Do not score an account you intend to harass. Do not scrape, resell or redistribute our scores, plans or calendars. Do not attempt to reverse the engine, probe it automatically, or use the service to build a competing dataset. Do not use the service for anyone under 18.'],
+      ['Intellectual property', 'Your content and your data stay yours. The scores, plans, calendars and drafts we produce are licensed to you for your own use, for as long as your account exists, and you may publish the drafts as your own posts. The service, its scoring method and its design are ours.'],
+      ['Changes to the service', 'We can add, change or withdraw features, and we will email paying customers before a material change that affects what they pay for. We aim to keep the service available but do not promise uninterrupted availability.'],
+      ['Disclaimers', 'The service is provided as is. Recommendations are suggestions and results vary. We are not affiliated with, endorsed by or operated by Instagram, TikTok, Meta, ByteDance or any other platform, and the platforms may change what they expose at any time.'],
+      ['Liability', 'To the extent the law allows, our liability to you is limited to the amount you paid us in the twelve months before the claim, and we are not liable for indirect or consequential loss. Nothing here limits liability that cannot be limited by law. [Counsel: confirm wording and add indemnity if wanted.]'],
       ['Termination', 'You can delete your account at any time from settings. We may suspend an account that breaks these terms; we will say why.'],
-      ['Governing law', '[Jurisdiction placeholder — to be set by counsel.]'],
-      ['Changes and contact', 'If these terms change materially we will email you before the change takes effect. Questions: reply to any email from us.']
+      ['Governing law and disputes', '[Counsel: set jurisdiction, and decide on arbitration or courts.]'],
+      ['Changes and contact', 'If these terms change materially we will email you at least 14 days before the change takes effect. Questions: hello@futreeng.com, or reply to any email from us.'],
     ] },
     privacy: { title: 'Privacy Policy', sections: [
-      ['What we collect', 'Your handle, niche, email and — if you create an account — a password hash. The public profile data we read to score you. Your scores and reports. Payment metadata from Stripe (never your full card number). Basic usage analytics.'],
-      ['How we read profiles', 'Public data only, through a third-party data provider. We never log in as you, never post, and never read private accounts.'],
-      ['Why', 'To produce your report; to improve niche averages in aggregate; to email you what you asked for.'],
-      ['Who we share with', 'Our data provider; the language-model providers that write the report text (your data is not used to train their models); Stripe for payments; our email provider; our hosting provider. No one else.'],
-      ['Retention', 'Reports are kept while your account exists. Delete your account from settings and they go with it. Anonymous free snapshots are kept for 90 days.'],
-      ['Your rights', 'Access, correction and deletion of your data, on request or from settings. If you are in the EU/UK or California, the rights in GDPR and CCPA apply and we honour them. [Counsel to confirm disclosures.]'],
-      ['Cookies', 'See the Cookie Notice.'],
-      ['Children', 'Scalecraft Social is not for anyone under 18.'],
-      ['Changes and contact', 'We will email you before a material change. Questions: reply to any email from us.']
+      ['Who is responsible', 'FutreEng LLC is the data controller for Scalecraft Social. Contact: hello@futreeng.com. [Counsel: add the postal address and, if required, an EU/UK representative.]'],
+      ['What we collect from you', 'Your email, the handle and niche you enter, a password hash if you create an account, your answers about your goal and time, any links or notes you add to a plan, your scores and reports, and the moves you mark done. From Stripe we receive payment status and the last four digits of a card, never the full number. When you visit, we record page views and button taps against an anonymous browser id, the marketing source you arrived from, and your IP address.'],
+      ['What we collect about scored accounts', 'To score an account, including a competitor or any handle entered by a user, we read what the platform shows a logged-out visitor: bio, follower count, and recent public posts with their captions, dates, likes, comments, views and thumbnails. We never log in as anyone, never post, and never read private accounts. We keep this so the report can show the posts behind each score. Our basis is our legitimate interest in providing the service; an account holder who objects can ask hello@futreeng.com and we will remove their data from our systems.'],
+      ['Why we use it', 'To produce and refresh your report and plan; to write the emails you asked for; to compute niche averages in aggregate; to run and secure the service; to take payment; and, if you opt in, to send product news. Legal bases where GDPR applies: performance of our contract with you, our legitimate interests, and your consent for marketing email.'],
+      ['Who we share it with', 'Named subprocessors: Apify (reads public profiles), Groq and Google (language models that write report text), Anthropic and OpenAI (language models, used only when configured as a fallback), Stripe (payments; seller of record), Resend (email delivery), Render (hosting and database). Each holds data only to provide its service to us under a data processing agreement. We do not sell personal data and do not share it for advertising. [Counsel: confirm the training-data position of each model provider before publishing a blanket statement.]'],
+      ['Where it is processed', 'Our servers and providers are in the United States. If you are in the EU, UK or Switzerland your data is transferred there under standard contractual clauses in our providers\' agreements.'],
+      ['How long we keep it', 'Reports, thumbnails and plans: while your account exists; deleting your account deletes them. Anonymous free Snapshots: 90 days. Scored-account data held for a report: as long as that report. Email log and usage events: 12 months. Payment records: as long as tax law requires, held by Stripe. [Engineering note: automated deletion on these windows is being completed; until it is, delete on request is honoured within 30 days.]'],
+      ['Your rights', 'You can see, correct, export and delete your data from settings or by emailing hello@futreeng.com. Marketing email has an unsubscribe link and a one-click pause. If you are in the EU or UK you also have the rights in GDPR, including to object and to complain to your supervisory authority; if you are in California, the rights in the CCPA, and we do not sell or share personal information as the CCPA defines it. We answer requests within 30 days.'],
+      ['Security', 'Passwords are hashed, API keys are encrypted at rest, traffic is encrypted in transit, and access is limited to the two people who run the company. If a breach affects your data we will tell you and the relevant authority without undue delay.'],
+      ['Cookies and browser storage', 'See the Cookie Notice.'],
+      ['Children', 'Scalecraft Social is not for anyone under 18 and we do not knowingly collect their data.'],
+      ['Changes and contact', 'We will email you before a material change. Questions or requests: hello@futreeng.com.'],
     ] },
     cookies: { title: 'Cookie Notice', sections: [
-      ['Strictly necessary', 'A session token so you stay signed in.'],
+      ['Strictly necessary', 'A sign-in token in your browser so you stay signed in, and a few session values that carry your handle and answers between pages.'],
       ['Preferences', 'Your billing toggle and a few display settings, stored in your browser.'],
-      ['Analytics', '[None yet — if we add a tool, we will name it here.]'],
-      ['Advertising', 'None. We do not run advertising cookies.'],
-      ['How to control them', 'Clear your browser storage for scalecraftsocial.com, or sign out.']
+      ['First-party analytics', 'An anonymous id in your browser lets us count visits and see which buttons lead to a report or a plan, together with the marketing source you arrived from. It is ours, not a third party\'s, and it is not used for advertising. We also record whether our emails were delivered.'],
+      ['Advertising', 'None. We do not run advertising cookies or trackers.'],
+      ['How to control them', 'Sign out to remove the sign-in token, or clear site data for scalecraftsocial.com in your browser to remove everything. The site works without the analytics id.'],
     ] },
     use: { title: 'Acceptable Use', sections: [
-      ['Do not', 'Score an account you intend to harass. Scrape, resell or redistribute our scores, plans or calendars. Attempt to reverse the engine or build a competing dataset from it. Use the service for anyone under 18 without consent.'],
-      ['We may', 'Suspend an account that breaks these rules. We will say why.']
-    ] }
+      ['Do not', 'Score an account you intend to harass, or publish someone else\'s score to mislead. Scrape, resell or redistribute our scores, plans or calendars. Attempt to reverse the engine, probe it automatically or build a competing dataset from it. Post drafts that break a platform\'s rules or someone\'s rights. Use the service for anyone under 18.'],
+      ['We may', 'Suspend an account that breaks these rules. We will say why.'],
+    ] },
   };
   function viewLegal(page) {
     renderHeader('legal');
@@ -2279,7 +2294,7 @@
       <article class="lbody">
         <span class="tag fair">DRAFT, PENDING LEGAL REVIEW</span>
         <h1>${doc.title}</h1>
-        <div class="fine">Last updated ${fmtDate('2026-09-19')}</div>
+        <div class="fine">Last updated ${fmtDate('2026-09-29')}</div>
         <div class="sections">${raw(doc.sections.map((sec, i) => h`<section id="s${i + 1}"><h2>${i + 1} · ${sec[0]}</h2><p>${sec[1]}</p></section>`).join(''))}</div>
       </article>
     </div></div>${raw(footer())}`;
