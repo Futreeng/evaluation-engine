@@ -268,6 +268,12 @@ async function initSchema() {
         views INTEGER NOT NULL DEFAULT 0, created_at BIGINT NOT NULL
       )`);
     await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_connections (
+        id TEXT PRIMARY KEY, account_id TEXT NOT NULL, platform TEXT NOT NULL, ext_user_id TEXT, handle TEXT, display_name TEXT, avatar_url TEXT,
+        token_enc TEXT NOT NULL, refresh_enc TEXT, expires_at BIGINT, refresh_expires_at BIGINT, scopes TEXT, last_error TEXT, connected_at BIGINT NOT NULL, updated_at BIGINT NOT NULL
+      )`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_connections_account ON growth_engine_connections (account_id)`);
+    await client.query(`
       CREATE TABLE IF NOT EXISTS growth_engine_plan_context (
         id TEXT PRIMARY KEY,
         account_id TEXT NOT NULL,
@@ -719,6 +725,8 @@ async function deleteAccount(accountId) {
   await q(`DELETE FROM growth_engine_jobs WHERE account_id = $1`, [accountId]);
   await q(`DELETE FROM growth_engine_tier_history WHERE account_id = $1`, [accountId]);
   await q(`DELETE FROM entitlements WHERE user_id = $1`, [accountId]);
+  await q(`DELETE FROM growth_engine_connections WHERE account_id = $1`, [accountId]);
+  await q(`DELETE FROM growth_engine_plan_context WHERE account_id = $1`, [accountId]);
   await q(`DELETE FROM users WHERE user_id = $1`, [accountId]);
   return { deleted: true, reports: Number(n.rows[0]?.n || 0) };
 }
@@ -733,6 +741,24 @@ async function getPlanContext(accountId, handle, platform) {
   if (!r.rows.length) return null;
   try { return { ...JSON.parse(r.rows[0].context), updated_at: Number(r.rows[0].updated_at) }; } catch { return null; }
 }
+function connRow(r) {
+  return r ? { id: r.id, accountId: r.account_id, platform: r.platform, extUserId: r.ext_user_id || null, handle: r.handle || null, displayName: r.display_name || null, avatarUrl: r.avatar_url || null,
+    tokenEnc: r.token_enc, refreshEnc: r.refresh_enc || null, expiresAt: r.expires_at ? Number(r.expires_at) : null, refreshExpiresAt: r.refresh_expires_at ? Number(r.refresh_expires_at) : null, scopes: r.scopes || null, lastError: r.last_error || null, connectedAt: Number(r.connected_at), updatedAt: Number(r.updated_at) } : null;
+}
+async function setConnection(accountId, platform, c) {
+  const id = `${accountId}|${platform}`; const now = Date.now();
+  await q(`INSERT INTO growth_engine_connections (id, account_id, platform, ext_user_id, handle, display_name, avatar_url, token_enc, refresh_enc, expires_at, refresh_expires_at, scopes, last_error, connected_at, updated_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$14)
+           ON CONFLICT (id) DO UPDATE SET ext_user_id = EXCLUDED.ext_user_id, handle = EXCLUDED.handle, display_name = EXCLUDED.display_name, avatar_url = EXCLUDED.avatar_url, token_enc = EXCLUDED.token_enc, refresh_enc = EXCLUDED.refresh_enc,
+             expires_at = EXCLUDED.expires_at, refresh_expires_at = EXCLUDED.refresh_expires_at, scopes = EXCLUDED.scopes, last_error = EXCLUDED.last_error, updated_at = EXCLUDED.updated_at`,
+    [id, accountId, platform, c.extUserId || null, c.handle ? String(c.handle).toLowerCase() : null, c.displayName || null, c.avatarUrl || null, c.tokenEnc, c.refreshEnc || null, c.expiresAt || null, c.refreshExpiresAt || null, c.scopes || null, c.lastError || null, now]);
+  return getConnection(accountId, platform);
+}
+async function getConnection(accountId, platform) { return connRow((await q(`SELECT * FROM growth_engine_connections WHERE id = $1`, [`${accountId}|${platform}`])).rows[0]); }
+async function listConnections(accountId) { return (await q(`SELECT * FROM growth_engine_connections WHERE account_id = $1 ORDER BY platform`, [accountId])).rows.map(connRow); }
+async function deleteConnection(accountId, platform) { await q(`DELETE FROM growth_engine_connections WHERE id = $1`, [`${accountId}|${platform}`]); return { deleted: true }; }
+async function listConnectionsExpiringBefore(ts) { return (await q(`SELECT * FROM growth_engine_connections WHERE expires_at IS NOT NULL AND expires_at < $1`, [ts])).rows.map(connRow); }
+
 async function setPlanContext(accountId, handle, platform, context) {
   const { updated_at, ...ctx } = context || {};
   const now = Date.now();
@@ -987,6 +1013,7 @@ async function getBaselineStats(category) {
 }
 
 module.exports = {
+  setConnection, getConnection, listConnections, deleteConnection, listConnectionsExpiringBefore,
   setStripeIds,
   initDb,
   initSchema,

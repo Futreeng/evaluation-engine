@@ -103,52 +103,9 @@ function normalizePost(p) {
   };
 }
 
-async function analyzeInstagramAccountViaApify(rawHandle) {
-  const handle = String(rawHandle || "").replace(/^@/, "").trim().toLowerCase();
-  if (!/^[a-z0-9._]{1,30}$/.test(handle)) throw new Error(`"${rawHandle}" is not a valid Instagram handle`);
-
-  const hit = cache.get(handle);
-  if (hit && Date.now() - hit.at < CACHE_TTL_MS) {
-    console.log(`[Instagram/Apify] Cache hit for @${handle}`);
-    return hit.data;
-  }
-  try {
-    const c = await geDb.getCachedProfile("instagram", handle, CACHE_TTL_MS);
-    // A retry resumes from the last scrape: any cached profile with a usable post set
-    // (12+, or everything the account has) is reused inside the TTL instead of asking
-    // Instagram again — the ask that turned a working handle into "not found".
-    const cachedPosts = c?.data?.recent_posts?.length || 0;
-    if (c && cachedPosts >= Math.min(12, c.data?.post_count || 12)) { console.log(`[Instagram/Apify] DB cache hit for @${handle} (${cachedPosts} posts)`); cache.set(handle, { at: c.fetchedAt, data: c.data }); return c.data; }
-  } catch (err) { console.warn(`[Instagram/Apify] profile cache read failed for @${handle}: ${err.message}`); }
-
-  console.log(`[Instagram/Apify] Fetching @${handle}...`);
-  require("./growth_engine_costs").scrape({ unit: "apify:instagram-profile", quantity: 1, handle, platform: "instagram" });
-  const profile = await fetchProfileFromApify(handle);
-
-  if (profile.private) {
-    throw new Error(
-      `Instagram returned the profile @${handle} as private, so there are no public posts for us to score.`
-    );
-  }
-
-  let posts = (profile.latestPosts || []).map(normalizePost).filter((p) => p.timestamp);
-  if (posts.length === 0) {
-    throw new Error(`No public posts found for @${handle}`);
-  }
-  // Deeper scrape: top up to SCRAPE_POSTS from the post scraper. Never fail
-  // the report over it — 12 posts is still a report.
-  if (posts.length < SCRAPE_POSTS && (profile.postsCount || SCRAPE_POSTS) > posts.length) {
-    try {
-      const more = await fetchPostsFromApify(handle, SCRAPE_POSTS);
-      require("./growth_engine_costs").scrape({ unit: "apify:instagram-post", quantity: Math.max(1, more.length), handle, platform: "instagram" });
-      const seen = new Set(posts.map((p) => p.id));
-      for (const raw of more) { const p = normalizePost(raw); if (p.timestamp && !seen.has(p.id)) { posts.push(p); seen.add(p.id); } }
-      posts.sort((a, b) => +new Date(b.timestamp) - +new Date(a.timestamp));
-      posts = posts.slice(0, SCRAPE_POSTS);
-      console.log(`[Instagram/Apify] @${handle}: ${posts.length} posts after deeper scrape`);
-    } catch (err) { console.warn(`[Instagram/Apify] deeper scrape failed for @${handle}: ${err.message} — scoring on ${posts.length} posts`); }
-  }
-
+// Everything after the posts are in hand. Shared with the official-API fetcher
+// (growth_engine_connect.js) so a connected account scores exactly like a scraped one.
+function buildInstagramData(profile, posts, handle, source = "apify/instagram-profile-scraper") {
   // Reuse the Graph-API metrics math so both fetchers score the same way.
   const user = {
     followers_count: profile.followersCount || 0,
@@ -212,11 +169,61 @@ async function analyzeInstagramAccountViaApify(rawHandle) {
     verified: !!profile.verified,
     recent_posts: posts,
     analysis: metrics,
-    source: "apify/instagram-profile-scraper",
+    source,
   };
+  return data;
+}
+
+async function analyzeInstagramAccountViaApify(rawHandle) {
+  const handle = String(rawHandle || "").replace(/^@/, "").trim().toLowerCase();
+  if (!/^[a-z0-9._]{1,30}$/.test(handle)) throw new Error(`"${rawHandle}" is not a valid Instagram handle`);
+
+  const hit = cache.get(handle);
+  if (hit && Date.now() - hit.at < CACHE_TTL_MS) {
+    console.log(`[Instagram/Apify] Cache hit for @${handle}`);
+    return hit.data;
+  }
+  try {
+    const c = await geDb.getCachedProfile("instagram", handle, CACHE_TTL_MS);
+    // A retry resumes from the last scrape: any cached profile with a usable post set
+    // (12+, or everything the account has) is reused inside the TTL instead of asking
+    // Instagram again — the ask that turned a working handle into "not found".
+    const cachedPosts = c?.data?.recent_posts?.length || 0;
+    if (c && cachedPosts >= Math.min(12, c.data?.post_count || 12)) { console.log(`[Instagram/Apify] DB cache hit for @${handle} (${cachedPosts} posts)`); cache.set(handle, { at: c.fetchedAt, data: c.data }); return c.data; }
+  } catch (err) { console.warn(`[Instagram/Apify] profile cache read failed for @${handle}: ${err.message}`); }
+
+  console.log(`[Instagram/Apify] Fetching @${handle}...`);
+  require("./growth_engine_costs").scrape({ unit: "apify:instagram-profile", quantity: 1, handle, platform: "instagram" });
+  const profile = await fetchProfileFromApify(handle);
+
+  if (profile.private) {
+    throw new Error(
+      `Instagram returned the profile @${handle} as private, so there are no public posts for us to score.`
+    );
+  }
+
+  let posts = (profile.latestPosts || []).map(normalizePost).filter((p) => p.timestamp);
+  if (posts.length === 0) {
+    throw new Error(`No public posts found for @${handle}`);
+  }
+  // Deeper scrape: top up to SCRAPE_POSTS from the post scraper. Never fail
+  // the report over it — 12 posts is still a report.
+  if (posts.length < SCRAPE_POSTS && (profile.postsCount || SCRAPE_POSTS) > posts.length) {
+    try {
+      const more = await fetchPostsFromApify(handle, SCRAPE_POSTS);
+      require("./growth_engine_costs").scrape({ unit: "apify:instagram-post", quantity: Math.max(1, more.length), handle, platform: "instagram" });
+      const seen = new Set(posts.map((p) => p.id));
+      for (const raw of more) { const p = normalizePost(raw); if (p.timestamp && !seen.has(p.id)) { posts.push(p); seen.add(p.id); } }
+      posts.sort((a, b) => +new Date(b.timestamp) - +new Date(a.timestamp));
+      posts = posts.slice(0, SCRAPE_POSTS);
+      console.log(`[Instagram/Apify] @${handle}: ${posts.length} posts after deeper scrape`);
+    } catch (err) { console.warn(`[Instagram/Apify] deeper scrape failed for @${handle}: ${err.message} — scoring on ${posts.length} posts`); }
+  }
+
+  const data = buildInstagramData(profile, posts, handle);
   cache.set(handle, { at: Date.now(), data });
   try { await geDb.putCachedProfile("instagram", handle, data); } catch (err) { console.warn(`[Instagram/Apify] profile cache write failed for @${handle}: ${err.message} — a retry will scrape again`); }
   return data;
 }
 
-module.exports = { analyzeInstagramAccountViaApify, normalizePost };
+module.exports = { analyzeInstagramAccountViaApify, normalizePost, buildInstagramData };

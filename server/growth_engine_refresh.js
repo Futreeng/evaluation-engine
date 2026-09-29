@@ -86,9 +86,15 @@ async function sendScheduledEmails() {
 let timer = null;
 let running = false;
 
+let lastTokenRefresh = 0;
 async function sweep(jobQueue) {
   if (running) return { skipped: "busy" };
   running = true;
+  // Connected-account tokens (TikTok 24h, Instagram 60d) are refreshed once a day here.
+  if (Date.now() - lastTokenRefresh > 20 * 60 * 60 * 1000) {
+    lastTokenRefresh = Date.now();
+    require("./growth_engine_connect").refreshDue().then((r) => { if (r.checked) console.log(`[Connect] token refresh: ${JSON.stringify(r)}`); }).catch((e) => console.warn("[Connect] token refresh failed:", e.message));
+  }
   const started = Date.now();
   let queued = 0, skipped = 0;
   try {
