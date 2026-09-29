@@ -283,6 +283,14 @@ async function initSchema() {
         to_tier TEXT NOT NULL,
         changed_at BIGINT NOT NULL
       )`);
+    // Click-through acceptance of the Terms/Privacy Policy. Append-only: one
+    // row per acceptance, so every version someone agreed to stays provable.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS growth_engine_terms_acceptances (
+        id TEXT PRIMARY KEY, account_id TEXT, email TEXT, version TEXT NOT NULL, context TEXT NOT NULL,
+        ip TEXT, user_agent TEXT, accepted_at BIGINT NOT NULL
+      )`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_terms_acc_account ON growth_engine_terms_acceptances (account_id, accepted_at)`);
     console.log("[Growth Engine DB] Schema initialized");
   } finally {
     client.release();
@@ -901,6 +909,13 @@ async function ensureRefCode(userId) {
   for (let i = 0; i < 5; i++) { try { await q(`UPDATE users SET ref_code = $1 WHERE user_id = $2 AND ref_code IS NULL`, [newRefCode(), userId]); return (await getUserById(userId)).refCode; } catch { /* collision */ } }
   return null;
 }
+async function recordTermsAcceptance({ accountId = null, email = null, version, context, ip = null, userAgent = null, acceptedAt = Date.now() }) {
+  await q(`INSERT INTO growth_engine_terms_acceptances (id, account_id, email, version, context, ip, user_agent, accepted_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, ["ta_" + uid(), accountId, email ? String(email).toLowerCase() : null, version, context, ip, userAgent, acceptedAt]);
+}
+async function latestTermsAcceptance(accountId) {
+  const r = (await q(`SELECT version, accepted_at FROM growth_engine_terms_acceptances WHERE account_id = $1 ORDER BY accepted_at DESC LIMIT 1`, [accountId])).rows[0];
+  return r ? { version: r.version, acceptedAt: Number(r.accepted_at) } : null;
+}
 async function getUserByRefCode(code) { const r = (await q(`SELECT user_id FROM users WHERE ref_code = $1`, [String(code || "").toLowerCase()])).rows[0]; return r ? getUserById(r.user_id) : null; }
 async function recordReferralSignup({ refCode, referrerId, referredId }) {
   if (!referrerId || !referredId || referrerId === referredId) return null;
@@ -982,6 +997,8 @@ module.exports = {
   initSchema,
   // Users
   createUser,
+  recordTermsAcceptance,
+  latestTermsAcceptance,
   getUserByEmail,
   getUserById,
   updateUserPassword,

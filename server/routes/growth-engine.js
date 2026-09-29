@@ -12,6 +12,7 @@ const events = require("../growth_engine_events");
 const entitlements = require("../growth_engine_entitlements");
 const costs = require("../growth_engine_costs");
 const pricingAB = require("../growth_engine_pricing");
+const legal = require("../legal");
 // Which price variant this request sees: the account's stored one, else a
 // stable hash of the anonymous browser id (so the same visitor keeps it).
 async function variantFor(req) {
@@ -117,9 +118,14 @@ router.get("/health", async (req, res) => {
 router.post("/auth/signup", authLimiter, validateAuthRequest, async (req, res) => {
   try {
     const { email, password, company_name } = req.body;
-    const profile = { isBusiness: req.body.is_business === true || req.body.is_business === "yes", niche: typeof req.body.niche === "string" ? req.body.niche.slice(0, 40) : undefined, priceVariant: pricingAB.assign(req.get("x-anon-id") || req.ip || "") };
+    // The Terms checkbox is enforced here, not just in the browser, and the
+    // acceptance is recorded — without the record there's no proof of agreement.
+    const acceptance = legal.acceptanceFrom(req, "signup");
+    if (!acceptance) { const t = legal.termsError(req); return sendError(res, 400, t.code, t.message); }
+    const profile ={ isBusiness: req.body.is_business === true || req.body.is_business === "yes", niche: typeof req.body.niche === "string" ? req.body.niche.slice(0, 40) : undefined, priceVariant: pricingAB.assign(req.get("x-anon-id") || req.ip || "") };
     const result = await signup(email, password, company_name, profile);
     const newId = result?.user?.user_id || null;
+    if (newId) await geDb.recordTermsAcceptance({ ...acceptance, accountId: newId, email });
     const utm = events.utmFrom(req);
     events.track("signup", { ...events.attribution(req), accountId: newId, props: { has_company: !!company_name, ...(utm ? { utm } : {}) } });
     if (newId && utm) geDb.setUserUtm(newId, utm).catch(() => { });
@@ -181,6 +187,7 @@ router.get("/auth/me", authMiddleware, async (req, res) => {
   try {
     const user = await geDb.getUserById(req.user.id);
     if (!user) return res.status(404).json({ error: "User not found" });
+    const accepted = await geDb.latestTermsAcceptance(user.userId).catch(() => null);
 
     res.json({
       user_id: user.userId,
@@ -193,9 +200,26 @@ router.get("/auth/me", authMiddleware, async (req, res) => {
       goal: user.goal || null,
       goal_target: user.goalTarget ?? null,
       founder: !!(await geDb.getEffectiveEntitlement(user.userId).catch(() => null))?.founder,
+      terms_version: accepted?.version || null,
+      terms_accepted_at: accepted?.acceptedAt || null,
+      terms_current: accepted?.version === legal.TERMS_VERSION,
+      terms_required_version: legal.TERMS_VERSION,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /account/accept-terms — accounts created before the current Terms
+// version (or before acceptance was recorded at all) accept here.
+router.post("/account/accept-terms", authMiddleware, async (req, res) => {
+  try {
+    const acceptance = legal.acceptanceFrom(req, "reaccept");
+    if (!acceptance) { const t = legal.termsError(req); return sendError(res, 400, t.code, t.message); }
+    await geDb.recordTermsAcceptance({ ...acceptance, accountId: req.user.id, email: req.user.email });
+    res.json({ ok: true, terms_version: acceptance.version, terms_accepted_at: acceptance.acceptedAt });
+  } catch (err) {
+    sendError(res, 500, "ACCEPT_FAILED", err.message);
   }
 });
 
@@ -555,6 +579,10 @@ router.post("/evaluate/social-snapshot", evaluateLimiter, optionalAuth, validate
       .filter((h) => /^[a-z0-9._-]{1,60}$/.test(h) && h !== String(handle).toLowerCase())
       .slice(0, MAX_COMPETITORS);
     const accountId = req.user?.id || "demo-account";
+    // Anonymous runs have no account-level acceptance, so the free form carries
+    // its own (Terms + "I hold this account or have permission to score it").
+    const acceptance = req.user ? null : legal.acceptanceFrom(req, "free_snapshot");
+    if (!req.user && !acceptance) { const t = legal.termsError(req); return sendError(res, 400, t.code, t.message); }
     const tier = await evaluationTierFor(accountId);
 
     // (2) Paid on-demand runs are metered per day; the weekly refresh is scheduled
@@ -628,8 +656,10 @@ router.post("/evaluate/social-snapshot", evaluateLimiter, optionalAuth, validate
     // Create job in database
     const attr = events.attribution(req);
     input.attribution = { anon: attr.anon, ref: attr.ref };
+    if (acceptance) input.terms = { version: acceptance.version, accepted_at: acceptance.acceptedAt };
     const jobResult = await geDb.createJob(accountId, tier, input);
     const jobId = jobResult.jobId;
+    if (acceptance) await geDb.recordTermsAcceptance({ ...acceptance, email, context: `free_snapshot:${jobId}` });
     events.track("evaluate_started", { ...attr, props: { tier, platform, category, horizon: plan_context?.horizon || null } });
 
     // Process asynchronously (fire-and-forget)

@@ -17,6 +17,7 @@
  * the 402 step is skipped), or pass a handle that has never been scored.
  */
 const FREE_UNLIMITED = process.env.SMOKE_FREE_UNLIMITED === "1";
+const { TERMS_VERSION } = require("../legal");
 const BASE = (process.env.SMOKE_BASE || "http://localhost:3005").replace(/\/$/, "") + "/api/growth-engine/v1";
 const HANDLE = process.env.SMOKE_HANDLE || "talon__wilson";
 const PLATFORM = process.env.SMOKE_PLATFORM || "instagram";
@@ -54,7 +55,9 @@ async function waitJob(jobId, maxMs = 6 * 60 * 1000) {
 
   await step("health", async () => { const { status, json } = await call("GET", "/health"); expect(status === 200 && json?.status === "ok", `status ${status}`); return `db ${json.db}`; });
   await step("pricing", async () => { const { json } = await call("GET", "/billing/pricing"); expect(json?.tiers?.some((t) => t.tier === "growth_plan"), "no growth_plan tier"); expect(json.one_time?.[0]?.days === 60, "one-time should be a 60-day plan"); return `$${json.tiers.find((t) => t.tier === "growth_plan").monthlyPrice}/mo, $${json.one_time[0].price} once`; });
-  await step("signup", async () => { const { status, json } = await call("POST", "/auth/signup", { email: EMAIL, password: PASSWORD }); expect(status === 200 && json?.token, `status ${status}`); token = json.token; });
+  await step("signup without accepting the Terms → 400", async () => { const { status, json } = await call("POST", "/auth/signup", { email: EMAIL, password: PASSWORD }, { anon: true }); expect(status === 400 && json?.code === "TERMS_REQUIRED", `status ${status} ${json?.code}`); });
+  await step("signup", async () => { const { status, json } = await call("POST", "/auth/signup", { email: EMAIL, password: PASSWORD, accepted_terms_version: TERMS_VERSION }); expect(status === 200 && json?.token, `status ${status}`); token = json.token; });
+  await step("acceptance recorded on /auth/me", async () => { const { json } = await call("GET", "/auth/me"); expect(json?.terms_current === true && json.terms_version === TERMS_VERSION, `terms ${json?.terms_version}`); });
   await step("login wrong password → 401", async () => { const { status } = await call("POST", "/auth/login", { email: EMAIL, password: "nope-nope" }, { anon: true }); expect(status === 401, `status ${status}`); });
   await step("free score (with horizon answer)", async () => {
     const { status, json } = await call("POST", "/evaluate/social-snapshot", { handle: HANDLE, platform: PLATFORM, category: NICHE, email: EMAIL, plan_context: { horizon: "fewer_shoots" } });

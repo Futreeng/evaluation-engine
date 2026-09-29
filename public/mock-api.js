@@ -161,6 +161,7 @@
   const reports = new Map();
   let savedContext = null;
   let mockGoal = { goal: null, goal_target: null };
+  let mockTerms = null;
   const mockPrefs = { weekly_score: true, monday_move: true, milestones: true, post_reviews: true, product_news: false, paused: false };
   let entitlement = { account_id: 'acct_mock', current_tier: 'social_snapshot' };
   let queueDepth = 2;
@@ -316,9 +317,12 @@
     if (method === 'POST' && (path === '/auth/login' || path === '/auth/signup')) {
       if (!body.email || !body.password) return json(400, { error: 'Email and password required', code: 'INVALID_EMAIL' });
       if (path === '/auth/login' && body.password === 'wrong') return json(401, { error: 'Invalid email or password', code: 'AUTH_FAILED' });
+      if (path === '/auth/signup' && !body.accepted_terms_version) return json(400, { error: 'Please agree to the Terms and Privacy Policy.', code: 'TERMS_REQUIRED' });
+      if (path === '/auth/signup') mockTerms = body.accepted_terms_version;
       return json(200, { token: 'mock.' + btoa(body.email) + '.' + Date.now(), user: { user_id: 'usr_mock', email: body.email, company_name: body.company_name || null } });
     }
-    if (method === 'GET' && path === '/auth/me') return json(200, { user_id: 'usr_mock', email: 'maya@sunrisefitness.co', company_name: 'Sunrise Fitness BK', is_admin: false, is_business: false, niche: 'fitness_creator', ref_code: 'mockref1', goal: mockGoal.goal, goal_target: mockGoal.goal_target });
+    if (method === 'GET' && path === '/auth/me') return json(200, { user_id: 'usr_mock', email: 'maya@sunrisefitness.co', company_name: 'Sunrise Fitness BK', is_admin: false, is_business: false, niche: 'fitness_creator', ref_code: 'mockref1', goal: mockGoal.goal, goal_target: mockGoal.goal_target, terms_version: mockTerms, terms_accepted_at: mockTerms ? Date.now() : null, terms_current: mockTerms === window.SCALECRAFT_TERMS_VERSION, terms_required_version: window.SCALECRAFT_TERMS_VERSION || null });
+    if (method === 'POST' && path === '/account/accept-terms') { if (!body.accepted_terms_version) return json(400, { error: 'Please agree to the Terms and Privacy Policy.', code: 'TERMS_REQUIRED' }); mockTerms = body.accepted_terms_version; return json(200, { ok: true, terms_version: mockTerms, terms_accepted_at: Date.now() }); }
     if (method === 'PUT' && path === '/account/goal') { mockGoal = { goal: body.goal, goal_target: body.goal === 'followers' ? Number(body.goal_target) || null : null }; return json(200, mockGoal); }
     return json(404, { error: 'No mock route for ' + method + ' ' + path });
   };

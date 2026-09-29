@@ -84,6 +84,7 @@ async function testAudit(testCase) {
       platform: testCase.platform,
       category: testCase.category,
       email: testCase.email,
+      accepted_terms_version: require("../legal").TERMS_VERSION,
     });
 
     const jobId = submitResponse.jobId;

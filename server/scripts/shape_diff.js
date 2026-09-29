@@ -17,6 +17,7 @@
 const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
+const { TERMS_VERSION } = require("../legal");
 
 const BASE = (process.env.SHAPE_BASE || "http://localhost:3005").replace(/\/$/, "") + "/api/growth-engine/v1";
 const TOKEN = process.env.SHAPE_TOKEN || "";
@@ -62,7 +63,7 @@ function diff(a, b) {
 async function main() {
   const email = `shape-${Date.now()}@example.test`, password = "shape-pass-123";
   // Sign up on both sides so authed routes have a token each.
-  const su = { real: await realCall("POST", "/auth/signup", { email, password }), mock: await mockCall("POST", "/auth/signup", { email, password }) };
+  const su = { real: await realCall("POST", "/auth/signup", { email, password, accepted_terms_version: TERMS_VERSION }), mock: await mockCall("POST", "/auth/signup", { email, password, accepted_terms_version: TERMS_VERSION }) };
   const mockTok = su.mock.json?.token || "mock";
   const paidTok = TOKEN || su.real.json?.token;
   // Newest report on the paid account, for the report/job routes.

@@ -72,6 +72,10 @@
   const setTokenRaw = t => { try { t ? localStorage.setItem('sc_token', t) : localStorage.removeItem('sc_token'); } catch { } };
   const setToken = t => { setTokenRaw(t); if (t) refreshAdminFlag(); else { try { localStorage.removeItem('sc_admin'); } catch { } } };
   const go = hash => { location.hash = hash; };
+  // Version of the Terms/Privacy/Retention pages — must match server/legal.js.
+  // It's sent with every acceptance and shown as "Last updated" on the pages.
+  const LEGAL_VERSION = '2026-09-29';
+  window.SCALECRAFT_TERMS_VERSION = LEGAL_VERSION;
   // Funnel attribution (spec 1.13): an anonymous browser id, and the referral
   // code from the first ?ref= link seen (spec 1.8 formalises referrals).
   const anonId = () => { try { let a = localStorage.getItem('sc_anon'); if (!a) { a = 'anon_' + Math.random().toString(36).slice(2, 12) + Date.now().toString(36); localStorage.setItem('sc_anon', a); } return a; } catch { return null; } };
@@ -165,10 +169,16 @@
     }));
   }
   // Admin link in the nav: ask /auth/me once per token and remember the answer.
+  // The same call tells us whether this account has accepted the current
+  // Terms; if not, it's sent to #/legal/accept until it does.
   async function refreshAdminFlag() {
     if (!token()) { try { localStorage.removeItem('sc_admin'); } catch { } return; }
     const before = lget('sc_admin', false);
-    try { const me = await api('/auth/me', {}, { allow401: true }); lset('sc_admin', !!me.is_admin); } catch { lset('sc_admin', false); }
+    try {
+      const me = await api('/auth/me', {}, { allow401: true }); lset('sc_admin', !!me.is_admin);
+      if (me.terms_current === false) { lset('sc_terms', null); if (!/^#\/(legal|reset)/.test(location.hash || '')) { sset('sc_next', location.hash || '#/'); go('#/legal/accept'); } }
+      else if (me.terms_current) lset('sc_terms', me.terms_version);
+    } catch { lset('sc_admin', false); }
     if (lget('sc_admin', false) !== before) { const cur = $header.querySelector('.nav a.strong'); renderHeader(cur ? (cur.getAttribute('href') || '').replace('#/', '') : ''); }
   }
   const grade = s => s < 50 ? ['Weak', 'weak'] : s < 70 ? ['Fair', 'fair'] : ['Strong', 'strong'];
@@ -223,7 +233,7 @@
   const supportEmail = () => (CFG.supportEmail || sget('sc_support', '') || '');
   const footer = () => h`<div class="wrap"><div class="footer">
     <a href="#/how">How the score works</a><a href="#/business">For businesses</a><a href="#/pricing">Pricing</a>
-    <a href="#/legal/terms">Terms</a><a href="#/legal/privacy">Privacy</a><a href="#/legal/cookies">Cookies</a>${supportEmail() ? raw(h`<a href="mailto:${supportEmail()}">Contact</a>`) : ''}
+    <a href="#/legal/terms">Terms</a><a href="#/legal/privacy">Privacy</a><a href="#/legal/retention">Data retention</a><a href="#/legal/cookies">Cookies</a>${supportEmail() ? raw(h`<a href="mailto:${supportEmail()}">Contact</a>`) : ''}
     <span style="margin-left:auto">© ${new Date().getFullYear()} Scalecraft Social</span>
   </div></div>`;
 
@@ -303,6 +313,7 @@
               </div>
               <div class="field" id="otherWrap" ${niche === 'other' ? '' : 'hidden'}><input type="text" name="other" placeholder="Your niche, in a word or two" value="${last.other || ''}" aria-label="Your niche"></div>
               <label class="bizcheck"><input type="checkbox" id="evBiz" ${last.is_business ? 'checked' : ''}> This is a business account <span class="hint" id="bizHint" ${last.is_business ? '' : 'hidden'}>— you get the creator scoring today and a note when the business version is ready</span></label>
+              ${token() ? '' : raw(h`<label class="bizcheck terms"><input type="checkbox" name="consent"> <span>I am 18 or older, I hold this account or have its holder’s permission to score it, and I agree to the <a href="#/legal/terms">Terms of Service</a>, <a href="#/legal/privacy">Privacy Policy</a> and <a href="#/legal/retention">Data Use &amp; Retention</a> schedule. Most data is kept for up to 24 months.</span></label>`)}
               <div class="form-error" id="formError" hidden></div>
               <div class="cta">
                 <button class="btn" type="submit">Score my account — free</button>
@@ -392,8 +403,10 @@
       if (!/^[A-Za-z0-9._-]{1,60}$/.test(payload.handle)) problems.push('a handle (letters, numbers, dots or underscores)');
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.email)) problems.push('an email we can send the report to');
       if (problems.length) { err.textContent = 'We need ' + problems.join(' and ') + '.'; err.hidden = false; return; }
+      if (form.consent && !form.consent.checked) { err.textContent = 'Please tick the box to confirm you’re 18+, may score this account, and agree to the Terms.'; err.hidden = false; return; }
       err.hidden = true;
       sset('sc_form', payload);
+      if (form.consent) payload.accepted_terms_version = LEGAL_VERSION;
       await submitEvaluation(payload, form.querySelector('button[type=submit]'));
     });
     $view.querySelector('#foundersForm').addEventListener('submit', async e => {
@@ -418,6 +431,7 @@
       if (ctx) body.plan_context = ctx;
       if (payload.rerun_of) body.rerun_of = payload.rerun_of;
       if (payload.is_business) body.is_business = true;
+      if (payload.accepted_terms_version) body.accepted_terms_version = payload.accepted_terms_version;
       const res = await api('/evaluate/social-snapshot', { method: 'POST', body: JSON.stringify(body) });
       sset('sc_job_' + res.job_id, { ...payload, submitted_at: Date.now() });
       go('#/evaluating/' + encodeURIComponent(res.job_id));
@@ -1605,7 +1619,7 @@
         <div class="field"><label for="suPass2">Confirm password</label><input id="suPass2" type="password" name="password_confirm" autocomplete="new-password" placeholder="••••••••••"></div>
         <div class="field"><label for="suNiche">Your niche</label><div class="selwrap"><select id="suNiche" name="niche">${raw(NICHES.map(([k, n]) => h`<option value="${k}" ${k === (sget('sc_form', {}).category || 'fitness_creator') ? 'selected' : ''}>${n}</option>`).join(''))}</select></div></div>
         <label class="check"><input type="checkbox" name="is_business" ${sget('sc_form', {}).is_business ? 'checked' : ''}> This is a business account</label>
-        <label class="check"><input type="checkbox" name="consent"> I agree to the <a href="#/legal/terms">Terms</a> and <a href="#/legal/privacy">Privacy Policy</a>.</label>
+        <label class="check"><input type="checkbox" name="consent"> <span>I am 18 or older and I agree to the <a href="#/legal/terms">Terms of Service</a>, <a href="#/legal/privacy">Privacy Policy</a> and <a href="#/legal/retention">Data Use &amp; Retention</a> schedule. Most data is kept for up to 24 months.</span></label>
         <div class="form-error" id="signupError" hidden></div>
         <button class="btn" type="submit">Create account</button>
         <div class="alt">Already signed up? <a href="#/signin">Sign in</a></div>
@@ -1617,16 +1631,16 @@
       if (!email || !pass) { err.textContent = 'Email and password, please.'; err.hidden = false; return; }
       if (pass.length < 8) { err.textContent = 'Password needs at least 8 characters.'; err.hidden = false; return; }
       if (pass !== pass2) { err.textContent = 'Passwords don’t match.'; err.hidden = false; return; }
-      if (!form.consent.checked) { err.textContent = 'Please agree to the Terms and Privacy Policy.'; err.hidden = false; return; }
+      if (!form.consent.checked) { err.textContent = 'Please confirm you’re 18 or older and agree to the Terms, Privacy Policy and retention schedule.'; err.hidden = false; return; }
       err.hidden = true; const btn = form.querySelector('button[type=submit]'); btn.disabled = true; btn.textContent = 'Creating…';
       try {
-        const res = await api('/auth/signup', { method: 'POST', body: JSON.stringify({ email, password: pass, ...(name ? { company_name: name } : {}), is_business: !!form.is_business?.checked, niche: form.niche?.value || undefined }) }, { allow401: true });
+        const res = await api('/auth/signup', { method: 'POST', body: JSON.stringify({ email, password: pass, ...(name ? { company_name: name } : {}), is_business: !!form.is_business?.checked, niche: form.niche?.value || undefined, accepted_terms_version: LEGAL_VERSION }) }, { allow401: true });
         const t = res.token || res.access_token; if (!t) throw new Error('No token in response');
-        setToken(t); sessionStorage.removeItem('sc_next');
+        lset('sc_terms', LEGAL_VERSION); setToken(t); sessionStorage.removeItem('sc_next');
         const pendingUnlock = sget('sc_unlock_once', null);
         if (pendingUnlock) { sessionStorage.removeItem('sc_unlock_once'); go(`#/plan-setup?report=${encodeURIComponent(pendingUnlock)}&path=once`); toast('Signed up — one more step to your 60-day plan.'); return; }
         go(next && !/signin|signup/.test(next) ? next : '#/');
-      } catch (e2) { err.textContent = e2.body?.code === 'EMAIL_EXISTS' ? 'That email already has an account — sign in instead.' : (e2.message || 'Sign-up failed.'); err.hidden = false; btn.disabled = false; btn.textContent = 'Create account'; }
+      } catch (e2) { err.textContent = e2.body?.code === 'EMAIL_EXISTS' ? 'That email already has an account — sign in instead.' : e2.body?.code === 'TERMS_OUTDATED' ? 'Our terms changed since this page loaded. Reload the page and try again.' : (e2.message || 'Sign-up failed.'); err.hidden = false; btn.disabled = false; btn.textContent = 'Create account'; }
     });
   }
 
@@ -2158,46 +2172,109 @@
     </div></div>${raw(footer())}`;
   }
 
-  // ------------------------------------------------------------ legal (batch 3 template; copy is draft)
+  // ------------------------------------------------------------ legal
+  // Every claim on these pages should match what the code does. Section bodies
+  // are trusted HTML written here (never user input). [TO CONFIRM] marks facts
+  // only the business can supply; they render highlighted until filled in.
+  // Bump LEGAL_VERSION (and server/legal.js) on any material change: signed-in
+  // users are then asked to accept again.
+  const todo = t => `<mark class="todo">[${esc(t)}]</mark>`;
+  const contactLine = () => supportEmail() ? `<a href="mailto:${esc(supportEmail())}">${esc(supportEmail())}</a>` : `reply to any email from us, or write to ${todo('support email — set SUPPORT_EMAIL')}`;
+  const ENTITY = `Futreeng ${todo('legal entity name, type and state')}`;
+  const retRow = (what, why, keep, after) => `<tr><td>${what}</td><td>${why}</td><td><b>${keep}</b></td><td>${after}</td></tr>`;
+  const retTable = rows => `<div class="ltable"><table><thead><tr><th>Data</th><th>Why we keep it</th><th>How long</th><th>Then</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
   const LEGAL = {
     terms: { title: 'Terms of Service', sections: [
+      ['Who we are', `Scalecraft Social is operated by ${ENTITY} (“we”, “us”). These Terms, our <a href="#/legal/privacy">Privacy Policy</a> and our <a href="#/legal/retention">Data Use &amp; Retention schedule</a> together form the agreement between you and us.`],
+      ['How you agree', `You accept these Terms by ticking the box and clicking the button on the sign-up form, the free Snapshot form, or the “review our updated terms” screen. That click is your electronic signature, with the same effect as signing on paper. When you accept, we record the version you accepted, the date and time, your IP address and your browser type, so both of us can later show what was agreed. You can print or save these pages at any time. If you don’t agree, don’t use Scalecraft Social.`],
       ['What Scalecraft Social does', 'Scalecraft Social reads a public social media account, scores it out of 100 across four dimensions, and writes a plan of suggested moves. We are a measurement and recommendation service. We do not guarantee growth, reach, followers, sales or any other outcome.'],
-      ['Eligibility', 'You must be 18 or over to use Scalecraft Social. You may score an account you hold, or one you have the account holder’s consent to score.'],
+      ['Eligibility', 'You must be 18 or over to use Scalecraft Social. You may only submit an account for scoring if you hold it, or have the account holder’s permission to score it. Competitor accounts you add for comparison must be public, and you may use the comparison only for your own planning.'],
       ['Your account', 'Keep your password to yourself. You are responsible for what happens under your account. Tell us at once if you think someone else has access to it.'],
-      ['Free tier limits', 'One free Snapshot per email address. A second evaluation requires an account and a paid plan.'],
-      ['Subscriptions, billing and refunds', 'Paid plans renew monthly or annually until cancelled. Billing is handled by Stripe; we never see your full card details. You can cancel in two clicks from your settings and keep access until the end of the period you paid for. If the plan is not useful in the first seven days, reply to any email from us and we refund it.' + (supportEmail() ? ` Questions about billing: ${supportEmail()}.` : '')],
-      ['Acceptable use', 'Do not score an account you intend to harass. Do not scrape, resell or redistribute our scores, plans or calendars. Do not attempt to reverse the engine or use the service to build a competing dataset.'],
+      ['Data we collect, use and store', `By using the service you authorise us to collect the public profile data of each account you submit (and any competitor accounts you add), to process it with the service providers named in the Privacy Policy, and to store it for the periods in our <a href="#/legal/retention">Data Use &amp; Retention schedule</a>. <b>Most data is kept for no more than 24 months.</b> A few records are kept longer only where the law requires it or to settle a dispute: billing and tax records for up to 7 years, and the record of your acceptance of these Terms. Agreeing to a maximum period does not stop you asking us to delete your data sooner. You can, at any time, as the Privacy Policy explains.`],
+      ['Free tier limits', 'One free Snapshot per account and per email address. Scoring the same account again requires an account and a paid plan.'],
+      ['Subscriptions, billing and refunds', 'Paid plans renew monthly or annually until cancelled. Billing is handled by Stripe; we never see your full card details. You can cancel from your settings and keep access until the end of the period you paid for. If the plan is not useful in the first seven days, reply to any email from us and we refund it.' + (supportEmail() ? ` Questions about billing: ${esc(supportEmail())}.` : '')],
+      ['Acceptable use', 'Do not score an account you intend to harass. Do not scrape, resell or redistribute our scores, plans or calendars. Do not attempt to reverse the engine or use the service to build a competing dataset. Do not use the service for anyone under 18.'],
       ['Intellectual property', 'Your content and your data stay yours. The scores, plans and calendars we produce are licensed to you for your own use for as long as your account exists.'],
-      ['Disclaimers', 'Recommendations are suggestions, not instructions, and results vary. We are not affiliated with, endorsed by or operated by Instagram, TikTok or any other platform.'],
-      ['Liability', 'To the extent the law allows, our liability to you is limited to the amount you paid us in the twelve months before the claim. [Counsel to confirm wording.]'],
+      ['Third-party platforms', 'We are not affiliated with, endorsed by or operated by Instagram, TikTok or any other platform. We read public data through a third-party data provider. Platforms can change what is publicly visible at any time, so we can’t guarantee that every account can always be scored.'],
+      ['Disclaimers', 'Recommendations are suggestions, not instructions, and results vary. The report text is written by AI language models from the numbers and posts we collected. We check the facts it cites against that data, but it can still be wrong.'],
+      ['Liability', `To the extent the law allows, our liability to you is limited to the amount you paid us in the twelve months before the claim. ${todo('Counsel to confirm wording')}`],
       ['Termination', 'You can delete your account at any time from settings. We may suspend an account that breaks these terms; we will say why.'],
-      ['Governing law', '[Jurisdiction placeholder — to be set by counsel.]'],
-      ['Changes and contact', 'If these terms change materially we will email you before the change takes effect. Questions: reply to any email from us.']
+      ['Governing law', todo('Governing law and venue — to be set by counsel')],
+      ['Changes', 'If these Terms or the Privacy Policy change materially, we will email you before the change takes effect and ask you to accept the new version the next time you sign in. We keep a record of each version you accepted and when.'],
+      ['Contact', `Questions about these Terms: ${contactLine()}.`]
     ] },
     privacy: { title: 'Privacy Policy', sections: [
-      ['What we collect', 'Your handle, niche, email and — if you create an account — a password hash. The public profile data we read to score you. Your scores and reports. Payment metadata from Stripe (never your full card number). Basic usage analytics.'],
-      ['How we read profiles', 'Public data only, through a third-party data provider. We never log in as you, never post, and never read private accounts.'],
-      ['Why', 'To produce your report; to improve niche averages in aggregate; to email you what you asked for.'],
-      ['Who we share with', 'Our data provider; the language-model providers that write the report text (your data is not used to train their models); Stripe for payments; our email provider; our hosting provider. No one else.'],
-      ['Retention', 'Reports are kept while your account exists. Delete your account from settings and they go with it. Anonymous free snapshots are kept for 90 days.'],
-      ['Your rights', 'Access, correction and deletion of your data, on request or from settings. If you are in the EU/UK or California, the rights in GDPR and CCPA apply and we honour them. [Counsel to confirm disclosures.]'],
-      ['Cookies', 'See the Cookie Notice.'],
-      ['Children', 'Scalecraft Social is not for anyone under 18.'],
-      ['Changes and contact', 'We will email you before a material change. Questions: reply to any email from us.']
+      ['Who is responsible', `${ENTITY} runs Scalecraft Social and decides how your personal data is used (in EU/UK terms, the “controller”). Contact: ${contactLine()}. Postal address: ${todo('business postal address')}.`],
+      ['What we collect', `<b>What you give us.</b> Your email address. If you create an account, a password, which we store only as a one-way bcrypt hash and never in readable form. Your name or handle, niche, whether you’re a business, and your goal. Answers to the plan questions (for example a link, notes and goals). Anything else you type into a form, such as a cancellation reason, a promo code or a waitlist sign-up.</p><p><b>What we read from public platforms.</b> For each account submitted, whether yours or a competitor’s: the public bio, display name, link, follower count and highlights, plus up to about 30 recent posts, with each post’s date, format, caption, likes, comments, views and thumbnail image.</p><p><b>What we record automatically.</b> Your IP address and browser type, the pages and actions you use in the app, the referral link or marketing campaign you arrived from, a random ID stored in your browser, and your time zone.</p><p><b>Payments.</b> Stripe collects your card details on its own page. We receive your plan, amounts, dates and a Stripe subscription ID, never your card number.</p><p><b>Emails.</b> A log of the emails we send you: the address, the type of email, the subject and the date.`],
+      ['How we use it', 'We use your data to produce and deliver your report and plan, run your account, take payment and send the emails you signed up for. We also use it to keep the service secure and prevent abuse (such as repeat free runs), to measure how the product is used, and to calculate niche averages and public benchmarks, which are published only as aggregates without handles. We do not sell your data, and we do not use it for advertising.'],
+      ['Legal basis (EU/UK)', 'We need your data to provide the service you asked for, so contract is our basis for account data, reports and billing. For security, analytics, benchmarks and scoring public accounts we rely on our legitimate interests. We keep records required by law, such as tax records, under legal obligation. Where we ask for consent, for example to marketing emails, you can withdraw it at any time.'],
+      ['Who we share it with', `We share data only with the service providers that run the service, and only what each one needs:</p><ul>
+        <li><b>Apify</b> collects the public profile and post data for the handles submitted.</li>
+        <li><b>AI model providers</b> write the report text. Any report may use one or more of <b>Anthropic</b> (Claude), <b>Google</b> (Gemini), <b>Groq</b> and <b>OpenAI</b>. We send them the handle, bio, public metrics, captions and your plan answers. Their retention periods are in the <a href="#/legal/retention">retention schedule</a>. ${todo('Confirm every provider in use is on a paid/commercial tier that does not train on submitted data. The free Gemini tier lets Google use submitted content to improve its products.')}</li>
+        <li><b>Stripe</b> processes payments.</li>
+        <li><b>Resend</b> sends our emails.</li>
+        <li><b>Our hosting and database provider</b> ${todo('confirm: Render or Railway')}, plus ${todo('object storage for thumbnails, if enabled')}.</li>
+        <li><b>Google Fonts</b> serves the typefaces on our pages, so your browser sends your IP address to Google when a page loads.</li>
+      </ul><p>If you create a share link, the card it shows (handle and score) can be seen by anyone who has the link. We may also disclose data when the law requires it, to protect our rights or users’ safety, or to a buyer if the business is sold. The same promises would then continue to apply. We do not sell personal information, and we do not share it for cross-context behavioural advertising.`],
+      ['If we scored your account and you’re not a user', `A user may have submitted your public account for scoring, or added it as a competitor, or it may be part of the public sample we use to build niche averages. In that case we hold the public profile data listed above, which we collected from the platform through Apify, along with the score we calculated. We use it only to produce that user’s report and our aggregate benchmarks, and we keep it for no more than 24 months. To have it deleted, ${contactLine()} with your handle, and we will delete what we hold about it.`],
+      ['How long we keep it', `Most data is kept for up to 24 months, some for much less, and billing records for up to 7 years because tax law requires it. The full schedule, category by category, is on our <a href="#/legal/retention">Data Use &amp; Retention</a> page.`],
+      ['Your rights and choices', `You can ask us to show you the data we hold about you, correct it, delete it, or give you a copy in a portable format. You can also object to how we use it. Delete your account and its reports from settings, or ${contactLine()} for anything else. We reply within 30 days, and we may need to confirm the request comes from you. Email preferences and unsubscribe links are in every non-essential email. We will not treat you differently for using these rights. We extend these rights to everyone, wherever they live. If you are in the EU or UK, you can also complain to your data protection authority. If you are in California, see the next section.`],
+      ['California residents', 'We do not sell your personal information or share it for cross-context behavioural advertising. The categories we collect, where they come from, why we use them, who receives them and how long we keep them are set out in this policy and the retention schedule. You can ask to know, delete or correct your personal information using the contact details above, or have an authorised agent do so on your behalf.'],
+      ['Do Not Track and Global Privacy Control', 'Our site does not change its behaviour in response to “Do Not Track” browser signals. We do not track you across other websites and we run no third-party analytics or advertising tools, so no other company collects your browsing activity through our site. Because we do not sell or share personal information, a Global Privacy Control signal has nothing further to switch off.'],
+      ['Security', 'Passwords are stored only as bcrypt hashes. API keys you save are encrypted, and data travels between your browser and our servers over HTTPS. Access to production data is limited to the people who run the service. No system is perfectly secure. If a breach affects your personal data, we will notify you and the relevant authorities as the law requires.'],
+      ['International transfers', `We are based in the United States, and our providers may process data in the United States and other countries. If you use Scalecraft Social from outside the US, your data will be transferred there. ${todo('Counsel to confirm the transfer mechanism for EU/UK users, e.g. Standard Contractual Clauses in each provider’s data processing terms')}`],
+      ['Children', 'Scalecraft Social is not for anyone under 18, and we do not knowingly collect data from children. If we learn that an account belongs to someone under 18, or that we hold data about a child under 13, we delete it.'],
+      ['Changes', 'We will email you before a material change, and ask you to accept the new version when you next sign in. The date at the top shows when this policy last changed.'],
+      ['Contact', `Privacy questions and requests: ${contactLine()}.`]
     ] },
-    cookies: { title: 'Cookie Notice', sections: [
-      ['Strictly necessary', 'A session token so you stay signed in.'],
-      ['Preferences', 'Your billing toggle and a few display settings, stored in your browser.'],
-      ['Analytics', '[None yet — if we add a tool, we will name it here.]'],
-      ['Advertising', 'None. We do not run advertising cookies.'],
-      ['How to control them', 'Clear your browser storage for scalecraftsocial.com, or sign out.']
+    retention: { title: 'Data Use & Retention', sections: [
+      ['The short version', 'We keep most data for no more than <b>24 months</b>, and much of it for far less. The exceptions are billing and tax records, which the law requires us to keep for up to 7 years, and a record of your acceptance of our Terms. You can ask us to delete your data sooner at any time. The 24-month limit is the longest we will keep it, not a period you are locked into.'],
+      ['Why 24 months', 'The service compares your account with itself over time and with other accounts in your niche. Two years of reports is enough to show a real trend and to keep niche averages accurate. We don’t need data older than that.'],
+      ['What we use each kind of data for', 'Your account details run your account and send your emails. Profile and post data produce scores, plans and comparisons. Usage records and IP addresses keep the service secure, enforce the free-tier limit and show us what to improve. Billing records are for payment, refunds and tax. Aggregated scores, with no handles attached, make up the niche averages and published benchmarks.'],
+      ['Schedule', retTable([
+        retRow('Account details: email, password hash, name or handle, niche, business flag, goal, email preferences, referral code', 'To run your account', 'While your account is open, up to 24 months after your last sign-in', 'Deleted'),
+        retRow('Reports: scores, plans, calendars, the public profile and post data they were built from, post reviews', 'To show your progress over time', 'Up to 24 months from each report’s date', 'Deleted, or sooner if you delete the report or your account'),
+        retRow('Free Snapshot run without an account', 'To deliver the report and enforce one free Snapshot', 'Up to 24 months from the run', 'Deleted. If you sign up with the same email, it joins your account’s reports'),
+        retRow('Post thumbnail images', 'To show posts in the report', 'Free reports: 90 days. Paid reports: as long as the report', 'Deleted'),
+        retRow('Competitor accounts you add', 'For your comparison', 'As long as the report they belong to', 'Deleted with that report'),
+        retRow('Stored copy of a public profile', 'To avoid re-collecting the same account within 24 hours', 'Used for 24 hours, stored no more than 24 months', 'Deleted'),
+        retRow('Per-account scores in the niche averages', 'To build accurate niche averages', 'Up to 24 months after the account was last scored', 'Deleted. Aggregates with no handles, such as published benchmarks, may be kept'),
+        retRow('Plan answers you give us: link, notes, goals, contact email', 'To personalise your plan', 'As long as the report or plan they belong to, no more than 24 months', 'Deleted'),
+        retRow('Usage records: pages and actions, IP address, browser ID, referral and campaign source', 'Security, abuse prevention, product improvement', 'Up to 24 months', 'Deleted'),
+        retRow('Email log: address, email type, subject, date', 'To show what we sent and handle complaints', 'Up to 24 months', 'Deleted'),
+        retRow('Share links and share cards', 'So the link keeps working', 'Until you delete the report or account, no more than 24 months', 'Link stops working, card deleted'),
+        retRow('Feedback and cancellation reasons', 'To improve the product', 'Up to 24 months', 'Deleted'),
+        retRow('Waitlist and launch-list emails', 'To tell you when the thing you asked about is ready', 'Until we send that email or you ask to be removed, no more than 24 months', 'Deleted'),
+        retRow('Password reset links', 'To reset your password', '1 hour', 'Expire and are deleted'),
+        retRow('Sign-in token in your browser', 'To keep you signed in', '7 days', 'Expires. Signing out removes it at once'),
+        retRow('Billing records: plan, amounts, dates, Stripe subscription ID, promo codes used, referral credits', 'Tax, accounting, refunds and disputes', 'Up to 7 years after the transaction', 'Deleted. Stripe keeps its own records under its own policy'),
+        retRow('Record of your acceptance of these Terms: version, date and time, IP address, browser', 'To show what was agreed', 'While your account or reports exist, then up to 7 years', 'Deleted')
+      ])],
+      ['Copies held by our service providers', `Providers keep their own copies for their own, generally much shorter, periods:</p><ul>
+        <li><b>Anthropic</b> deletes API inputs and outputs within 30 days. Content flagged for a usage-policy violation can be kept up to 2 years.</li>
+        <li><b>OpenAI</b> keeps API inputs and outputs for up to 30 days for abuse monitoring and does not train on them.</li>
+        <li><b>Groq</b> does not keep inference data by default, but may log it for up to 30 days for reliability or abuse checks.</li>
+        <li><b>Google Gemini</b> (paid tier) logs prompts for a limited period for abuse detection only. ${todo('confirm paid tier, and the period')}</li>
+        <li><b>Apify</b> keeps collection results for the storage period of our plan, days to weeks, and keeps its most recent runs longer. ${todo('confirm our Apify plan')}</li>
+        <li><b>Resend</b> keeps email content and logs for 30 days.</li>
+        <li><b>Stripe</b> keeps payment records for as long as financial regulations require. Stripe decides that period, not us.</li>
+      </ul>`],
+      ['Longer only when we must', 'We keep data past these periods only when the law requires it, or when we need it to deal with a dispute, legal claim, fraud or security investigation. Even then, we keep only the data involved, use it only for that purpose, and delete it once the matter is closed.'],
+      ['Backups and logs', `Deleted data can remain in backups and server logs until they are overwritten on our hosting provider’s schedule. ${todo('confirm backup and log retention on the host')}`],
+      ['Deleting sooner', `Delete a report or your whole account from settings. For anything else, including data about an account you don’t use Scalecraft Social with, ${contactLine()}. We complete deletion requests within 30 days and tell you once it’s done.`]
+    ] },
+    cookies: { title: 'Cookie & Browser Storage Notice', sections: [
+      ['What we store in your browser', 'We don’t set advertising or analytics cookies. The app stores a few items in your browser’s local and session storage instead:</p><ul><li>Your sign-in token (<code>sc_token</code>, valid for 7 days).</li><li>A random browser ID (<code>sc_anon</code>), used to count free runs and see which pages lead to sign-ups.</li><li>The referral code and campaign you arrived from (<code>sc_ref</code>, <code>sc_utm</code>).</li><li>Form answers and display choices, so you don’t retype them.</li></ul><p>Items in session storage are cleared when you close the tab.'],
+      ['Third parties', 'Google Fonts serves our typefaces, so your browser contacts Google when a page loads. Stripe’s checkout page sets its own cookies under Stripe’s policy. There is no other third-party tracking.'],
+      ['How to control it', 'Sign out, or clear this site’s data in your browser settings. If you clear it, you’ll need to sign in again, and a free Snapshot you’ve already used still counts.']
     ] },
     use: { title: 'Acceptable Use', sections: [
-      ['Do not', 'Score an account you intend to harass. Scrape, resell or redistribute our scores, plans or calendars. Attempt to reverse the engine or build a competing dataset from it. Use the service for anyone under 18 without consent.'],
+      ['Do not', 'Score an account you intend to harass. Score an account you don’t hold without its holder’s permission. Scrape, resell or redistribute our scores, plans or calendars. Attempt to reverse the engine or build a competing dataset from it. Use the service for, or on behalf of, anyone under 18.'],
       ['We may', 'Suspend an account that breaks these rules. We will say why.']
     ] }
   };
   function viewLegal(page) {
+    if (page === 'accept') return viewAcceptTerms();
     renderHeader('legal');
     const doc = LEGAL[page] || LEGAL.terms;
     $view.innerHTML = h`<div class="wrap"><div class="legal">
@@ -2209,11 +2286,37 @@
       <article class="lbody">
         <span class="tag fair">DRAFT, PENDING LEGAL REVIEW</span>
         <h1>${doc.title}</h1>
-        <div class="fine">Last updated ${fmtDate('2026-09-19')}</div>
-        <div class="sections">${raw(doc.sections.map((sec, i) => h`<section id="s${i + 1}"><h2>${i + 1} · ${sec[0]}</h2><p>${sec[1]}</p></section>`).join(''))}</div>
+        <div class="fine">Last updated ${fmtDate(LEGAL_VERSION + 'T12:00:00')} · Version ${LEGAL_VERSION}</div>
+        <div class="sections">${raw(doc.sections.map((sec, i) => h`<section id="s${i + 1}"><h2>${i + 1} · ${sec[0]}</h2>${raw(/^<div/.test(sec[1]) ? sec[1] : `<p>${sec[1]}</p>`)}</section>`).join(''))}</div>
       </article>
     </div></div>${raw(footer())}`;
     $view.querySelectorAll('[data-jump]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); document.getElementById(a.dataset.jump)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }));
+  }
+  // Accounts whose recorded acceptance is missing or older than LEGAL_VERSION
+  // land here (see refreshAdminFlag) until they accept.
+  function viewAcceptTerms() {
+    renderHeader('legal');
+    if (!token()) { go('#/legal/terms'); return; }
+    const next = sget('sc_next', '#/');
+    $view.innerHTML = h`<div class="wrap"><div class="authwrap"><div class="brandname">Scalecraft Social</div>
+      <form class="card lightform" id="acceptForm" novalidate><h1>Our terms have been updated</h1>
+        <p class="lede sm">Before you continue, please review and accept the current <a href="#/legal/terms">Terms of Service</a>, <a href="#/legal/privacy">Privacy Policy</a> and <a href="#/legal/retention">Data Use &amp; Retention</a> schedule (version ${LEGAL_VERSION}). In short: we keep most data for no more than 24 months, billing records for up to 7 years as tax law requires, and you can ask us to delete your data sooner at any time.</p>
+        <label class="check"><input type="checkbox" name="consent"> <span>I am 18 or older and I agree to the <a href="#/legal/terms">Terms of Service</a>, <a href="#/legal/privacy">Privacy Policy</a> and <a href="#/legal/retention">Data Use &amp; Retention</a> schedule.</span></label>
+        <div class="form-error" id="acceptError" hidden></div>
+        <button class="btn" type="submit">Accept and continue</button>
+        <div class="alt">Don’t agree? <a href="#" data-action="signout">Sign out</a>. You can still delete your account from settings, or ask us to delete your data.</div>
+      </form></div></div>${raw(footer())}`;
+    const form = $view.querySelector('#acceptForm');
+    form.addEventListener('submit', async e => {
+      e.preventDefault(); const err = form.querySelector('#acceptError');
+      if (!form.consent.checked) { err.textContent = 'Please tick the box to accept.'; err.hidden = false; return; }
+      const btn = form.querySelector('button[type=submit]'); btn.disabled = true;
+      try {
+        await api('/account/accept-terms', { method: 'POST', body: JSON.stringify({ accepted_terms_version: LEGAL_VERSION }) });
+        lset('sc_terms', LEGAL_VERSION); sessionStorage.removeItem('sc_next');
+        toast('Thanks — you’re all set.'); go(next && !/legal\/accept|signin|signup/.test(next) ? next : '#/');
+      } catch (e2) { if (e2.status === 401) return; err.textContent = e2.body?.code === 'TERMS_OUTDATED' ? 'The terms changed while this page was open. Reload the page and try again.' : (e2.message || 'Couldn’t save that. Try again.'); err.hidden = false; btn.disabled = false; }
+    });
   }
 
   // ------------------------------------------------------------ router
@@ -2249,6 +2352,8 @@
     if (act.dataset.action === 'email-report') { e.preventDefault(); toast('This report is already on its way to your inbox.'); }
   });
   loadLevels();
+  // Returning visitors already hold a token; check their Terms acceptance once per page load.
+  if (token() && lget('sc_terms', null) !== LEGAL_VERSION) refreshAdminFlag();
   window.addEventListener('hashchange', route);
   if (CFG.useMock) { const b = document.createElement('div'); b.className = 'mockbadge'; b.textContent = 'Sample data'; b.setAttribute('aria-hidden', 'true'); document.body.appendChild(b); }
   route();

@@ -407,6 +407,16 @@ function initSchema() {
   `);
   db.run(`CREATE INDEX IF NOT EXISTS idx_referrals_referrer ON growth_engine_referrals (referrer_id)`);
 
+  // Click-through acceptance of the Terms/Privacy Policy. Append-only: one
+  // row per acceptance, so every version someone agreed to stays provable.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS growth_engine_terms_acceptances (
+      id TEXT PRIMARY KEY, account_id TEXT, email TEXT, version TEXT NOT NULL, context TEXT NOT NULL,
+      ip TEXT, user_agent TEXT, accepted_at INTEGER NOT NULL
+    )
+  `);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_terms_acc_account ON growth_engine_terms_acceptances (account_id, accepted_at)`);
+
   // Tier history table: audit log of tier changes
   db.run(`
     CREATE TABLE IF NOT EXISTS tier_history (
@@ -1228,6 +1238,16 @@ async function ensureRefCode(userId) {
   for (let i = 0; i < 5; i++) { const code = newRefCode(); try { db.run(`UPDATE users SET ref_code = ? WHERE user_id = ? AND ref_code IS NULL`, [code, userId]); saveDb(); return (await getUserById(userId)).refCode; } catch { /* collision: retry */ } }
   return null;
 }
+async function recordTermsAcceptance({ accountId = null, email = null, version, context, ip = null, userAgent = null, acceptedAt = Date.now() }) {
+  if (!db) throw new Error("Database not initialized");
+  db.run(`INSERT INTO growth_engine_terms_acceptances (id, account_id, email, version, context, ip, user_agent, accepted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, ["ta_" + uid(), accountId, email ? String(email).toLowerCase() : null, version, context, ip, userAgent, acceptedAt]);
+  saveDb();
+}
+async function latestTermsAcceptance(accountId) {
+  if (!db) throw new Error("Database not initialized");
+  const r = one(`SELECT version, accepted_at FROM growth_engine_terms_acceptances WHERE account_id = ? ORDER BY accepted_at DESC LIMIT 1`, [accountId]);
+  return r ? { version: r.version, acceptedAt: Number(r.accepted_at) } : null;
+}
 async function getUserByRefCode(code) {
   if (!db) throw new Error("Database not initialized");
   const r = rowsOf(`SELECT user_id FROM users WHERE ref_code = ?`, [String(code || "").toLowerCase()])[0];
@@ -1698,6 +1718,8 @@ module.exports = {
   getTierHistory,
   // Users
   createUser,
+  recordTermsAcceptance,
+  latestTermsAcceptance,
   getUserByEmail,
   getUserById,
   updateUserPassword,
