@@ -4,7 +4,8 @@ const crypto = require("crypto");
 const initSqlJs = require("sql.js");
 
 const DATA_DIR = path.join(__dirname, "data");
-const GROWTH_ENGINE_DB_FILE = path.join(DATA_DIR, "growth_engine.db");
+// GROWTH_ENGINE_DB points tests and scripts at a scratch file instead of the live one.
+const GROWTH_ENGINE_DB_FILE = process.env.GROWTH_ENGINE_DB || path.join(DATA_DIR, "growth_engine.db");
 
 let SQL = null;
 let db = null;
@@ -117,6 +118,28 @@ function initSchema() {
       email TEXT NOT NULL,
       platform TEXT NOT NULL,
       created_at INTEGER NOT NULL
+    )
+  `);
+
+  // Connected accounts (official Instagram / TikTok APIs): one row per account+platform.
+  // Tokens are encrypted with ENCRYPTION_KEY; nothing here is readable without it.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS growth_engine_connections (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      platform TEXT NOT NULL,
+      ext_user_id TEXT,
+      handle TEXT,
+      display_name TEXT,
+      avatar_url TEXT,
+      token_enc TEXT NOT NULL,
+      refresh_enc TEXT,
+      expires_at INTEGER,
+      refresh_expires_at INTEGER,
+      scopes TEXT,
+      last_error TEXT,
+      connected_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
     )
   `);
 
@@ -550,7 +573,7 @@ async function deleteAccount(accountId) {
   if (!db) throw new Error("Database not initialized");
   const n = db.exec(`SELECT COUNT(*) FROM growth_engine_reports WHERE account_id = ?`, [accountId]);
   const reports = n.length ? Number(n[0].values[0][0]) : 0;
-  for (const t of ["growth_engine_reports", "growth_engine_jobs", "growth_engine_tier_history", "growth_engine_entitlements", "entitlements"]) {
+  for (const t of ["growth_engine_reports", "growth_engine_jobs", "growth_engine_tier_history", "growth_engine_entitlements", "entitlements", "growth_engine_connections", "growth_engine_plan_context"]) {
     try { db.run(`DELETE FROM ${t} WHERE account_id = ?`, [accountId]); } catch { /* table/column may not exist in this schema */ }
   }
   try { db.run(`DELETE FROM entitlements WHERE user_id = ?`, [accountId]); } catch { /* sqlite schema uses account_id */ }
@@ -641,6 +664,41 @@ async function getPlanContext(accountId, handle, platform) {
   if (!r.length || !r[0].values.length) return null;
   try { return { ...JSON.parse(r[0].values[0][0]), updated_at: r[0].values[0][1] }; } catch { return null; }
 }
+const CONN_COLS = ["id","account_id","platform","ext_user_id","handle","display_name","avatar_url","token_enc","refresh_enc","expires_at","refresh_expires_at","scopes","last_error","connected_at","updated_at"];
+function connRow(columns, row) {
+  const g = (k) => row[columns.indexOf(k)];
+  return { id: g("id"), accountId: g("account_id"), platform: g("platform"), extUserId: g("ext_user_id") || null, handle: g("handle") || null, displayName: g("display_name") || null, avatarUrl: g("avatar_url") || null,
+    tokenEnc: g("token_enc"), refreshEnc: g("refresh_enc") || null, expiresAt: g("expires_at") || null, refreshExpiresAt: g("refresh_expires_at") || null, scopes: g("scopes") || null, lastError: g("last_error") || null, connectedAt: g("connected_at"), updatedAt: g("updated_at") };
+}
+async function setConnection(accountId, platform, c) {
+  if (!db) throw new Error("Database not initialized");
+  const id = `${accountId}|${platform}`; const now = Date.now();
+  const prev = await getConnection(accountId, platform);
+  db.run(`INSERT OR REPLACE INTO growth_engine_connections (${CONN_COLS.join(",")}) VALUES (${CONN_COLS.map(() => "?").join(",")})`,
+    [id, accountId, platform, c.extUserId || null, c.handle ? String(c.handle).toLowerCase() : null, c.displayName || null, c.avatarUrl || null, c.tokenEnc, c.refreshEnc || null, c.expiresAt || null, c.refreshExpiresAt || null, c.scopes || null, c.lastError || null, prev?.connectedAt || now, now]);
+  saveDb();
+  return getConnection(accountId, platform);
+}
+async function getConnection(accountId, platform) {
+  if (!db) throw new Error("Database not initialized");
+  const r = db.exec(`SELECT * FROM growth_engine_connections WHERE id = ?`, [`${accountId}|${platform}`]);
+  return r.length && r[0].values.length ? connRow(r[0].columns, r[0].values[0]) : null;
+}
+async function listConnections(accountId) {
+  if (!db) throw new Error("Database not initialized");
+  const r = db.exec(`SELECT * FROM growth_engine_connections WHERE account_id = ? ORDER BY platform`, [accountId]);
+  return r.length ? r[0].values.map((v) => connRow(r[0].columns, v)) : [];
+}
+async function deleteConnection(accountId, platform) {
+  if (!db) throw new Error("Database not initialized");
+  db.run(`DELETE FROM growth_engine_connections WHERE id = ?`, [`${accountId}|${platform}`]); saveDb(); return { deleted: true };
+}
+async function listConnectionsExpiringBefore(ts) {
+  if (!db) throw new Error("Database not initialized");
+  const r = db.exec(`SELECT * FROM growth_engine_connections WHERE expires_at IS NOT NULL AND expires_at < ?`, [ts]);
+  return r.length ? r[0].values.map((v) => connRow(r[0].columns, v)) : [];
+}
+
 async function setPlanContext(accountId, handle, platform, context) {
   if (!db) throw new Error("Database not initialized");
   const { updated_at, ...ctx } = context || {};
@@ -1656,6 +1714,7 @@ async function updateUserPassword(userId, passwordHash) {
 }
 
 module.exports = {
+  setConnection, getConnection, listConnections, deleteConnection, listConnectionsExpiringBefore,
   setStripeIds,
   countFreeSnapshotsByEmail,
   latestFreeSnapshotForEmail,

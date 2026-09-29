@@ -29,7 +29,7 @@ Tester invites). Real customers need App Review (step 5 on the API setup page):
 business verification, a screencast of the connect flow on scalecraftsocial.com,
 and a written explanation per permission. Budget 6–8 weeks (`docs/` notes of 29 Sept).
 
-## The connect flow Joe builds (Instagram Login, no Facebook Page needed)
+## The connect flow (built 29 Sept in `server/growth_engine_connect.js`; this section is the reference it was built from)
 
 1. Button on the report/Path for a signed-in user: "Connect Instagram to unlock
    saves, reach and story views". It links to
@@ -51,8 +51,7 @@ and a written explanation per permission. Budget 6–8 weeks (`docs/` notes of 2
    needs the **Facebook Login for Business** use case (`instagram_manage_insights`
    + `pages_read_engagement` on a Page-linked account). Add that use case and a
    second review later; until then competitors stay on the public snapshot.
-5. Env on Render: `IG_APP_ID=1036695342742623`, `IG_APP_SECRET=<dashboard>`,
-   `IG_REDIRECT_URI=https://scalecraftsocial.com/api/growth-engine/v1/connect/instagram/callback`.
+5. Env on Render: `IG_APP_ID=1036695342742623`, `IG_APP_SECRET=<dashboard>`. The redirect URI is derived from `APP_URL`.
 
 ## Business portfolios, what happened on 29 Sept
 

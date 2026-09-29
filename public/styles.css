@@ -1240,3 +1240,16 @@ body.focus .sigshape .now { fill: var(--on-dark); stroke: var(--on-dark); }
   .sharepromo .t { flex: 1 1 auto; min-width: 0; }
   .sharepromo h2 { font-size: 22px; }
 }
+
+/* Connected accounts (official APIs) */
+.conncard { padding: 22px; }
+.conncard .t .n { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.conncard h2 { font-size: 22px; letter-spacing: -.02em; margin-top: 4px; }
+.conncard p { margin-top: 8px; font-size: 14px; line-height: 1.5; color: var(--body); }
+.connrows { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+.connrow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 12px 14px; background: var(--ground); border-radius: 14px; }
+.connrow .pl { font-weight: 700; min-width: 90px; }
+.connrow .who { flex: 1 1 160px; font-size: 14px; }
+.connrow .warn { color: var(--act); }
+.connectline { margin-top: 8px; font-size: 13px; color: var(--body); }
+.linkbtn { background: none; border: 0; padding: 0; font: inherit; font-weight: 600; color: var(--act); cursor: pointer; text-decoration: underline; }

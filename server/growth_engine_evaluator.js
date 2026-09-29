@@ -246,7 +246,23 @@ const CATEGORY_BENCHMARKS = {
 };
 
 // Fetch real social media data based on platform
-async function getRealPostData(handle, platform, category) {
+async function getRealPostData(handle, platform, category, { accountId = null } = {}) {
+  // Connected account → the official API, which sees what a scrape can't (saves, reach).
+  // Any API failure falls back to the public read so a report is never lost to a token hiccup.
+  try {
+    const connect = require("./growth_engine_connect");
+    const conn = await connect.connectionFor(accountId, platform === "ig" ? "instagram" : platform, handle);
+    if (conn) {
+      try {
+        const data = await connect.fetchConnected(conn);
+        console.log(`[Growth Engine] @${handle} read through the ${platform} API (connected account)`);
+        return formatInstagramDataForAnalysis({ ...data, platform: platform === "ig" ? "instagram" : platform });
+      } catch (err) {
+        console.warn(`[Growth Engine] connected ${platform} read failed for @${handle}: ${err.message} — falling back to the public profile`);
+        try { await require("./growth_engine_db_select").setConnection(conn.accountId, conn.platform, { ...conn, lastError: err.message }); } catch { /* best-effort */ }
+      }
+    }
+  } catch (err) { console.warn(`[Growth Engine] connection lookup failed: ${err.message}`); }
   if (platform === "instagram" || platform === "ig") {
     try {
       // Apify reads any public profile; the Graph API only reads accounts we own.
@@ -284,6 +300,7 @@ function formatInstagramDataForAnalysis(instagramData) {
     biography: instagramData.biography || null,
     website: instagramData.website || "empty (no link in bio)",
     metrics: instagramData.analysis,
+    connected: !!instagramData.connected,
     posts_sampled: instagramData.recent_posts.length,
     recent_activity: instagramData.recent_posts.map((p) => ({
       date: p.timestamp.split("T")[0],
@@ -294,6 +311,7 @@ function formatInstagramDataForAnalysis(instagramData) {
       video_views: p.video_view_count || undefined,
       shares: p.share_count || undefined,
       saves: p.save_count || undefined,
+      reach: p.reach || undefined,
       duration_s: p.duration || undefined,
       location: p.location || undefined,
       caption_preview: p.caption ? p.caption.substring(0, 100) : "",
@@ -305,7 +323,7 @@ function formatInstagramDataForAnalysis(instagramData) {
       id: String(p.id || p.short_code || ""), posted_at: p.timestamp,
       type: p.is_reel ? (instagramData.platform === "tiktok" ? "video" : "reel") : String(p.media_type || "").toLowerCase() === "carousel" ? "carousel" : String(p.media_type || "").toLowerCase() === "video" ? "video" : instagramData.platform === "tiktok" ? "slideshow" : "image",
       caption: (p.caption || "").slice(0, 300), likes: p.like_count || 0, comments: p.comments_count || 0,
-      views: p.video_view_count || null, saves: p.save_count ?? null, shares: p.share_count ?? null, duration_s: p.duration || null,
+      views: p.video_view_count || null, saves: p.save_count ?? null, shares: p.share_count ?? null, reach: p.reach ?? null, duration_s: p.duration || null,
       permalink: p.permalink || null, source_thumbnail_url: p.thumbnail_url || null, is_pinned: !!p.is_pinned,
     })),
   };
@@ -626,7 +644,7 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
   let realData = null;
   try {
     await onStage("finding", 1);
-    realData = await getRealPostData(handle, platform, category);
+    realData = await getRealPostData(handle, platform, category, { accountId });
     await onStage("reading", 2);
     postRecords = Array.isArray(realData.posts) ? realData.posts : [];
     profileBio = realData.biography || null;
@@ -748,7 +766,8 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
     profile: { external_url: realData?.analysis?.profile_clarity?.external_url || realData?.website || null, highlight_count: Number(realData?.analysis?.profile_clarity?.highlight_count) || 0, pinned_posts: Number(realData?.analysis?.content?.pinned_posts) || 0, bio: profileBio || "" },
     tz: inputParams.tz || null,
     best_times: postRecords.length ? bestTimes(postRecords, { tz: inputParams.tz || "UTC", platform }) : null,
-    data_window: postRecords.length ? `Based on your last ${postRecords.length} posts. We can't see saves, reach or story views.` : null,
+    data_window: postRecords.length ? (realData?.connected ? `Based on your last ${postRecords.length} posts, read from your connected ${platform === "tiktok" ? "TikTok" : "Instagram"} account${platform === "tiktok" ? "." : " — saves, reach and shares included."}` : `Based on your last ${postRecords.length} posts. We can't see saves, reach or story views.`) : null,
+    data_source: realData?.connected ? "api" : "public",
     plan_context: inputParams.plan_context || null,
     data_confidence: structured ? "full" : "narrative_only",
     narrative,

@@ -38,6 +38,14 @@ services:
         sync: false
       # Email (Resend). See docs/EMAIL_SETUP.md. Unset RESEND_API_KEY → every
       # send is logged, nothing goes out.
+      - key: TIKTOK_CLIENT_KEY
+        sync: false
+      - key: TIKTOK_CLIENT_SECRET
+        sync: false
+      - key: IG_APP_ID
+        value: '1036695342742623'
+      - key: IG_APP_SECRET
+        sync: false
       - key: RESEND_API_KEY
         sync: false
       - key: MAIL_FROM
