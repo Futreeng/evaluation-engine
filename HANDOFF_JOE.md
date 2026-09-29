@@ -96,6 +96,10 @@ ledger never expire). Competitor data is stored for accounts that never used us.
 
 ## Official Instagram and TikTok access (yours, per Haron 23 Sept)
 
+> **Superseded by [docs/OFFICIAL_API_SPEC.md](docs/OFFICIAL_API_SPEC.md) (29 Sept).** Step 1 below
+> won't work as written: Business Discovery requires Facebook Login, and a Meta app can use
+> only one login type. The spec picks Facebook Login and explains why.
+
 Goal: creators connect their own account so the report can see saves, reach, story views and
 audience demographics, competitors come through Business Discovery instead of a scrape, and
 the product no longer depends on scraping for paid users. The scrape stays for the free
@@ -137,7 +141,7 @@ Discovery for competitors, new signals folded into the existing dimensions.
 
 ### Render env (beyond what's already there)
 
-`SUPPORT_EMAIL=hello@futreeng.com` · `MAIL_FROM="Scalecraft Social <hello@send.futreeng.com>"` · `REPLY_TO=hello@futreeng.com` · `EMAIL_POSTAL_ADDRESS` · `APP_URL=https://scalecraft.onrender.com` (or the domain) · `ADMIN_EMAILS` (you + Haron) · `ADMIN_TOKEN` · promo codes only for comps/campaigns (`node scripts/promo.js create …`) — founders pricing is automatic, no code · `SCRAPE_POSTS=30` · `BASELINE_MIN_N=10`. Everything else has a default; `server/.env.example` documents every knob by spec item.
+`SUPPORT_EMAIL=hello@futreeng.com` · `MAIL_FROM="Scalecraft Social <hello@send.futreeng.com>"` · `REPLY_TO=hello@futreeng.com` · `EMAIL_POSTAL_ADDRESS` · `APP_URL=https://scalecraft.onrender.com` (or the domain) · `ADMIN_EMAILS` (you + Haron) · `ADMIN_TOKEN` · promo codes only for comps/campaigns (`node scripts/promo.js create …`) — founders pricing is automatic, no code · `SCRAPE_POSTS=30` · `BASELINE_MIN_N=10`. Everything else has a default; `server/.env.example` documents every knob by spec item.
 
 Cost guardrails already on: `PAID_RUNS_PER_DAY`, `COMPETITOR_PULLS_PER_DAY`, `FREE_RUNS_PER_DAY_GLOBAL`, `EVALS_PER_IP_PER_HOUR`, `ROASTS_PER_IP_PER_HOUR`, `POST_REVIEW_*`, `WINBACK_BATCH`. Every scrape and LLM call lands in `growth_engine_costs`; `#/admin` shows spend vs revenue.
 
