@@ -145,7 +145,8 @@ Cost guardrails already on: `PAID_RUNS_PER_DAY`, `COMPETITOR_PULLS_PER_DAY`, `FR
 - Remove the unused AI keys from Render (Together isn't referenced by the code; Claude/OpenAI only if not in the fallback) so the subprocessor list stays true, and confirm each remaining provider's training-data position before any blanket "not used for training" claim goes back in.
 - **Renewal law (California AB 2863, in force July 2025; FTC/ROSCA)**: the terms now promise (a) express agreement at checkout — set the Terms and Privacy URLs under Stripe → Settings → Public details, then pass `consent_collection: { terms_of_service: "required" }` in `_createStripeSubscription` (it errors until the URL is set, so gate it on an env flag); (b) an **annual renewal reminder email** (price, period, how to cancel) — a small cron in `growth_engine_refresh.js` off `tier_start_date`; (c) consent records kept 3 years — Stripe keeps the session's consent, we should log the checkout session id on the entitlement.
 - **EU cookie consent**: the first-party analytics id in localStorage is technically a stored identifier under ePrivacy; either gate it behind a one-line consent bar for EU visitors or accept the (low) risk. Counsel's call.
-- Counsel: postal address and entity details, liability/indemnity wording, governing law and disputes, the state auto-renewal wording, EU/UK representative if needed, then drop the DRAFT tag.
+- `EMAIL_POSTAL_ADDRESS` on Render = `FutureEng LLC, 5900 Balcones Drive, Ste 100, Austin, TX 78731` (the legal pages now carry it).
+- Counsel: entity details, liability/indemnity wording, governing law and disputes, the state auto-renewal wording, EU/UK representative if needed, then drop the DRAFT tag.
 
 ## Cheap wins, anyone
 

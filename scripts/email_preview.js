@@ -10,7 +10,7 @@ const path = require("path");
 process.env.EMAIL_PROVIDER = "log";
 process.env.APP_URL = process.env.APP_URL || "https://scalecraft.onrender.com";
 process.env.SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || "hello@futreeng.com";
-process.env.EMAIL_POSTAL_ADDRESS = process.env.EMAIL_POSTAL_ADDRESS || "FutureEng LLC, New York, NY";
+process.env.EMAIL_POSTAL_ADDRESS = process.env.EMAIL_POSTAL_ADDRESS || "FutureEng LLC, 5900 Balcones Drive, Ste 100, Austin, TX 78731";
 
 const email = require("../server/growth_engine_email");
 const out = path.resolve(process.argv[2] || path.join(__dirname, "..", "server", "emails", "preview"));
