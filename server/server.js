@@ -62,6 +62,11 @@ app.use((req, res, next) => {
 // "payment succeeded" away from a free subscription, so this ordering is
 // load-bearing, not a style choice.
 app.use("/api/growth-engine/v1/billing/webhook", express.raw({ type: "application/json" }));
+// Meta posts its deauthorize and data-deletion callbacks as form-encoded
+// `signed_request`, which express.json does not parse. Scoped to those two
+// paths so nothing else changes shape.
+app.use("/api/growth-engine/v1/connect/instagram/deauthorize", express.urlencoded({ extended: false }));
+app.use("/api/growth-engine/v1/connect/instagram/data-deletion", express.urlencoded({ extended: false }));
 app.use(express.json({ limit: "50mb" }));
 app.use(cookieParser());
 

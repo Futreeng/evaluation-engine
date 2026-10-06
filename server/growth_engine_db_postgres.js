@@ -270,9 +270,28 @@ async function initSchema() {
     await client.query(`
       CREATE TABLE IF NOT EXISTS growth_engine_connections (
         id TEXT PRIMARY KEY, account_id TEXT NOT NULL, platform TEXT NOT NULL, ext_user_id TEXT, handle TEXT, display_name TEXT, avatar_url TEXT,
-        token_enc TEXT NOT NULL, refresh_enc TEXT, expires_at BIGINT, refresh_expires_at BIGINT, scopes TEXT, last_error TEXT, connected_at BIGINT NOT NULL, updated_at BIGINT NOT NULL
+        token_enc TEXT NOT NULL, refresh_enc TEXT, expires_at BIGINT, refresh_expires_at BIGINT, scopes TEXT,
+        status TEXT NOT NULL DEFAULT 'active', source TEXT NOT NULL DEFAULT 'oauth',
+        last_error TEXT, connected_at BIGINT NOT NULL, updated_at BIGINT NOT NULL
       )`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_connections_account ON growth_engine_connections (account_id)`);
+    // Explicit lifecycle instead of inferring it from last_error; `source` leaves room
+    // for a connection recorded by something other than OAuth (see docs/CONNECT_FLOW.md).
+    // ADD COLUMN IF NOT EXISTS cannot tell us whether it added anything, so ask
+    // first: the backfill must run exactly once, on the boot that introduces the
+    // column, and never over state the new code has since written.
+    const hadStatus = (await client.query(`SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'growth_engine_connections' AND column_name = 'status'`)).rowCount > 0;
+    await client.query(`ALTER TABLE growth_engine_connections ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'`);
+    await client.query(`ALTER TABLE growth_engine_connections ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'oauth'`);
+    if (!hadStatus) {
+      // Before `status` existed a broken connection was marked by last_error
+      // alone, and the UI now reads `status`. Without this, an already-broken
+      // connection comes back reading healthy and never prompts to reconnect.
+      await client.query(`UPDATE growth_engine_connections SET status = 'needs_reconnect' WHERE last_error IS NOT NULL AND last_error <> ''`);
+    }
+    // findConnectionsByExtUserId drives both Meta callbacks; without this it is a
+    // sequential scan on every deauthorize and deletion request.
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_connections_ext_user ON growth_engine_connections (platform, ext_user_id)`);
     await client.query(`
       CREATE TABLE IF NOT EXISTS growth_engine_plan_context (
         id TEXT PRIMARY KEY,
@@ -743,21 +762,30 @@ async function getPlanContext(accountId, handle, platform) {
 }
 function connRow(r) {
   return r ? { id: r.id, accountId: r.account_id, platform: r.platform, extUserId: r.ext_user_id || null, handle: r.handle || null, displayName: r.display_name || null, avatarUrl: r.avatar_url || null,
-    tokenEnc: r.token_enc, refreshEnc: r.refresh_enc || null, expiresAt: r.expires_at ? Number(r.expires_at) : null, refreshExpiresAt: r.refresh_expires_at ? Number(r.refresh_expires_at) : null, scopes: r.scopes || null, lastError: r.last_error || null, connectedAt: Number(r.connected_at), updatedAt: Number(r.updated_at) } : null;
+    tokenEnc: r.token_enc, refreshEnc: r.refresh_enc || null, expiresAt: r.expires_at ? Number(r.expires_at) : null, refreshExpiresAt: r.refresh_expires_at ? Number(r.refresh_expires_at) : null, scopes: r.scopes || null,
+    status: r.status || "active", source: r.source || "oauth", lastError: r.last_error || null, connectedAt: Number(r.connected_at), updatedAt: Number(r.updated_at) } : null;
 }
 async function setConnection(accountId, platform, c) {
   const id = `${accountId}|${platform}`; const now = Date.now();
-  await q(`INSERT INTO growth_engine_connections (id, account_id, platform, ext_user_id, handle, display_name, avatar_url, token_enc, refresh_enc, expires_at, refresh_expires_at, scopes, last_error, connected_at, updated_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$14)
+  await q(`INSERT INTO growth_engine_connections (id, account_id, platform, ext_user_id, handle, display_name, avatar_url, token_enc, refresh_enc, expires_at, refresh_expires_at, scopes, status, source, last_error, connected_at, updated_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$16)
            ON CONFLICT (id) DO UPDATE SET ext_user_id = EXCLUDED.ext_user_id, handle = EXCLUDED.handle, display_name = EXCLUDED.display_name, avatar_url = EXCLUDED.avatar_url, token_enc = EXCLUDED.token_enc, refresh_enc = EXCLUDED.refresh_enc,
-             expires_at = EXCLUDED.expires_at, refresh_expires_at = EXCLUDED.refresh_expires_at, scopes = EXCLUDED.scopes, last_error = EXCLUDED.last_error, updated_at = EXCLUDED.updated_at`,
-    [id, accountId, platform, c.extUserId || null, c.handle ? String(c.handle).toLowerCase() : null, c.displayName || null, c.avatarUrl || null, c.tokenEnc, c.refreshEnc || null, c.expiresAt || null, c.refreshExpiresAt || null, c.scopes || null, c.lastError || null, now]);
+             expires_at = EXCLUDED.expires_at, refresh_expires_at = EXCLUDED.refresh_expires_at, scopes = EXCLUDED.scopes, status = EXCLUDED.status, source = EXCLUDED.source, last_error = EXCLUDED.last_error, updated_at = EXCLUDED.updated_at`,
+    [id, accountId, platform, c.extUserId || null, c.handle ? String(c.handle).toLowerCase() : null, c.displayName || null, c.avatarUrl || null, c.tokenEnc, c.refreshEnc || null, c.expiresAt || null, c.refreshExpiresAt || null, c.scopes || null, c.status || "active", c.source || "oauth", c.lastError || null, now]);
   return getConnection(accountId, platform);
 }
 async function getConnection(accountId, platform) { return connRow((await q(`SELECT * FROM growth_engine_connections WHERE id = $1`, [`${accountId}|${platform}`])).rows[0]); }
 async function listConnections(accountId) { return (await q(`SELECT * FROM growth_engine_connections WHERE account_id = $1 ORDER BY platform`, [accountId])).rows.map(connRow); }
 async function deleteConnection(accountId, platform) { await q(`DELETE FROM growth_engine_connections WHERE id = $1`, [`${accountId}|${platform}`]); return { deleted: true }; }
-async function listConnectionsExpiringBefore(ts) { return (await q(`SELECT * FROM growth_engine_connections WHERE expires_at IS NOT NULL AND expires_at < $1`, [ts])).rows.map(connRow); }
+// Meta's deauthorize and data-deletion callbacks name the user by their
+// Instagram user id, not by our account id, so we need this way in.
+async function findConnectionsByExtUserId(platform, extUserId) {
+  if (!platform || !extUserId) return [];
+  return (await q(`SELECT * FROM growth_engine_connections WHERE platform = $1 AND ext_user_id = $2`, [String(platform), String(extUserId)])).rows.map(connRow);
+}
+// Skips needs_reconnect: only the user can fix those, and retrying one on every
+// sweep burns platform rate limit and re-reports the same failure forever.
+async function listConnectionsExpiringBefore(ts) { return (await q(`SELECT * FROM growth_engine_connections WHERE expires_at IS NOT NULL AND expires_at < $1 AND status <> 'needs_reconnect'`, [ts])).rows.map(connRow); }
 
 async function setPlanContext(accountId, handle, platform, context) {
   const { updated_at, ...ctx } = context || {};
@@ -1013,7 +1041,7 @@ async function getBaselineStats(category) {
 }
 
 module.exports = {
-  setConnection, getConnection, listConnections, deleteConnection, listConnectionsExpiringBefore,
+  setConnection, getConnection, listConnections, deleteConnection, listConnectionsExpiringBefore, findConnectionsByExtUserId,
   setStripeIds,
   initDb,
   initSchema,

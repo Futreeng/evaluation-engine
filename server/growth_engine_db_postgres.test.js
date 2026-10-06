@@ -169,6 +169,24 @@ const assert = require("assert");
   await db.insertRoastRejection({ reportId: "r1", accountId: "a1", heat: "medium", reason: "blocklist", flagged: "[2]", text: "[]" });
   assert.equal((await db.listRoastRejections(5))[0].reason, "blocklist");
 
+  // Connected accounts: the Postgres mirror of the path the connect flow writes
+  // through. Production runs on Postgres, so the renumbered INSERT, the new
+  // status/source columns and findConnectionsByExtUserId need their own cover —
+  // the connect suite only exercises the sql.js backend.
+  { const c1 = await db.setConnection("acct_pg", "instagram", { extUserId: "ig_1", handle: "Sunrise", tokenEnc: "enc", expiresAt: 123, scopes: "a,b" });
+    assert.equal(c1.status, "active"); assert.equal(c1.source, "oauth");
+    assert.equal(c1.handle, "sunrise", "handles are stored lowercase");
+    assert.equal(c1.expiresAt, 123); assert.equal(c1.lastError, null);
+    assert.equal((await db.findConnectionsByExtUserId("instagram", "ig_1")).length, 1);
+    assert.equal((await db.findConnectionsByExtUserId("tiktok", "ig_1")).length, 0, "scoped by platform");
+    assert.equal((await db.findConnectionsByExtUserId("instagram", "")).length, 0, "safe on empty input");
+    const c2 = await db.setConnection("acct_pg", "instagram", { ...c1, status: "needs_reconnect", lastError: "revoked" });
+    assert.equal(c2.status, "needs_reconnect"); assert.equal(c2.lastError, "revoked");
+    assert.equal(c2.connectedAt, c1.connectedAt, "connected_at survives the upsert");
+    assert.equal((await db.listConnections("acct_pg")).length, 1);
+    await db.deleteConnection("acct_pg", "instagram");
+    assert.equal(await db.getConnection("acct_pg", "instagram"), null); }
+
   console.log("postgres module: all assertions passed");
   process.exit(0);
 })().catch((e) => { console.error("FAILED:", e.message); process.exit(1); });

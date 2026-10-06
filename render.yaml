@@ -46,6 +46,16 @@ services:
         value: '1036695342742623'
       - key: IG_APP_SECRET
         sync: false
+      # Optional second secret for Meta's deauthorize / data-deletion callbacks;
+      # either this or IG_APP_SECRET verifying is enough. App 1617940326404118
+      # → Settings → Basic. See docs/CONNECT_FLOW.md.
+      - key: META_APP_SECRET
+        sync: false
+      # Per-platform off switches; unset means "on if credentials are set".
+      - key: CONNECT_TIKTOK_ENABLED
+        sync: false
+      - key: CONNECT_INSTAGRAM_ENABLED
+        sync: false
       - key: RESEND_API_KEY
         sync: false
       - key: MAIL_FROM

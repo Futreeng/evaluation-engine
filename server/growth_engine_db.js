@@ -137,6 +137,8 @@ function initSchema() {
       expires_at INTEGER,
       refresh_expires_at INTEGER,
       scopes TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      source TEXT NOT NULL DEFAULT 'oauth',
       last_error TEXT,
       connected_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
@@ -186,6 +188,18 @@ function initSchema() {
     )
   `);
 
+  // Connected accounts: an explicit lifecycle instead of inferring it from last_error,
+  // and `source` so a connection can be recorded by something other than OAuth later
+  // (see docs/CONNECT_FLOW.md) without reshaping the table.
+  try {
+    db.run(`ALTER TABLE growth_engine_connections ADD COLUMN status TEXT NOT NULL DEFAULT 'active'`);
+    // Only on the boot that adds the column: before it existed, a broken
+    // connection was marked by last_error alone, and the UI now reads `status`.
+    // Without this, every already-broken connection comes back reading healthy
+    // and its owner never sees the Reconnect prompt.
+    db.run(`UPDATE growth_engine_connections SET status = 'needs_reconnect' WHERE last_error IS NOT NULL AND last_error <> ''`);
+  } catch { /* exists */ }
+  try { db.run(`ALTER TABLE growth_engine_connections ADD COLUMN source TEXT NOT NULL DEFAULT 'oauth'`); } catch { /* exists */ }
   // Cancel-at-period-end: tier stays until this timestamp, then reads as free.
   try { db.run(`ALTER TABLE entitlements ADD COLUMN cancel_at INTEGER`); } catch { /* exists */ }
   // The Stripe customer behind this account (portal, receipts) and its subscription.
@@ -664,18 +678,19 @@ async function getPlanContext(accountId, handle, platform) {
   if (!r.length || !r[0].values.length) return null;
   try { return { ...JSON.parse(r[0].values[0][0]), updated_at: r[0].values[0][1] }; } catch { return null; }
 }
-const CONN_COLS = ["id","account_id","platform","ext_user_id","handle","display_name","avatar_url","token_enc","refresh_enc","expires_at","refresh_expires_at","scopes","last_error","connected_at","updated_at"];
+const CONN_COLS = ["id","account_id","platform","ext_user_id","handle","display_name","avatar_url","token_enc","refresh_enc","expires_at","refresh_expires_at","scopes","status","source","last_error","connected_at","updated_at"];
 function connRow(columns, row) {
   const g = (k) => row[columns.indexOf(k)];
   return { id: g("id"), accountId: g("account_id"), platform: g("platform"), extUserId: g("ext_user_id") || null, handle: g("handle") || null, displayName: g("display_name") || null, avatarUrl: g("avatar_url") || null,
-    tokenEnc: g("token_enc"), refreshEnc: g("refresh_enc") || null, expiresAt: g("expires_at") || null, refreshExpiresAt: g("refresh_expires_at") || null, scopes: g("scopes") || null, lastError: g("last_error") || null, connectedAt: g("connected_at"), updatedAt: g("updated_at") };
+    tokenEnc: g("token_enc"), refreshEnc: g("refresh_enc") || null, expiresAt: g("expires_at") || null, refreshExpiresAt: g("refresh_expires_at") || null, scopes: g("scopes") || null,
+    status: g("status") || "active", source: g("source") || "oauth", lastError: g("last_error") || null, connectedAt: g("connected_at"), updatedAt: g("updated_at") };
 }
 async function setConnection(accountId, platform, c) {
   if (!db) throw new Error("Database not initialized");
   const id = `${accountId}|${platform}`; const now = Date.now();
   const prev = await getConnection(accountId, platform);
   db.run(`INSERT OR REPLACE INTO growth_engine_connections (${CONN_COLS.join(",")}) VALUES (${CONN_COLS.map(() => "?").join(",")})`,
-    [id, accountId, platform, c.extUserId || null, c.handle ? String(c.handle).toLowerCase() : null, c.displayName || null, c.avatarUrl || null, c.tokenEnc, c.refreshEnc || null, c.expiresAt || null, c.refreshExpiresAt || null, c.scopes || null, c.lastError || null, prev?.connectedAt || now, now]);
+    [id, accountId, platform, c.extUserId || null, c.handle ? String(c.handle).toLowerCase() : null, c.displayName || null, c.avatarUrl || null, c.tokenEnc, c.refreshEnc || null, c.expiresAt || null, c.refreshExpiresAt || null, c.scopes || null, c.status || "active", c.source || "oauth", c.lastError || null, prev?.connectedAt || now, now]);
   saveDb();
   return getConnection(accountId, platform);
 }
@@ -693,9 +708,19 @@ async function deleteConnection(accountId, platform) {
   if (!db) throw new Error("Database not initialized");
   db.run(`DELETE FROM growth_engine_connections WHERE id = ?`, [`${accountId}|${platform}`]); saveDb(); return { deleted: true };
 }
+// Meta's deauthorize and data-deletion callbacks name the user by their
+// Instagram user id, not by our account id, so we need this way in.
+async function findConnectionsByExtUserId(platform, extUserId) {
+  if (!db) throw new Error("Database not initialized");
+  if (!platform || !extUserId) return [];
+  const r = db.exec(`SELECT * FROM growth_engine_connections WHERE platform = ? AND ext_user_id = ?`, [String(platform), String(extUserId)]);
+  return r.length ? r[0].values.map((row) => connRow(r[0].columns, row)) : [];
+}
 async function listConnectionsExpiringBefore(ts) {
   if (!db) throw new Error("Database not initialized");
-  const r = db.exec(`SELECT * FROM growth_engine_connections WHERE expires_at IS NOT NULL AND expires_at < ?`, [ts]);
+  // Skips needs_reconnect: only the user can fix those, and retrying one on every
+  // sweep burns platform rate limit and re-reports the same failure forever.
+  const r = db.exec(`SELECT * FROM growth_engine_connections WHERE expires_at IS NOT NULL AND expires_at < ? AND status <> 'needs_reconnect'`, [ts]);
   return r.length ? r[0].values.map((v) => connRow(r[0].columns, v)) : [];
 }
 
@@ -1714,7 +1739,7 @@ async function updateUserPassword(userId, passwordHash) {
 }
 
 module.exports = {
-  setConnection, getConnection, listConnections, deleteConnection, listConnectionsExpiringBefore,
+  setConnection, getConnection, listConnections, deleteConnection, listConnectionsExpiringBefore, findConnectionsByExtUserId,
   setStripeIds,
   countFreeSnapshotsByEmail,
   latestFreeSnapshotForEmail,

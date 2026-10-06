@@ -12,3 +12,6 @@ server.log
 server/scripts/baselines.export.json
 server/data/thumbs/
 public/axe.min.js
+
+# macOS
+.DS_Store

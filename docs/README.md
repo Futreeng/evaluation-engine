@@ -23,6 +23,20 @@ This folder contains documentation for the Growth Engine SaaS platform.
    - For: Founder/business owner (you)
    - Status: Reference for ongoing operations
 
+**In this folder:**
+
+4. **[WHAT_WE_BUILT.md](WHAT_WE_BUILT.md)** — plain-language record of every shipped feature, by wave
+5. **[CONNECT_FLOW.md](CONNECT_FLOW.md)** — connected accounts: env to set, URLs to register on the
+   Meta and TikTok apps, the manual test checklist that doubles as the app-review script,
+   and the known limitations. Read this before touching connect env on Render
+6. **[PRIVACY_CONNECTED_ACCOUNTS.md](PRIVACY_CONNECTED_ACCOUNTS.md)** — the privacy wording the
+   connected-account flow commits us to, and what still needs counsel
+7. **[META_APP.md](META_APP.md)** / **[TIKTOK_APP.md](TIKTOK_APP.md)** — the developer-app records
+   (ids, scopes, dashboard state, what's still owed to each dashboard)
+
+> Note: the "What's Built" and "Status" sections below are a 16 Sept snapshot and are well
+> behind the code. `WHAT_WE_BUILT.md` is the current record.
+
 ---
 
 ## 📦 What's Built

@@ -9,7 +9,11 @@
 const EVENTS = [
   "evaluate_started", "evaluate_completed", "evaluate_failed",
   "report_viewed", "path_viewed", "share_clicked", "card_downloaded", "share_page_visited",
-  "signup", "pricing_viewed", "subscribe", "unlock", "cancel", "resume", "account_connected",
+  "signup", "pricing_viewed", "subscribe", "unlock", "cancel", "resume",
+  // Connected accounts (growth_engine_connect.js): the whole lifecycle, so the
+  // funnel shows where a connect attempt dies.
+  "account_connected", "account_connect_failed", "account_first_pull", "account_refreshed",
+  "account_reconnect_needed", "account_disconnected",
   "promo_applied", "checkin_answered", "move_done", "move_skipped", "cta_clicked", "form_step2", "post_regenerated", "post_copied", "referral_signup",
   "rank_up", "milestone", "record", "badge", "moment_shared",
   "roast_opened", "roast_generated", "roast_rejected", "roast_skipped_minor", "roast_shared",
