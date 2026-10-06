@@ -280,7 +280,10 @@
     const r = refCode(); if (r) headers['x-ref'] = r;
     const u = utmHeader(); if (u) headers['x-utm'] = u;
     const doFetch = CFG.useMock && window.scalecraftMockFetch ? window.scalecraftMockFetch : fetch;
-    const res = await doFetch(url, { ...init, headers });
+    // credentials must be explicit: the connect flow sets an httpOnly nonce
+    // cookie that the callback requires back, and a cross-origin apiBase would
+    // otherwise drop it.
+    const res = await doFetch(url, { credentials: 'include', ...init, headers });
     let body = null; try { body = await res.json(); } catch { }
     if (body && body.error && !body.message) body.message = body.error;
     if (res.status === 401 && !opts.allow401) {
@@ -1231,7 +1234,7 @@
       const mine = c && (!c.handle || !line.dataset.handle || c.handle === line.dataset.handle.toLowerCase());
       if (report.data_source === 'api') return;
       // A stale connection can't be rescored, so prompt for the fix instead.
-      if (mine && c.needs_reconnect) { line.hidden = false; line.innerHTML = h`${PLAT_LABEL[p]} needs reconnecting — the login expired or was revoked. <button type="button" class="linkbtn" data-action="connect-here">Reconnect ${PLAT_LABEL[p]}</button>`; }
+      if (mine && c.needs_reconnect) { line.hidden = false; line.innerHTML = h`<span class="warn">${PLAT_LABEL[p]} needs reconnecting — the login expired or was revoked.</span> <button type="button" class="linkbtn" data-action="connect-here">Reconnect ${PLAT_LABEL[p]}</button>`; }
       else if (mine) { line.hidden = false; line.innerHTML = h`Connected as @${c.handle || c.display_name}. <button type="button" class="linkbtn" data-action="rescore-connected">Score again from the API →</button>`; }
       else if (conns.available?.[p]) { line.hidden = false; line.innerHTML = h`<button type="button" class="linkbtn" data-action="connect-here">Connect ${PLAT_LABEL[p]}</button> to read saves, reach and views straight from your account.`; }
       line.querySelector('[data-action=connect-here]')?.addEventListener('click', e => { e.currentTarget.disabled = true; startConnect(p, '#/report/' + report.report_id); });
@@ -1789,7 +1792,7 @@
           if (!c) return h`<div class="connrow"><span class="pl">${PLAT_LABEL[p]}</span><span class="who fine">Not connected</span><button type="button" class="btn sm" data-connect="${p}">Connect ${PLAT_LABEL[p]}</button></div>`;
           // A connection the platform has stopped honouring: say so, and make the
           // fix one button rather than asking them to disconnect first.
-          if (c.needs_reconnect) return h`<div class="connrow needsfix"><span class="pl">${PLAT_LABEL[p]}</span><span class="who">@${c.handle || c.display_name || 'connected'} <span class="fine warn">needs reconnecting</span>${c.last_error ? raw(h`<span class="fine">${c.last_error}</span>`) : ''}</span><button type="button" class="btn sm" data-connect="${p}">Reconnect</button><button type="button" class="btn ghost sm" data-disconnect="${p}">Remove</button></div>`;
+          if (c.needs_reconnect) return h`<div class="connrow needsfix"><span class="pl">${PLAT_LABEL[p]}</span><span class="who">@${c.handle || c.display_name || 'connected'}<span class="warn">${c.last_error || 'Needs reconnecting — the login expired or was revoked.'}</span></span><button type="button" class="btn sm" data-connect="${p}">Reconnect</button><button type="button" class="btn ghost sm" data-disconnect="${p}">Disconnect</button></div>`;
           return h`<div class="connrow"><span class="pl">${PLAT_LABEL[p]}</span><span class="who">@${c.handle || c.display_name || 'connected'}</span><button type="button" class="btn ghost sm" data-disconnect="${p}">Disconnect</button></div>`;
         }).join(''))}</div></div>`) : ''}
       ${raw((() => { const g = me && me.goal ? me.goal : sget('sc_goal', null)?.goal; const t = me && me.goal_target != null ? me.goal_target : sget('sc_goal', null)?.goal_target; const gp = g && latestRep ? goalProgress(g, t, latestRep) : null;

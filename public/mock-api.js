@@ -352,12 +352,12 @@
       const p = path.split('/')[2];
       // The real route hands back a platform URL; the mock short-circuits
       // straight to the return trip, including the first-pull count.
-      const fail = new URLSearchParams(location.search).get('mock_connect') === 'fail';
+      const fail = mockConnStart === 'fail';
       mockConnState[p] = fail ? 'none' : 'active';
       const back = (body.return_to && /^#\//.test(body.return_to)) ? body.return_to : '#/reports';
       const q = fail
-        ? 'connect_error=' + encodeURIComponent('You cancelled on the platform\u2019s page \u2014 nothing was connected.') + '&connect_code=DENIED&platform=' + p
-        : 'connected=' + p + '&handle=' + (p === 'tiktok' ? 'sunrise.fitness' : 'sunrisefitnessbk') + '&pulled=' + (p === 'tiktok' ? 18 : 24);
+        ? 'connect_error=' + encodeURIComponent('You cancelled on ' + (p === 'tiktok' ? 'TikTok' : 'Instagram') + '\u2019s screen \u2014 nothing was connected. You can try again any time.') + '&connect_code=DENIED&platform=' + p
+        : 'connected=' + p + '&handle=' + MOCK_CONN[p].handle + '&pulled=' + (p === 'tiktok' ? 18 : 24);
       return json(200, { url: back + (back.includes('?') ? '&' : '?') + q });
     }
     if (method === 'DELETE' && path.startsWith('/account/connections/')) { const p = path.split('/').pop(); const had = mockConnState[p] !== 'none'; mockConnState[p] = 'none'; return json(200, { deleted: had }); }

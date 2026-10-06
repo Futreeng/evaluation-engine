@@ -1251,10 +1251,15 @@ body.focus .sigshape .now { fill: var(--on-dark); stroke: var(--on-dark); }
 .connrow .pl { font-weight: 700; min-width: 90px; }
 .connrow .who { flex: 1 1 160px; font-size: 14px; }
 .connrow .warn { color: var(--act); }
+/* .conncard p outranks .fine on specificity, so the de-emphasis has to be
+   restated here or the note renders at full body weight. */
+.conncard p.fine { font-size: 13px; color: var(--muted); }
 /* A connection the platform stopped honouring: flagged, with the reason under
    the handle and Reconnect as the primary button. */
 .connrow.needsfix { outline: 1px solid var(--act); outline-offset: -1px; }
-.connrow.needsfix .who { display: flex; flex-direction: column; gap: 2px; }
-.connrow.needsfix .who .fine { font-size: 12px; line-height: 1.4; }
+.connrow.needsfix .who { display: flex; flex-direction: column; gap: 3px; }
+.connrow.needsfix .who .warn { font-size: 13px; line-height: 1.45; }
+/* The report-page line marks the same failure the same way the card does. */
+.connectline .warn { color: var(--act); }
 .connectline { margin-top: 8px; font-size: 13px; color: var(--body); }
 .linkbtn { background: none; border: 0; padding: 0; font: inherit; font-weight: 600; color: var(--act); cursor: pointer; text-decoration: underline; }
