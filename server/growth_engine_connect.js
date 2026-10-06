@@ -66,7 +66,8 @@ function configReport() {
     app_url: APP(),
     encryption_key: ENC() ? "configured" : "missing",
     jwt_secret: process.env.JWT_SECRET ? "configured" : "missing (using dev default)",
-    meta_app_secret: process.env.META_APP_SECRET ? "configured" : "missing",
+    // Which secrets are available to verify Meta's callbacks. Either is enough.
+    signed_request_secrets: signedRequestSecrets().map((x) => x.name),
     platforms: {},
   };
   for (const [k, v] of Object.entries(PLATFORMS)) {
@@ -464,21 +465,47 @@ const publicView = (c) => c ? {
  * Meta's deauthorize and data-deletion callbacks (required for app review).
  *
  * Both arrive as POST with a `signed_request` body field: "<sig>.<payload>",
- * base64url, HMAC-SHA256 over the payload string with the **Meta app secret**
- * (app 1617940326404118) — which is a different value from IG_APP_SECRET. If
- * META_APP_SECRET isn't set we refuse rather than trusting an unverified body.
+ * base64url, HMAC-SHA256 over the payload string with "your app secret".
+ *
+ * Which app secret, though, is genuinely ambiguous for this use case. Meta's
+ * generic data-deletion page says "your app secret" while describing a
+ * Facebook-app-scoped callback; our callbacks are configured under the
+ * Instagram use case, whose client_id is the *Instagram* app. Published
+ * implementations go both ways and the docs never say outright.
+ *
+ * So we accept either. Both values are secrets known only to us and Meta, so
+ * trying both weakens nothing — a forger needs one of the two either way — and
+ * it means the flow cannot be broken by picking the wrong one. IG_APP_SECRET is
+ * already set in production; META_APP_SECRET (app 1617940326404118 → Settings →
+ * Basic) is optional belt-and-braces. If neither is set we refuse rather than
+ * trusting an unverified body.
  */
+function signedRequestSecrets() {
+  return [
+    { name: "IG_APP_SECRET", value: process.env.IG_APP_SECRET },
+    { name: "META_APP_SECRET", value: process.env.META_APP_SECRET },
+  ].filter((s) => !!s.value);
+}
 function parseSignedRequest(signedRequest) {
-  const secret = process.env.META_APP_SECRET;
-  if (!secret) throw Object.assign(new Error("META_APP_SECRET is not set — cannot verify Meta's signed_request"), { status: 503, code: "NO_META_APP_SECRET" });
+  const secrets = signedRequestSecrets();
+  if (!secrets.length) throw Object.assign(new Error("Neither IG_APP_SECRET nor META_APP_SECRET is set — cannot verify Meta's signed_request"), { status: 503, code: "NO_META_APP_SECRET" });
   const [sig, payload] = String(signedRequest || "").split(".");
   if (!sig || !payload) throw Object.assign(new Error("Malformed signed_request"), { status: 400, code: "BAD_SIGNED_REQUEST" });
-  const want = crypto.createHmac("sha256", secret).update(payload).digest();
   const got = Buffer.from(sig, "base64url");
-  if (want.length !== got.length || !crypto.timingSafeEqual(want, got)) throw Object.assign(new Error("signed_request signature failed"), { status: 400, code: "BAD_SIGNED_REQUEST" });
+  // Every candidate is checked, and always in constant time, so neither which
+  // secret matched nor how many are set is observable from the timing.
+  let matched = null;
+  for (const s of secrets) {
+    const want = crypto.createHmac("sha256", s.value).update(payload).digest();
+    if (want.length === got.length && crypto.timingSafeEqual(want, got)) matched = matched || s.name;
+  }
+  if (!matched) throw Object.assign(new Error("signed_request signature failed"), { status: 400, code: "BAD_SIGNED_REQUEST" });
   const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
   if (data.algorithm && String(data.algorithm).toUpperCase() !== "HMAC-SHA256") throw Object.assign(new Error(`Unexpected signed_request algorithm ${data.algorithm}`), { status: 400, code: "BAD_SIGNED_REQUEST" });
   if (!data.user_id) throw Object.assign(new Error("signed_request carried no user_id"), { status: 400, code: "BAD_SIGNED_REQUEST" });
+  // Logged (the name, never the value) so the first real callback tells us which
+  // secret Meta actually signs with, and the other can then be dropped.
+  console.log(`[Connect] signed_request verified with ${matched}`);
   return data;
 }
 

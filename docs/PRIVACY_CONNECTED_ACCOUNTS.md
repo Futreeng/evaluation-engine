@@ -1,7 +1,13 @@
-# Privacy policy — connected accounts (DRAFT, not published)
+# Privacy policy — connected accounts
 
-Status: **draft for Haron's review. Nothing here is on the live page.**
-The live copy lives in `public/app.js` → `LEGAL.privacy.sections`.
+Status: **APPLIED to the live page on Haron's instruction (6 Oct 2026).**
+All four edits below are now in `public/app.js` → `LEGAL.privacy.sections`.
+Kept as the record of what changed and why, and of what still needs counsel.
+
+**Still outstanding: counsel review.** The surrounding policy already carries
+`[Counsel: …]` markers; this text has not been through that pass. It is an
+accurate description of what the code does, which is what app review needs, but
+it is not legal sign-off.
 
 ## Why the current policy needs changing
 
@@ -16,7 +22,7 @@ numbers no logged-out visitor can see (Instagram saves, reach and shares).
 Leaving it as-is would be a false statement in a privacy policy, and Meta's and
 TikTok's reviewers both read this page.
 
-## Proposed edits
+## The edits (now applied)
 
 ### 1. Amend the existing "What we collect about scored accounts" section
 

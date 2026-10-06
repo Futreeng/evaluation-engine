@@ -21,9 +21,32 @@ Names only. Never paste a value into git, a chat, or this file.
 
 | Name | Notes |
 |---|---|
-| `META_APP_SECRET` | **New.** The *Meta* app secret for app `1617940326404118` (Settings → Basic). A **different value** from `IG_APP_SECRET`. Verifies the signed_request on Meta's deauthorize and data-deletion callbacks; without it both refuse. |
+| `META_APP_SECRET` | **New, optional — see below.** The *Meta* app secret for app `1617940326404118` (Settings → Basic). A **different value** from `IG_APP_SECRET`. |
 | `CONNECT_TIKTOK_ENABLED` | **New, optional.** Set to `0` to force TikTok off while leaving credentials in place. Unset = on if credentials are set. |
 | `CONNECT_INSTAGRAM_ENABLED` | **New, optional.** Same for Instagram. |
+
+### Which secret verifies Meta's callbacks
+
+Meta signs the deauthorize and data-deletion `signed_request` with "your app
+secret". Which one that means here is genuinely ambiguous: Meta's generic
+data-deletion page describes a Facebook-app-scoped callback, but our callbacks
+are configured under the **Instagram** use case, whose `client_id` is the
+Instagram app. Published implementations go both ways and the docs never say.
+
+So the code **accepts either**. It checks the signature against `IG_APP_SECRET`
+and `META_APP_SECRET`, in constant time, and proceeds if either matches. This
+weakens nothing — a forger needs one of the two secrets either way — and it
+means the flow cannot break on a coin-flip.
+
+**What this means for you:** `IG_APP_SECRET` is already set in production, so
+the callbacks will work without you doing anything. Setting `META_APP_SECRET`
+as well is belt-and-braces, worth doing while you are in the dashboard but not
+blocking. If neither is set, both callbacks refuse rather than trusting an
+unverified body.
+
+The first real callback logs `[Connect] signed_request verified with
+<NAME>` — the name only, never the value. Once you have seen that line you know
+which secret Meta actually uses and can drop the other.
 
 Already declared in `render.yaml`; confirm each actually has a value set:
 
@@ -127,8 +150,8 @@ scopes. Step 5 shows TikTok's own view/share counts.
   of 29 Sept — confirm the outcome.
 - Confirm the TikTok sandbox exists and the test account is a target user.
 - Confirm the Instagram Testers invite was sent **and accepted**.
-- `META_APP_SECRET` has never been recorded anywhere; read it from the dashboard
-  and set it on Render.
+- `META_APP_SECRET` is optional (see "Which secret verifies Meta's callbacks");
+  set it while you are in the dashboard, but the callbacks work without it.
 
 ## 5. Notes for whoever works on this next
 

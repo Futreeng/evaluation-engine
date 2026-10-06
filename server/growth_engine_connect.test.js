@@ -257,18 +257,35 @@ const days = (n) => new Date(Date.now() - n * 86400000);
     await geDb.deleteAccount(acc);
   });
 
-  await test("Meta's signed_request is verified, and a bad signature is refused", async () => {
-    process.env.META_APP_SECRET = "meta_test_secret";
+  await test("Meta's signed_request verifies against either app secret, and a bad signature is refused", async () => {
     const crypto = require("crypto");
     const payload = Buffer.from(JSON.stringify({ algorithm: "HMAC-SHA256", user_id: "ig_12345", issued_at: 1 })).toString("base64url");
-    const sig = crypto.createHmac("sha256", "meta_test_secret").update(payload).digest("base64url");
-    assert.equal(connect.parseSignedRequest(`${sig}.${payload}`).user_id, "ig_12345");
+    const signWith = (secret) => crypto.createHmac("sha256", secret).update(payload).digest("base64url");
+    const igSig = signWith(process.env.IG_APP_SECRET);
+    const metaSig = signWith("meta_test_secret");
+
+    // Meta signs with the Instagram app secret → accepted (IG_APP_SECRET is set).
+    delete process.env.META_APP_SECRET;
+    assert.equal(connect.parseSignedRequest(`${igSig}.${payload}`).user_id, "ig_12345");
+    // …and if it turns out to sign with the Meta app secret, that works too.
+    process.env.META_APP_SECRET = "meta_test_secret";
+    assert.equal(connect.parseSignedRequest(`${metaSig}.${payload}`).user_id, "ig_12345");
+    assert.equal(connect.parseSignedRequest(`${igSig}.${payload}`).user_id, "ig_12345", "the other secret still works");
+
+    // A signature from neither secret is refused.
+    assert.throws(() => connect.parseSignedRequest(`${signWith("not_our_secret")}.${payload}`), (e) => e.code === "BAD_SIGNED_REQUEST");
     assert.throws(() => connect.parseSignedRequest(`AAAA.${payload}`), (e) => e.code === "BAD_SIGNED_REQUEST");
     assert.throws(() => connect.parseSignedRequest("nodot"), (e) => e.code === "BAD_SIGNED_REQUEST");
-    // Without the secret we refuse rather than trusting an unverified body.
-    delete process.env.META_APP_SECRET;
-    assert.throws(() => connect.parseSignedRequest(`${sig}.${payload}`), (e) => e.code === "NO_META_APP_SECRET");
-    process.env.META_APP_SECRET = "meta_test_secret";
+
+    // A payload that isn't a deletion/deauth request is refused.
+    const noUser = Buffer.from(JSON.stringify({ algorithm: "HMAC-SHA256" })).toString("base64url");
+    assert.throws(() => connect.parseSignedRequest(`${crypto.createHmac("sha256", "meta_test_secret").update(noUser).digest("base64url")}.${noUser}`), (e) => e.code === "BAD_SIGNED_REQUEST");
+
+    // With neither secret set we refuse rather than trusting an unverified body.
+    const ig = process.env.IG_APP_SECRET;
+    delete process.env.META_APP_SECRET; delete process.env.IG_APP_SECRET;
+    assert.throws(() => connect.parseSignedRequest(`${igSig}.${payload}`), (e) => e.code === "NO_META_APP_SECRET");
+    process.env.IG_APP_SECRET = ig; process.env.META_APP_SECRET = "meta_test_secret";
   });
 
   await test("deauthorize forgets every connection for that Instagram user", async () => {
@@ -314,6 +331,7 @@ const days = (n) => new Date(Date.now() - n * 86400000);
     assert.equal(r.platforms.instagram.data_deletion_url, "https://scalecraft.test/api/growth-engine/v1/connect/instagram/data-deletion");
     assert.equal(r.platforms.tiktok.scopes, "user.info.basic,user.info.profile,user.info.stats,video.list");
     assert.equal(r.encryption_key, "configured");
+    assert.deepEqual(r.signed_request_secrets, ["IG_APP_SECRET", "META_APP_SECRET"], "names only, so it is clear which secrets can verify Meta's callbacks");
     const blob = JSON.stringify(r);
     for (const secret of ["tts_test", "igs_test", "meta_test_secret", "test-secret", process.env.ENCRYPTION_KEY]) {
       assert.ok(!blob.includes(secret), `config report leaked a secret (${secret.slice(0, 6)}…)`);
