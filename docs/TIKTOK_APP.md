@@ -10,7 +10,7 @@ https://developers.tiktok.com/app/7691060702467000340
 | App name / id | Scalecraft Social / 7691060702467000340 |
 | App type | Other (Login with TikTok). Cannot be changed |
 | Status | **Draft**, not submitted |
-| Client key / secret | App details → Credentials (eye icon). Render env `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`; never in git or chat |
+| Client key / secret | App details → Credentials (eye icon). Render env `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`; never in git or chat. Since Wave 2 there is also `CONNECT_TIKTOK_ENABLED`, an optional off switch — unset means on as long as the credentials are set |
 | Category | Business |
 | Platform | Web, `https://scalecraftsocial.com/` |
 | Terms / Privacy URLs | `https://scalecraftsocial.com/#/legal/terms`, `/#/legal/privacy` |
@@ -22,7 +22,13 @@ https://developers.tiktok.com/app/7691060702467000340
 | App Review explanation | written (per-scope, 863 chars) |
 | Demo video | **PLACEHOLDER** — a 7-second slideshow of the live site so the draft would save. TikTok refuses to save a draft with any required field empty. **Replace with a real screencast of the connect flow before submitting**, or the review is rejected |
 
-## What Joe builds (mirror of the Instagram flow in docs/META_APP.md)
+## The flow (spec as of 29 Sept; built since, mirror of the Instagram flow in docs/META_APP.md)
+
+Built in `server/growth_engine_connect.js`. How it behaves now — reconnect
+lifecycle, the post-connect first pull, the plain-language error states, the
+per-platform nonce cookie, the env names and the review recording script — is in
+`docs/CONNECT_FLOW.md`. TikTok has no deauthorize or data-deletion callback to
+register; those two are Meta-only.
 
 1. Button on the report/Path: "Connect TikTok". Link:
    `https://www.tiktok.com/v2/auth/authorize/?client_key=<TIKTOK_CLIENT_KEY>&scope=user.info.basic,user.info.profile,user.info.stats,video.list&response_type=code&redirect_uri=https%3A%2F%2Fscalecraftsocial.com%2Fapi%2Fgrowth-engine%2Fv1%2Fconnect%2Ftiktok%2Fcallback&state=<signed accountId>` (PKCE `code_challenge` is required for web).

@@ -10,12 +10,15 @@ https://developers.facebook.com/apps/1617940326404118/
 | Instagram app name | Scalecraft Social-IG |
 | Instagram app ID | 1036695342742623 (this is the OAuth `client_id`) |
 | Instagram app secret | dashboard → Use cases → Customize → API setup with Instagram login → Show. Goes in Render as `IG_APP_SECRET`; never in git or chat |
+| Meta app secret | Settings → Basic → Show. A **different value** from the Instagram app secret. Optional, goes in Render as `META_APP_SECRET`: the deauthorize and data-deletion callbacks verify Meta's `signed_request` against either secret, because Meta does not document which one it signs with for the Instagram Login use case. See `docs/CONNECT_FLOW.md` |
 | Contact email | hello@futreeng.com |
 | Use case | Manage messaging & content on Instagram (Instagram API with Instagram Login) |
 | Permissions added, "Ready for testing" | `instagram_business_basic`, `instagram_business_manage_insights` |
 | Business login redirect URL | `https://scalecraftsocial.com/api/growth-engine/v1/connect/instagram/callback` |
+| Deauthorize callback URL | `https://scalecraftsocial.com/api/growth-engine/v1/connect/instagram/deauthorize` — the route exists; **still to register in the dashboard** |
+| Data deletion request URL | `https://scalecraftsocial.com/api/growth-engine/v1/connect/instagram/data-deletion` — the route exists and answers both verbs (Meta `POST`s, a person opens the `?code=` `GET`); **still to register in the dashboard** |
 | App domain | scalecraftsocial.com; website platform `https://scalecraftsocial.com/` |
-| Privacy / Terms / Data deletion URLs | `https://scalecraftsocial.com/#/legal/privacy`, `/#/legal/terms`, `/#/legal/privacy` |
+| Privacy / Terms / Data deletion URLs | `https://scalecraftsocial.com/#/legal/privacy`, `/#/legal/terms`, and Data deletion still points at `/#/legal/privacy` — repoint it at the data-deletion route above |
 | Category | Business and pages |
 | Business portfolio | **Scalecraft Social** (portfolio id 381235392320983, the former "werunnewyork" portfolio, renamed) — owns the app since 29 Sept. Legal details entered as "FutureEng LLC" (confirmed: the formation document says FutureEng), business verification **in review** |
 | Status | Unpublished. Works for accounts given the Instagram Tester role until app review passes |
@@ -30,6 +33,11 @@ business verification, a screencast of the connect flow on scalecraftsocial.com,
 and a written explanation per permission. Budget 6–8 weeks (`docs/` notes of 29 Sept).
 
 ## The connect flow (built 29 Sept in `server/growth_engine_connect.js`; this section is the reference it was built from)
+
+This section records the spec as of 29 Sept. For how the flow behaves now —
+reconnect lifecycle, the post-connect first pull, the plain-language error
+states, Meta's two callbacks, the per-platform nonce cookie, and the exact URLs
+and env names to register — read `docs/CONNECT_FLOW.md`.
 
 1. Button on the report/Path for a signed-in user: "Connect Instagram to unlock
    saves, reach and story views". It links to
@@ -51,7 +59,7 @@ and a written explanation per permission. Budget 6–8 weeks (`docs/` notes of 2
    needs the **Facebook Login for Business** use case (`instagram_manage_insights`
    + `pages_read_engagement` on a Page-linked account). Add that use case and a
    second review later; until then competitors stay on the public snapshot.
-5. Env on Render: `IG_APP_ID=1036695342742623`, `IG_APP_SECRET=<dashboard>`. The redirect URI is derived from `APP_URL`.
+5. Env on Render: `IG_APP_ID=1036695342742623`, `IG_APP_SECRET=<dashboard>`. The redirect URI is derived from `APP_URL`. Since Wave 2 also: `META_APP_SECRET` (optional, see the table above) and `CONNECT_INSTAGRAM_ENABLED` (optional off switch; unset means on as long as the credentials are set).
 
 ## Business portfolios, what happened on 29 Sept
 
@@ -78,9 +86,13 @@ and a written explanation per permission. Budget 6–8 weeks (`docs/` notes of 2
   submit review.
 - Add test accounts as Instagram Testers (your own and talon__wilson with permission).
 - App review (step 5) once the connect flow is live: screencast + per-permission notes.
+- Register the deauthorize and data-deletion callback URLs from the table above,
+  and repoint the Data deletion URL off `/#/legal/privacy`. Both routes are live;
+  `GET /api/growth-engine/v1/admin/connect-config` prints the exact strings.
 
 ## TikTok
 
 Separate developer app at https://developers.tiktok.com (Display API,
 `user.info.basic`, `user.info.profile`, `user.info.stats`, `video.list`). Same
-shape of flow; review 1–3 weeks. Not started.
+shape of flow; review 1–3 weeks. The app now exists — its record is
+`docs/TIKTOK_APP.md`.

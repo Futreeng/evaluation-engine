@@ -7,7 +7,7 @@ From then on their report reads the official API instead of the public scrape.
 Code: `server/growth_engine_connect.js`, routes in `server/routes/growth-engine.js`,
 UI in `public/app.js` (reports page + the line under each report's data window).
 Developer-app records: `docs/TIKTOK_APP.md`, `docs/META_APP.md`.
-Tests: `node server/growth_engine_connect.test.js` (24).
+Tests: `node server/growth_engine_connect.test.js` (55).
 
 **Users who never connect are unaffected.** The API path only runs for a
 signed-in account that owns a connection for the exact handle being scored, and
