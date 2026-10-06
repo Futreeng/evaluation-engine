@@ -160,7 +160,20 @@ scopes. Step 5 shows TikTok's own view/share counts.
   route the front end *does* call has a mock in `public/mock-api.js`, and the
   mock is stateful — `?mock_connect=needsfix|none|fail` picks a starting state.
 - The connections table carries `status` (`active` / `needs_reconnect`) and
-  `source` (`oauth`). `source` exists so a connection recorded some other way can
-  sit in the same table without a migration.
+  `source` (always `oauth` today). `source` exists so a connection recorded some
+  other way can sit in the same table without a migration.
+
+  That column is the answer to "replace the screenshot-upload data from Wave 1.5
+  without a migration". **There is no screenshot-upload feature, and Wave 1.5 was
+  never built at all.** Searched on 6 Oct 2026: no upload route, no multipart
+  dependency, no mention of screenshots in the build spec, in WHAT_WE_BUILT.md,
+  in the uploaded spec boards, or as a product feature in any local session
+  transcript. Wave 1.5 itself survives only as a planning doc that references
+  `docs/SCALECRAFT_WAVE_1_5.md`, which was never committed; its one surviving
+  item (1.5.1, the What/Why/When/How move format, in
+  `~/Downloads/SCALECRAFT_1_5_1_PLAN.md`) is not in the code either — no
+  `move_id`, no `when`/`how` fields. So nothing needs replacing. If a
+  screenshot-upload path is ever built, its rows go in this table with a
+  different `source` and the connected-account code does not change.
 - Costs: every official-API call is recorded through `growth_engine_costs.api()`
   at a zero rate. The number that matters is the call count, not the money.
