@@ -163,7 +163,7 @@ function authUrl(platform, accountId, { returnTo = "" } = {}) {
 }
 
 // ---- HTTP with readable errors
-async function call(url, { method = "GET", headers = {}, form = null, json = null, bearer = null, label = "api" } = {}) {
+async function call(url, { method = "GET", headers = {}, form = null, json = null, bearer = null, label = "api", countCost = true } = {}) {
   const h = { ...headers };
   let body;
   if (form) { h["Content-Type"] = "application/x-www-form-urlencoded"; body = new URLSearchParams(form).toString(); }
@@ -174,7 +174,7 @@ async function call(url, { method = "GET", headers = {}, form = null, json = nul
   try {
     const host = new URL(url).host;
     const unit = host.includes("tiktokapis") || host.includes("tiktok.com") ? "tiktok-open" : host.includes("instagram") ? "instagram-graph" : null;
-    if (unit) costs.api({ unit, endpoint: label, platform: unit === "tiktok-open" ? "tiktok" : "instagram" });
+    if (unit && countCost) costs.api({ unit, endpoint: label, platform: unit === "tiktok-open" ? "tiktok" : "instagram" });
   } catch { /* never let accounting break a fetch */ }
   const res = await fetch(url, { method, headers: h, body });
   const text = await res.text();
@@ -484,11 +484,13 @@ async function fetchInstagram(conn) {
     const isVideo = m.media_type === "VIDEO";
     const metric = isVideo ? "reach,saved,shares,views" : "reach,saved,shares";
     try {
-      const r = await call(`https://graph.instagram.com/${IG_V}/${m.id}/insights?${new URLSearchParams({ metric, access_token: token })}`, { label: "Instagram insights" });
+      const r = await call(`https://graph.instagram.com/${IG_V}/${m.id}/insights?${new URLSearchParams({ metric, access_token: token })}`, { label: "Instagram insights", countCost: false });
       const o = {}; for (const d of r.data || []) o[d.name] = d.values?.[0]?.value ?? d.total_value?.value ?? null;
       insights.set(m.id, o);
     } catch { insights.set(m.id, {}); }
   }));
+  // One row for the whole fan-out rather than one per post.
+  try { costs.api({ unit: "instagram-graph", endpoint: "Instagram insights", quantity: media.length, platform: "instagram", handle: prof.username || conn.handle }); } catch { /* accounting never breaks a read */ }
   const posts = media.map((m) => {
     const ins = insights.get(m.id) || {};
     const media_type = m.media_type === "CAROUSEL_ALBUM" ? "CAROUSEL" : m.media_type === "VIDEO" ? "VIDEO" : "IMAGE";

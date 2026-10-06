@@ -642,6 +642,11 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
   let postRecords = [];
   let profileBio = null;
   let realData = null;
+  // Declared out here, not inside the try below: the prompt block further down
+  // reads it when postInsights is present, which is outside that scope. It used
+  // to be declared inside, so that read threw ReferenceError whenever a report
+  // actually had post insights to send.
+  const tz = inputParams.tz || "UTC";
   try {
     await onStage("finding", 1);
     realData = await getRealPostData(handle, platform, category, { accountId });
@@ -655,7 +660,6 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
     // thumbnails or full captions — 30 posts must still fit Groq's 8k TPM.
     // Every date the model sees is the account's own calendar day, so "the Sep 16 reel" means the same
     // thing on the report, in the hover card and in the plan.
-    const tz = inputParams.tz || "UTC";
     const localDay = (iso) => planQuality.zonedKey(iso, tz) || iso;
     postSummary = JSON.stringify({
       ...realData, posts: undefined,

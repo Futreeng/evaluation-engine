@@ -844,6 +844,27 @@ const days = (n) => new Date(Date.now() - n * 86400000);
     await geDb.deleteAccount(acc);
   });
 
+  await test("the insights fan-out records one cost row, not one per post", async () => {
+    // Per-post rows meant ~26 concurrent inserts on a connected Instagram read,
+    // which exhausted the DB pool in production ("[Costs] write failed: timeout").
+    const costs = require("./growth_engine_costs");
+    const seen = [];
+    const realApi = costs.api;
+    costs.api = (row) => { seen.push(row); };
+    try {
+      const acc = "acct_costfan";
+      const u = new URL(connect.authUrl("instagram", acc, {}));
+      const st = u.searchParams.get("state");
+      await connect.handleCallback("instagram", { code: "c", state: st }, ck(st));
+      const conn = await geDb.getConnection(acc, "instagram");
+      const data = await connect.fetchInstagram(conn);
+      const insightRows = seen.filter((r) => r.endpoint === "Instagram insights");
+      assert.equal(insightRows.length, 1, `expected one aggregated insights row, got ${insightRows.length}`);
+      assert.equal(insightRows[0].quantity, data.recent_posts.length, "its quantity is the number of posts read");
+      await geDb.deleteAccount(acc);
+    } finally { costs.api = realApi; }
+  });
+
   console.log(`${passed} passed`);
   try { fs.unlinkSync(process.env.GROWTH_ENGINE_DB); } catch { /* fine */ }
   process.exit(process.exitCode || 0);
