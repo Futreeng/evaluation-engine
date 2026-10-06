@@ -24,6 +24,8 @@ Names only. Never paste a value into git, a chat, or this file.
 | `META_APP_SECRET` | **New, optional — see below.** The *Meta* app secret for app `1617940326404118` (Settings → Basic). A **different value** from `IG_APP_SECRET`. |
 | `CONNECT_TIKTOK_ENABLED` | **New, optional.** Set to `0` to force TikTok off while leaving credentials in place. Unset = on if credentials are set. |
 | `CONNECT_INSTAGRAM_ENABLED` | **New, optional.** Same for Instagram. |
+| `CONNECT_FIRST_PULL_MS` | **New, optional.** How long the post-connect read may hold the redirect before giving up and returning no count. Default 5000. |
+| `META_SIGNED_REQUEST_MAX_AGE_S` | **New, optional.** How old a Meta `signed_request` may be before it is refused as a replay. Default 300. |
 
 ### Which secret verifies Meta's callbacks
 
@@ -56,9 +58,15 @@ Already declared in `render.yaml`; confirm each actually has a value set:
 `APP_URL` must be exactly `https://scalecraftsocial.com` — every callback URL is
 derived from it, and they must match the dashboards character for character.
 
-Check what the running server thinks: **`GET /api/growth-engine/v1/health`** →
-the `connect` block reports each platform's enabled/credentials/flag state and
-prints the exact URLs below. It never prints a secret (there is a test for that).
+Check what the running server thinks:
+**`GET /api/growth-engine/v1/admin/connect-config`** (admin auth required) reports
+each platform's enabled/credentials/flag state and prints the exact URLs below.
+It never prints a value, only names (there is a test for that) — but it does say
+which secrets are set, which is why it is admin-only rather than on `/health`.
+
+Note: with `NODE_ENV=production` the server now refuses to sign connect state
+when `JWT_SECRET` is unset, instead of silently falling back to a default. If
+connect starts returning 500s on a new deploy, check that variable first.
 
 ## 2. URLs to register on the developer apps
 
@@ -95,9 +103,9 @@ Run on `https://scalecraftsocial.com` signed in as yourself. The domain must
 match what's registered or the recording is rejected. Record one clean take per
 platform covering steps 1–6.
 
-**Before you start:** confirm `GET /api/growth-engine/v1/health` shows
-`connect.platforms.<platform>.enabled: true`. If it doesn't, the button won't
-appear and nothing below will work.
+**Before you start:** confirm `GET /api/growth-engine/v1/admin/connect-config`
+(as an admin) shows `platforms.<platform>.enabled: true`. If it doesn't, the
+button won't appear and nothing below will work.
 
 ### Instagram (needs a Business or Creator account added as an Instagram Tester)
 
@@ -152,6 +160,35 @@ scopes. Step 5 shows TikTok's own view/share counts.
 - Confirm the Instagram Testers invite was sent **and accepted**.
 - `META_APP_SECRET` is optional (see "Which secret verifies Meta's callbacks");
   set it while you are in the dashboard, but the callbacks work without it.
+
+## 4b. Known limitations (found in review, deliberately not fixed here)
+
+- **The nonce cookie does not survive a cross-origin front end.** Production
+  serves the app and the API from the same origin (`scalecraftsocial.com`), so
+  this does not affect it. But `public/config.js` points any `*.vercel.app` copy
+  at `scalecraft.onrender.com`, which makes the `Set-Cookie` third-party:
+  Safari blocks it and Firefox partitions it, so the callback refuses. **Do not
+  test the connect flow on a Vercel preview** — use the real domain. The durable
+  fix is a first-party `GET /connect/:platform/start` that sets the cookie and
+  redirects, instead of setting it on an XHR.
+- **The status backfill is deliberately over-inclusive.** Any connection with a
+  recorded `last_error` is marked `needs_reconnect` on the upgrade boot, even
+  though some of those errors were recoverable read failures. A user who sees an
+  unnecessary Reconnect prompt clicks it and is fine; a user whose dead
+  connection looks healthy never finds out. False positive beats false negative
+  here, but it is a choice, not an accident.
+- **CORS matches origins by substring** (`server/server.js`), so
+  `vercel.app.example.com` would be reflected. Pre-existing, and auth is
+  Bearer-only, so there is no session to ride — but now that the nonce cookie
+  exists, tighten this to an exact-origin allowlist before adding any
+  cookie-based session.
+- **OAuth-time API calls are recorded without attribution.** `costs.api()` runs
+  inside the callback, which is outside the `costs.run()` scope, so token
+  exchanges land with `accountId: null, feature: "other"`.
+- **Neither the route layer nor the front end has a test harness.** The Meta
+  callbacks, the `/health` and cookie behaviour, and every `public/*.js` path are
+  covered only by the manual checklist above. Adding supertest for routes is the
+  obvious next step.
 
 ## 5. Notes for whoever works on this next
 
