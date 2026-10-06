@@ -109,10 +109,6 @@ router.get("/health", async (req, res) => {
   health.apis.twitter = process.env.TWITTER_BEARER_TOKEN ? "configured" : "missing";
   health.apis.instagram = process.env.INSTAGRAM_ACCESS_TOKEN ? "configured" : "missing";
 
-  // Connected accounts: why each platform is on or off, and the exact URLs that
-  // must be registered on the developer apps. Names and URLs only, no secrets.
-  health.connect = connect.configReport();
-
   res.json(health);
 });
 
@@ -408,6 +404,15 @@ router.post("/billing/resume", authMiddleware, async (req, res) => {
 });
 
 // GET /account/reports
+// Why each platform is on or off, and the exact URLs to register on the
+// developer apps (the URLs this route prints are the ones to register).
+// Admin-only: it reports which secrets are configured, and an
+// anonymous caller has no business knowing that. Names and URLs, never values.
+router.get("/admin/connect-config", requireAdmin, async (_req, res) => {
+  try { res.json(connect.configReport()); }
+  catch (err) { sendError(res, 500, "CONNECT_CONFIG_ERROR", err.message); }
+});
+
 // ---- Connected accounts (official Instagram / TikTok APIs). See growth_engine_connect.js.
 router.get("/account/connections", authMiddleware, async (req, res) => {
   try { res.json({ available: connect.available(), connections: (await geDb.listConnections(req.user.id)).map(connect.publicView) }); }
@@ -419,7 +424,7 @@ router.post("/connect/:platform/url", authMiddleware, async (req, res) => {
     const returnTo = /^#\/[A-Za-z0-9/_?=&.-]{0,180}$/.test(String(req.body?.return_to || "")) ? String(req.body.return_to) : "";
     const url = connect.authUrl(req.params.platform, req.user.id, { returnTo });
     // Binds the trip to this browser; the callback requires it back.
-    res.cookie(connect.NONCE_COOKIE, connect.nonceOf(url), connect.nonceCookieOpts());
+    res.cookie(connect.nonceCookie(req.params.platform), connect.nonceOf(url), connect.nonceCookieOpts());
     res.json({ url });
   } catch (err) { sendError(res, err.status || 500, err.code || "CONNECT_ERROR", err.message); }
 });
@@ -427,9 +432,15 @@ router.post("/connect/:platform/url", authMiddleware, async (req, res) => {
 router.get("/connect/:platform/callback", async (req, res) => {
   const app = (process.env.APP_URL || `${req.protocol}://${req.get("host")}`).replace(/\/$/, "");
   const back = (dest, params) => res.redirect(`${app}/${dest || "#/reports"}${(dest || "#/reports").includes("?") ? "&" : "?"}${new URLSearchParams(params)}`);
-  res.clearCookie(connect.NONCE_COOKIE, connect.nonceCookieOpts());
+  // maxAge must not ride along: res.clearCookie merges these over its own past
+  // expiry and then recomputes expires from maxAge, which re-issues the cookie
+  // for another 15 minutes instead of deleting it.
+  // Clear only this platform's nonce — a trip started for the other platform in
+  // another tab must survive.
+  const nonceName = connect.nonceCookie(req.params.platform);
+  res.clearCookie(nonceName, { ...connect.nonceCookieOpts(), maxAge: undefined });
   try {
-    const r = await connect.handleCallback(req.params.platform, req.query, { cookieNonce: req.cookies?.[connect.NONCE_COOKIE] || "" });
+    const r = await connect.handleCallback(req.params.platform, req.query, { cookieNonce: req.cookies?.[nonceName] || "" });
     events.track("account_connected", { accountId: r.accountId, props: { platform: r.platform, handle: r.handle } });
     // Proof of life: read the profile and recent posts so the UI can say what
     // it actually got. Never fails the connection — the token is already good.
@@ -445,13 +456,16 @@ router.get("/connect/:platform/callback", async (req, res) => {
 });
 // ---- Meta's required callbacks. Both are public (Meta calls them, not the
 // browser) and both authenticate by the signed_request HMAC, not by our session.
-// Registered on the app dashboard; the exact URLs are in /health → connect.
+// Registered on the app dashboard; GET /admin/connect-config prints the exact URLs.
 router.post("/connect/instagram/deauthorize", async (req, res) => {
   try {
     const data = connect.parseSignedRequest(req.body?.signed_request);
-    const accounts = await connect.forgetInstagramUser(data.user_id);
+    const { accounts, failed } = await connect.forgetInstagramUser(data.user_id);
     for (const accountId of accounts) events.track("account_disconnected", { accountId, props: { platform: "instagram", reason: "deauthorized_on_platform" } });
-    console.log(`[Connect] Instagram deauthorize for user ${data.user_id}: ${accounts.length} connection(s) deleted`);
+    console.log(`[Connect] Instagram deauthorize for user ${data.user_id}: ${accounts.length} deleted, ${failed.length} failed`);
+    // A 500 makes Meta retry. Answering ok while the token is still here would
+    // record the request as honoured when it was not.
+    if (failed.length) return sendError(res, 500, "DEAUTHORIZE_INCOMPLETE", `${failed.length} connection(s) could not be deleted`);
     res.json({ ok: true });
   } catch (err) {
     console.warn(`[Connect] Instagram deauthorize rejected: ${err.message}`);
@@ -464,8 +478,10 @@ router.post("/connect/instagram/deauthorize", async (req, res) => {
 router.post("/connect/instagram/data-deletion", async (req, res) => {
   try {
     const data = connect.parseSignedRequest(req.body?.signed_request);
-    const accounts = await connect.forgetInstagramUser(data.user_id);
+    const { accounts, failed } = await connect.forgetInstagramUser(data.user_id);
     for (const accountId of accounts) events.track("account_disconnected", { accountId, props: { platform: "instagram", reason: "data_deletion_request" } });
+    // No confirmation code for a deletion that did not happen.
+    if (failed.length) return sendError(res, 500, "DATA_DELETION_INCOMPLETE", `${failed.length} connection(s) could not be deleted`);
     const code = connect.deletionCode(data.user_id);
     console.log(`[Connect] Instagram data deletion for user ${data.user_id}: ${accounts.length} connection(s) deleted, code ${code}`);
     const app = (process.env.APP_URL || `${req.protocol}://${req.get("host")}`).replace(/\/$/, "");
@@ -477,16 +493,17 @@ router.post("/connect/instagram/data-deletion", async (req, res) => {
 });
 router.get("/connect/instagram/data-deletion", async (req, res) => {
   const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const support = esc(process.env.SUPPORT_EMAIL || "hello@futreeng.com");
   let body;
   try {
     const extUserId = connect.readDeletionCode(req.query.code);
     const remaining = await geDb.findConnectionsByExtUserId("instagram", extUserId).catch(() => []);
     body = remaining.length
-      ? `<h1>Deletion in progress</h1><p>We still hold a connection for this Instagram account. It will be removed shortly. Email <a href="mailto:${esc(process.env.SUPPORT_EMAIL || "hello@futreeng.com")}">${esc(process.env.SUPPORT_EMAIL || "hello@futreeng.com")}</a> if this does not clear.</p>`
+      ? `<h1>Deletion in progress</h1><p>We still hold a connection for this Instagram account. It will be removed shortly. Email <a href="mailto:${support}">${support}</a> if this does not clear.</p>`
       : `<h1>Deleted</h1><p>We no longer hold any Instagram access token or connected-account record for this Instagram account. Reports you created before disconnecting are covered by the retention windows in our <a href="/#/legal/privacy">Privacy Policy</a>.</p>`;
     body += `<p class="c">Confirmation code: <code>${esc(req.query.code)}</code></p>`;
   } catch {
-    body = `<h1>Unknown code</h1><p>We could not read that confirmation code. Email <a href="mailto:${esc(process.env.SUPPORT_EMAIL || "hello@futreeng.com")}">${esc(process.env.SUPPORT_EMAIL || "hello@futreeng.com")}</a> and we will confirm by hand.</p>`;
+    body = `<h1>Unknown code</h1><p>We could not read that confirmation code. Email <a href="mailto:${support}">${support}</a> and we will confirm by hand.</p>`;
   }
   res.type("html").send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Data deletion — Scalecraft Social</title><style>body{font:16px/1.6 system-ui,sans-serif;max-width:34rem;margin:4rem auto;padding:0 1.25rem;color:#111}h1{font-size:1.4rem}code{background:#f3f3f3;padding:.15em .4em;border-radius:3px}.c{color:#666;font-size:.9rem}</style></head><body>${body}</body></html>`);
 });

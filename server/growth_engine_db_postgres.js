@@ -277,8 +277,21 @@ async function initSchema() {
     await client.query(`CREATE INDEX IF NOT EXISTS idx_connections_account ON growth_engine_connections (account_id)`);
     // Explicit lifecycle instead of inferring it from last_error; `source` leaves room
     // for a connection recorded by something other than OAuth (see docs/CONNECT_FLOW.md).
+    // ADD COLUMN IF NOT EXISTS cannot tell us whether it added anything, so ask
+    // first: the backfill must run exactly once, on the boot that introduces the
+    // column, and never over state the new code has since written.
+    const hadStatus = (await client.query(`SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'growth_engine_connections' AND column_name = 'status'`)).rowCount > 0;
     await client.query(`ALTER TABLE growth_engine_connections ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'`);
     await client.query(`ALTER TABLE growth_engine_connections ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'oauth'`);
+    if (!hadStatus) {
+      // Before `status` existed a broken connection was marked by last_error
+      // alone, and the UI now reads `status`. Without this, an already-broken
+      // connection comes back reading healthy and never prompts to reconnect.
+      await client.query(`UPDATE growth_engine_connections SET status = 'needs_reconnect' WHERE last_error IS NOT NULL AND last_error <> ''`);
+    }
+    // findConnectionsByExtUserId drives both Meta callbacks; without this it is a
+    // sequential scan on every deauthorize and deletion request.
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_connections_ext_user ON growth_engine_connections (platform, ext_user_id)`);
     await client.query(`
       CREATE TABLE IF NOT EXISTS growth_engine_plan_context (
         id TEXT PRIMARY KEY,
@@ -770,7 +783,9 @@ async function findConnectionsByExtUserId(platform, extUserId) {
   if (!platform || !extUserId) return [];
   return (await q(`SELECT * FROM growth_engine_connections WHERE platform = $1 AND ext_user_id = $2`, [String(platform), String(extUserId)])).rows.map(connRow);
 }
-async function listConnectionsExpiringBefore(ts) { return (await q(`SELECT * FROM growth_engine_connections WHERE expires_at IS NOT NULL AND expires_at < $1`, [ts])).rows.map(connRow); }
+// Skips needs_reconnect: only the user can fix those, and retrying one on every
+// sweep burns platform rate limit and re-reports the same failure forever.
+async function listConnectionsExpiringBefore(ts) { return (await q(`SELECT * FROM growth_engine_connections WHERE expires_at IS NOT NULL AND expires_at < $1 AND status <> 'needs_reconnect'`, [ts])).rows.map(connRow); }
 
 async function setPlanContext(accountId, handle, platform, context) {
   const { updated_at, ...ctx } = context || {};

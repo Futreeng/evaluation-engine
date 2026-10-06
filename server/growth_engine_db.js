@@ -188,12 +188,19 @@ function initSchema() {
     )
   `);
 
-  // Cancel-at-period-end: tier stays until this timestamp, then reads as free.
   // Connected accounts: an explicit lifecycle instead of inferring it from last_error,
   // and `source` so a connection can be recorded by something other than OAuth later
   // (see docs/CONNECT_FLOW.md) without reshaping the table.
-  try { db.run(`ALTER TABLE growth_engine_connections ADD COLUMN status TEXT NOT NULL DEFAULT 'active'`); } catch { /* exists */ }
+  try {
+    db.run(`ALTER TABLE growth_engine_connections ADD COLUMN status TEXT NOT NULL DEFAULT 'active'`);
+    // Only on the boot that adds the column: before it existed, a broken
+    // connection was marked by last_error alone, and the UI now reads `status`.
+    // Without this, every already-broken connection comes back reading healthy
+    // and its owner never sees the Reconnect prompt.
+    db.run(`UPDATE growth_engine_connections SET status = 'needs_reconnect' WHERE last_error IS NOT NULL AND last_error <> ''`);
+  } catch { /* exists */ }
   try { db.run(`ALTER TABLE growth_engine_connections ADD COLUMN source TEXT NOT NULL DEFAULT 'oauth'`); } catch { /* exists */ }
+  // Cancel-at-period-end: tier stays until this timestamp, then reads as free.
   try { db.run(`ALTER TABLE entitlements ADD COLUMN cancel_at INTEGER`); } catch { /* exists */ }
   // The Stripe customer behind this account (portal, receipts) and its subscription.
   try { db.run(`ALTER TABLE entitlements ADD COLUMN stripe_customer_id TEXT`); } catch { /* exists */ }
@@ -711,7 +718,9 @@ async function findConnectionsByExtUserId(platform, extUserId) {
 }
 async function listConnectionsExpiringBefore(ts) {
   if (!db) throw new Error("Database not initialized");
-  const r = db.exec(`SELECT * FROM growth_engine_connections WHERE expires_at IS NOT NULL AND expires_at < ?`, [ts]);
+  // Skips needs_reconnect: only the user can fix those, and retrying one on every
+  // sweep burns platform rate limit and re-reports the same failure forever.
+  const r = db.exec(`SELECT * FROM growth_engine_connections WHERE expires_at IS NOT NULL AND expires_at < ? AND status <> 'needs_reconnect'`, [ts]);
   return r.length ? r[0].values.map((v) => connRow(r[0].columns, v)) : [];
 }
 

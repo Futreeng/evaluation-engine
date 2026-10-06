@@ -24,9 +24,17 @@ const { encrypt, decrypt } = require("./crypto");
 const { buildInstagramData } = require("./instagram_apify_fetcher");
 const { buildTikTokData } = require("./tiktok_apify_fetcher");
 const costs = require("./growth_engine_costs");
+const events = require("./growth_engine_events");
 
 const APP = () => (process.env.APP_URL || "http://localhost:3005").replace(/\/$/, "");
-const SECRET = () => process.env.JWT_SECRET || "dev";
+// Signs the OAuth state and the deletion codes. A missing key used to fall back
+// to the literal "dev" — a value anyone can guess, and enough to forge a state
+// binding any account. In production that is a refusal, not a default.
+const SECRET = () => {
+  if (process.env.JWT_SECRET) return process.env.JWT_SECRET;
+  if (process.env.NODE_ENV === "production") throw Object.assign(new Error("JWT_SECRET is not set — refusing to sign connect state with a known default"), { status: 500, code: "NO_JWT_SECRET" });
+  return "dev";
+};
 const ENC = () => process.env.ENCRYPTION_KEY;
 const POSTS = Math.max(12, Math.min(50, Number(process.env.SCRAPE_POSTS || 30)));
 
@@ -58,14 +66,14 @@ const platformOf = (p) => (PLATFORMS[String(p || "").toLowerCase()] ? String(p).
 const available = () => Object.fromEntries(Object.entries(PLATFORMS).map(([k, v]) => [k, v.configured()]));
 
 /**
- * Why each platform is on or off, for /health. Names only — never a secret,
- * never a token, so this is safe to expose on an unauthenticated endpoint.
+ * Why each platform is on or off. Names only, never a value — but it does say
+ * which secrets are configured, so it is served from an admin-only route.
  */
 function configReport() {
   const out = {
     app_url: APP(),
     encryption_key: ENC() ? "configured" : "missing",
-    jwt_secret: process.env.JWT_SECRET ? "configured" : "missing (using dev default)",
+    jwt_secret: process.env.JWT_SECRET ? "configured" : (process.env.NODE_ENV === "production" ? "MISSING — connect is refusing to sign" : "missing (dev default outside production)"),
     // Which secrets are available to verify Meta's callbacks. Either is enough.
     signed_request_secrets: signedRequestSecrets().map((x) => x.name),
     platforms: {},
@@ -109,22 +117,33 @@ function readState(state, { maxAgeMs = 15 * 60 * 1000 } = {}) {
 // to match on the way back. SameSite=Lax so it survives the platform's
 // top-level GET redirect back to us.
 const NONCE_COOKIE = "sc_connect_nonce";
+// Per platform: connecting Instagram in one tab must not invalidate a TikTok
+// trip started in another, and finishing one must not clear the other's nonce.
+const nonceCookie = (platform) => `${NONCE_COOKIE}_${platformOf(platform) || "x"}`;
 const nonceCookieOpts = () => ({ httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", maxAge: 15 * 60 * 1000, path: "/" });
 /** The nonce inside an auth URL we just produced, for the caller to put in the cookie. */
 function nonceOf(url) {
-  try { return readState(new URL(url).searchParams.get("state")).nonce; } catch { return ""; }
+  const n = readState(new URL(url).searchParams.get("state")).nonce;
+  if (!n) throw Object.assign(new Error("Could not derive the connect nonce"), { status: 500, code: "CONNECT_ERROR" });
+  return n;
 }
 /**
- * Compare the nonce in the returned state against the cookie.
- * A present-but-different cookie is a replay and is refused. An absent cookie
- * (cookies blocked, or a connect started in another browser) falls back to
- * signature-only verification, which is what this flow did before — it is not
- * worth stranding a real user over.
+ * Compare the nonce in the returned state against the cookie. Both an absent
+ * and a mismatched cookie are refused.
+ *
+ * Absent must fail, not fall back. The callback carries no session of its own —
+ * the account it writes to comes entirely from the signed state — so without
+ * this check an attacker can mint a state bound to their own account, send the
+ * victim the platform's authorize URL, and have the victim's token stored under
+ * the attacker's account, handing them the victim's private insights. A victim
+ * who never started a connect is exactly the person with no cookie, so "accept
+ * when the cookie is missing" is "accept the attack".
  */
 function checkNonce(stateNonce, cookieNonce, { platform = "" } = {}) {
-  if (!cookieNonce) { console.warn(`[Connect] ${platform} callback had no ${NONCE_COOKIE} cookie — accepting on the signed state alone`); return; }
+  const fail = () => { throw Object.assign(new Error("This connect link wasn't started in this browser, or it has expired. Start again from your account page."), { code: "BAD_STATE" }); };
+  if (!cookieNonce) { console.warn(`[Connect] ${platform} callback had no ${NONCE_COOKIE} cookie — refusing`); fail(); }
   const a = Buffer.from(String(stateNonce || "")), b = Buffer.from(String(cookieNonce));
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) throw Object.assign(new Error("This connect link was not started in this browser — start again from your account page."), { code: "BAD_STATE" });
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) fail();
 }
 
 /** The URL to send the browser to. */
@@ -231,7 +250,12 @@ async function exchangeInstagram(code) {
   if (!short) throw Object.assign(new Error("Instagram token: no access_token in response"), { status: 502, code: "PLATFORM_ERROR" });
   // Long-lived (60 days), refreshable while it's still valid.
   const l = await call(`https://graph.instagram.com/access_token?${new URLSearchParams({ grant_type: "ig_exchange_token", client_secret: process.env.IG_APP_SECRET, access_token: short })}`, { label: "Instagram long-lived token" });
-  return { token: l.access_token || short, refresh: null, expiresAt: Date.now() + (Number(l.expires_in) || 3600) * 1000, refreshExpiresAt: null, extUserId: userId ? String(userId) : null, scopes: (s.permissions || PLATFORMS.instagram.scopes).join ? (s.permissions || PLATFORMS.instagram.scopes).join(",") : String(s.permissions) };
+  // Only report scopes the platform actually told us about. Falling back to the
+  // list we requested would make missingScopes() pass by construction and would
+  // store a grant we never saw. Null means "unknown", which missingScopes treats
+  // leniently — unverified is not the same as verified-complete.
+  const granted = Array.isArray(s.permissions) ? s.permissions.join(",") : (typeof s.permissions === "string" && s.permissions ? s.permissions : null);
+  return { token: l.access_token || short, refresh: null, expiresAt: Date.now() + (Number(l.expires_in) || 3600) * 1000, refreshExpiresAt: null, extUserId: userId ? String(userId) : null, scopes: granted };
 }
 async function refreshInstagram(conn) {
   const l = await call(`https://graph.instagram.com/refresh_access_token?${new URLSearchParams({ grant_type: "ig_refresh_token", access_token: decrypt(conn.tokenEnc, ENC()) })}`, { label: "Instagram refresh" });
@@ -256,7 +280,14 @@ async function handleCallback(platform, query, { cookieNonce = "" } = {}) {
   const st = readState(query.state);
   if (st.platform !== p) throw Object.assign(new Error("State/platform mismatch"), { code: "BAD_STATE" });
   checkNonce(st.nonce, cookieNonce, { platform: p });
-  if (query.error) throw Object.assign(new Error(query.error_description || query.error === "access_denied" ? "You cancelled on the platform's page — nothing was connected." : String(query.error)), { code: "DENIED", accountId: st.accountId, returnTo: st.returnTo });
+  // Route the platform's own error through friendly() so "access_denied" reads as
+  // a cancellation and everything else gets the message that fits it. (This line
+  // previously relied on `a || b ? x : y`, which parses as `(a || b) ? x : y` —
+  // so any error carrying a description was reported as a cancellation.)
+  if (query.error) {
+    const raw = query.error_description ? `${query.error}: ${query.error_description}` : String(query.error);
+    throw Object.assign(friendly(p, new Error(raw)), { accountId: st.accountId, returnTo: st.returnTo });
+  }
   if (!query.code) throw Object.assign(new Error("No code came back from the platform"), { code: "NO_CODE", accountId: st.accountId, returnTo: st.returnTo });
   if (!ENC()) throw Object.assign(new Error("ENCRYPTION_KEY is not set — refusing to store a token in the clear"), { status: 500, code: "NO_ENCRYPTION_KEY" });
 
@@ -271,10 +302,18 @@ async function handleCallback(platform, query, { cookieNonce = "" } = {}) {
   // Instagram Login only works on a Professional (Business or Creator) account.
   // A personal account can authorize and then return a profile we can't read
   // insights for, so say so plainly instead of failing later on an insights 400.
+  // We hold a live token at this point. If we are about to refuse the
+  // connection, hand it back first — otherwise "nothing was saved" is true of
+  // our database and false of the user's Instagram or TikTok settings.
+  const refuse = async (message, code) => {
+    await revoke({ platform: p, tokenEnc: encrypt(tok.token, ENC()) });
+    throw Object.assign(new Error(message), { code, accountId: st.accountId, returnTo: st.returnTo });
+  };
+
   if (p === "instagram") {
     const type = String(prof.account_type || "").toUpperCase();
     if (type && !["BUSINESS", "CREATOR", "MEDIA_CREATOR"].includes(type)) {
-      throw Object.assign(new Error("That Instagram account is a personal one. Scalecraft needs a Professional account — switch to Business or Creator in Instagram under Settings → Account type, then connect again. Nothing was saved."), { code: "PERSONAL_ACCOUNT", accountId: st.accountId, returnTo: st.returnTo });
+      await refuse("That Instagram account is a personal one. Scalecraft needs a Professional account — switch to Business or Creator in Instagram under Settings → Account type, then connect again. Nothing was saved.", "PERSONAL_ACCOUNT");
     }
   }
 
@@ -282,7 +321,7 @@ async function handleCallback(platform, query, { cookieNonce = "" } = {}) {
   // refuse the half-connection rather than storing it.
   const missing = missingScopes(p, tok.scopes);
   if (missing.length) {
-    throw Object.assign(new Error(`${PLATFORMS[p].label} didn't grant ${missing.join(" and ")}. Connect again and leave every permission switched on — Scalecraft reads your numbers and never posts.`), { code: "SCOPE_DENIED", accountId: st.accountId, returnTo: st.returnTo });
+    await refuse(`${PLATFORMS[p].label} didn't grant ${missing.join(" and ")}. Connect again and leave every permission switched on — Scalecraft reads your numbers and never posts.`, "SCOPE_DENIED");
   }
 
   const handle = prof.username || null;
@@ -306,31 +345,67 @@ async function firstPull(accountId, platform) {
   const p = platformOf(platform);
   const conn = p ? await geDb.getConnection(accountId, p).catch(() => null) : null;
   if (!conn) return { posts: 0, followers: null, ok: false, error: "No connection" };
+  // fetchConnected can refresh the token, and can mark the connection as needing
+  // reconnect. Either way the row we captured above is stale the moment it
+  // returns, so every write re-reads first: writing `{ ...conn }` back would put
+  // the pre-refresh token, or an "active" status, over what just changed.
+  const patch = (fields) => patchConnection(accountId, p, fields);
+  // The browser is sitting on the platform's callback URL until this returns, so
+  // it is time-boxed. On timeout we redirect with no count rather than hang: the
+  // token is stored and good, and the next score reads it properly.
+  const budgetMs = Number(process.env.CONNECT_FIRST_PULL_MS || 5000);
+  let timer;
+  const deadline = new Promise((_, rej) => { timer = setTimeout(() => rej(Object.assign(new Error(`First read took longer than ${budgetMs >= 1000 ? `${Math.round(budgetMs / 1000)}s` : `${budgetMs}ms`} — your numbers will appear on the next score.`), { code: "PULL_TIMEOUT" })), budgetMs); });
   try {
-    const data = await fetchConnected(conn);
+    const data = await Promise.race([fetchConnected(conn), deadline]);
     // Both fetchers return the scraper's shape: recent_posts + follower_count.
     const posts = data?.recent_posts?.length || 0;
     const followers = data?.follower_count ?? null;
-    await geDb.setConnection(accountId, p, { ...conn, status: "active", lastError: null }).catch(() => { });
+    await patch({ status: "active", lastError: null });
     return { posts, followers, ok: true };
   } catch (e) {
     console.warn(`[Connect] first pull failed for ${p}/${accountId}: ${e.message}`);
-    await geDb.setConnection(accountId, p, { ...conn, lastError: e.message }).catch(() => { });
-    return { posts: 0, followers: null, ok: false, error: friendly(p, e).message };
+    // A RECONNECT has already recorded its own status and reason; anything else
+    // is a read failure that leaves the connection usable.
+    // A timeout is not a broken connection, so it leaves no error on the row.
+    const reason = e.code === "PULL_TIMEOUT" ? e.message : friendly(p, e).message;
+    if (e.code !== "RECONNECT" && e.code !== "PULL_TIMEOUT") await patch({ lastError: reason });
+    return { posts: 0, followers: null, ok: false, error: reason };
+  } finally {
+    clearTimeout(timer);
   }
 }
 
-/** A usable access token, refreshed first if it's about to expire. */
+/**
+ * Update a connection without resurrecting it.
+ *
+ * setConnection is an upsert, so writing back a row captured before a slow call
+ * re-creates it if something deleted it meanwhile — which after a Meta deletion
+ * request means putting the encrypted token we just promised to destroy back in
+ * the table. Always re-read, and if the row is gone, leave it gone.
+ */
+async function patchConnection(accountId, platform, fields) {
+  const latest = await geDb.getConnection(accountId, platform).catch(() => null);
+  if (!latest) return null; // deleted or deauthorized while we worked — stay deleted
+  return geDb.setConnection(accountId, platform, { ...latest, ...fields }).catch(() => null);
+}
+
 /**
  * Mark a connection as needing the user to reconnect, and say so in the funnel.
  * A connection that needs reconnecting keeps its row (so the UI can prompt)
  * but its token is no longer trusted.
  */
 async function markNeedsReconnect(conn, message) {
-  await geDb.setConnection(conn.accountId, conn.platform, { ...conn, status: "needs_reconnect", lastError: String(message || "").slice(0, 300) }).catch(() => { });
-  try { require("./growth_engine_events").track("account_reconnect_needed", { accountId: conn.accountId, props: { platform: conn.platform, reason: String(message || "").slice(0, 120) } }); } catch { /* analytics must never break a refresh */ }
+  const was = conn.status;
+  const row = await patchConnection(conn.accountId, conn.platform, { status: "needs_reconnect", lastError: String(message || "").slice(0, 300) });
+  // Only on the transition. The refresh sweep revisits a dead connection on
+  // every cycle, and re-emitting here would bury the funnel in repeats.
+  if (row && was !== "needs_reconnect") {
+    try { events.track("account_reconnect_needed", { accountId: conn.accountId, props: { platform: conn.platform, reason: String(message || "").slice(0, 120) } }); } catch { /* analytics must never break a refresh */ }
+  }
 }
 
+/** A usable access token, refreshed first if it's about to expire. */
 async function liveToken(conn) {
   const soon = Date.now() + (conn.platform === "tiktok" ? 60 * 60 * 1000 : 7 * 86400000);
   if (conn.expiresAt && conn.expiresAt < soon) {
@@ -345,8 +420,8 @@ async function liveToken(conn) {
       await markNeedsReconnect(conn, friendly(conn.platform, e).message);
       throw Object.assign(friendly(conn.platform, e), { code: "RECONNECT" });
     }
-    await geDb.setConnection(conn.accountId, conn.platform, { ...conn, tokenEnc: encrypt(t.token, ENC()), refreshEnc: t.refresh ? encrypt(t.refresh, ENC()) : conn.refreshEnc, expiresAt: t.expiresAt, refreshExpiresAt: t.refreshExpiresAt, status: "active", lastError: null });
-    try { require("./growth_engine_events").track("account_refreshed", { accountId: conn.accountId, props: { platform: conn.platform } }); } catch { /* ignore */ }
+    await patchConnection(conn.accountId, conn.platform, { tokenEnc: encrypt(t.token, ENC()), refreshEnc: t.refresh ? encrypt(t.refresh, ENC()) : conn.refreshEnc, expiresAt: t.expiresAt, refreshExpiresAt: t.refreshExpiresAt, status: "active", lastError: null });
+    try { events.track("account_refreshed", { accountId: conn.accountId, props: { platform: conn.platform } }); } catch { /* ignore */ }
     return t.token;
   }
   return decrypt(conn.tokenEnc, ENC());
@@ -358,7 +433,7 @@ async function refreshDue() {
   let ok = 0, failed = 0;
   for (const c of rows) {
     try { await liveToken(c); ok++; }
-    catch (e) { failed++; if (e.code !== "RECONNECT") await geDb.setConnection(c.accountId, c.platform, { ...c, lastError: e.message }).catch(() => { }); }
+    catch (e) { failed++; if (e.code !== "RECONNECT") await patchConnection(c.accountId, c.platform, { lastError: e.message }); }
   }
   return { checked: rows.length, refreshed: ok, failed };
 }
@@ -503,6 +578,18 @@ function parseSignedRequest(signedRequest) {
   const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
   if (data.algorithm && String(data.algorithm).toUpperCase() !== "HMAC-SHA256") throw Object.assign(new Error(`Unexpected signed_request algorithm ${data.algorithm}`), { status: 400, code: "BAD_SIGNED_REQUEST" });
   if (!data.user_id) throw Object.assign(new Error("signed_request carried no user_id"), { status: 400, code: "BAD_SIGNED_REQUEST" });
+  // Meta stamps issued_at (unix seconds). Anything older than the window is a
+  // replay of a body someone kept. Absent is accepted but noted: the signature
+  // still holds, and refusing would strand us if Meta ever stops sending it.
+  const maxAgeS = Number(process.env.META_SIGNED_REQUEST_MAX_AGE_S || 300);
+  if (data.issued_at != null) {
+    const ageS = Math.floor(Date.now() / 1000) - Number(data.issued_at);
+    // Bounded both ways: a future-dated stamp would otherwise be replayable for
+    // as long as it stays in the future. 60s of slack covers clock skew.
+    if (!Number.isFinite(ageS) || ageS > maxAgeS || ageS < -60) throw Object.assign(new Error(`signed_request timestamp is out of range (${ageS}s, limit ${maxAgeS}s)`), { status: 400, code: "STALE_SIGNED_REQUEST" });
+  } else {
+    console.warn("[Connect] signed_request carried no issued_at — accepted on the signature alone");
+  }
   // Logged (the name, never the value) so the first real callback tells us which
   // secret Meta actually signs with, and the other can then be dropped.
   console.log(`[Connect] signed_request verified with ${matched}`);
@@ -517,12 +604,14 @@ function parseSignedRequest(signedRequest) {
  */
 async function forgetInstagramUser(extUserId) {
   const rows = await geDb.findConnectionsByExtUserId("instagram", extUserId).catch(() => []);
-  const accounts = [];
+  const accounts = [], failed = [];
   for (const c of rows) {
-    await geDb.deleteConnection(c.accountId, c.platform).catch((e) => console.warn(`[Connect] deauthorize delete failed: ${e.message}`));
-    accounts.push(c.accountId);
+    try { await geDb.deleteConnection(c.accountId, c.platform); accounts.push(c.accountId); }
+    // Never report a deletion we did not perform: the caller turns this into a
+    // non-2xx so Meta retries rather than recording the request as honoured.
+    catch (e) { console.warn(`[Connect] deauthorize delete failed: ${e.message}`); failed.push(c.accountId); }
   }
-  return accounts;
+  return { accounts, failed };
 }
 
 /**
@@ -551,4 +640,4 @@ async function revoke(conn) {
   } catch (e) { console.warn(`[Connect] revoke failed (${conn.platform}): ${e.message}`); }
 }
 
-module.exports = { PLATFORMS, platformOf, available, configReport, NONCE_COOKIE, nonceCookieOpts, nonceOf, checkNonce, parseSignedRequest, forgetInstagramUser, deletionCode, readDeletionCode, firstPull, friendly, missingScopes, authUrl, makeState, readState, handleCallback, liveToken, refreshDue, fetchTikTok, fetchInstagram, fetchConnected, connectionFor, publicView, revoke, _call: call };
+module.exports = { PLATFORMS, platformOf, available, configReport, NONCE_COOKIE, nonceCookie, nonceCookieOpts, nonceOf, checkNonce, patchConnection, parseSignedRequest, forgetInstagramUser, deletionCode, readDeletionCode, firstPull, friendly, missingScopes, authUrl, makeState, readState, handleCallback, liveToken, refreshDue, fetchTikTok, fetchInstagram, fetchConnected, connectionFor, publicView, revoke, _call: call };
