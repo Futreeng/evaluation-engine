@@ -215,9 +215,20 @@
     catch (e) { if (e.status === 401) return; toast(e.message || 'Could not start the connection.'); }
   }
   // The platform sends the browser back with ?connected= or ?connect_error= on the hash.
+  // `pulled` is the proof-of-life count from the first read; `connect_code` names
+  // the failure so we can say something more useful than the raw platform text.
   function connectNotice() {
     const q = new URLSearchParams(location.hash.split('?')[1] || '');
-    if (q.get('connected')) toast(`${PLAT_LABEL[q.get('connected')] || 'Account'} connected${q.get('handle') ? ' as @' + q.get('handle') : ''}. Your next score reads from it.`);
+    if (q.get('connected')) {
+      const who = q.get('handle') ? ' as @' + q.get('handle') : '';
+      const pulled = Number(q.get('pulled') || 0);
+      const err = q.get('pull_error');
+      toast(pulled > 0
+        ? `${PLAT_LABEL[q.get('connected')] || 'Account'} connected${who} — pulled ${pulled} post${pulled === 1 ? '' : 's'}. Your next score reads from it.`
+        : err
+          ? `${PLAT_LABEL[q.get('connected')] || 'Account'} connected${who}, but the first read didn't come back: ${err}`
+          : `${PLAT_LABEL[q.get('connected')] || 'Account'} connected${who}. Your next score reads from it.`);
+    }
     if (q.get('connect_error')) toast(`${PLAT_LABEL[q.get('platform')] || 'Connection'}: ${q.get('connect_error')}`);
     if (q.get('connected') || q.get('connect_error')) history.replaceState(null, '', location.hash.split('?')[0]);
   }
@@ -1219,7 +1230,9 @@
       const p = line.dataset.connectline, c = (conns.connections || []).find(x => x.platform === p);
       const mine = c && (!c.handle || !line.dataset.handle || c.handle === line.dataset.handle.toLowerCase());
       if (report.data_source === 'api') return;
-      if (mine) { line.hidden = false; line.innerHTML = h`Connected as @${c.handle || c.display_name}. <button type="button" class="linkbtn" data-action="rescore-connected">Score again from the API →</button>`; }
+      // A stale connection can't be rescored, so prompt for the fix instead.
+      if (mine && c.needs_reconnect) { line.hidden = false; line.innerHTML = h`${PLAT_LABEL[p]} needs reconnecting — the login expired or was revoked. <button type="button" class="linkbtn" data-action="connect-here">Reconnect ${PLAT_LABEL[p]}</button>`; }
+      else if (mine) { line.hidden = false; line.innerHTML = h`Connected as @${c.handle || c.display_name}. <button type="button" class="linkbtn" data-action="rescore-connected">Score again from the API →</button>`; }
       else if (conns.available?.[p]) { line.hidden = false; line.innerHTML = h`<button type="button" class="linkbtn" data-action="connect-here">Connect ${PLAT_LABEL[p]}</button> to read saves, reach and views straight from your account.`; }
       line.querySelector('[data-action=connect-here]')?.addEventListener('click', e => { e.currentTarget.disabled = true; startConnect(p, '#/report/' + report.report_id); });
       line.querySelector('[data-action=rescore-connected]')?.addEventListener('click', async e => { e.currentTarget.disabled = true; const last = sget('sc_form', {}); await submitEvaluation({ handle: biz.handle, platform: biz.platform, category: biz.category, email: last.email || report.email || '' }, null); });
@@ -1769,8 +1782,16 @@
       <div class="ph"><h1>Your reports</h1><a class="btn pillbtn" href="#/" data-scroll="evalForm">Run a new evaluation</a></div>
       ${raw(planCard())}
       ${conns && (conns.available?.instagram || conns.available?.tiktok || (conns.connections || []).length) ? raw(h`<div class="card conncard"><div class="t"><div class="n">Connected accounts</div><h2>Read your numbers straight from the platform</h2>
-        <p>Connect the account you're scoring and the report reads it through the official API instead of the public profile: ${'Instagram adds saves, reach and shares; TikTok uses its own counts.'} Nothing is posted. Disconnect any time.</p></div>
-        <div class="connrows">${raw(['instagram', 'tiktok'].filter(p => conns.available?.[p] || (conns.connections || []).some(c => c.platform === p)).map(p => { const c = (conns.connections || []).find(x => x.platform === p); return h`<div class="connrow"><span class="pl">${PLAT_LABEL[p]}</span>${c ? raw(h`<span class="who">@${c.handle || c.display_name || 'connected'}${c.last_error ? raw(h` <span class="fine warn">needs reconnecting</span>`) : ''}</span><button type="button" class="btn ghost sm" data-disconnect="${p}">Disconnect</button>`) : raw(h`<span class="who fine">Not connected</span><button type="button" class="btn sm" data-connect="${p}">Connect ${PLAT_LABEL[p]}</button>`)}</div>`; }).join(''))}</div></div>`) : ''}
+        <p>Connect the account you're scoring and the report reads it through the official API instead of the public profile: ${'Instagram adds saves, reach and shares; TikTok uses its own counts.'} Nothing is posted. Disconnect any time.</p>
+        <p class="fine">Instagram needs a Professional account (Business or Creator). You can switch for free in Instagram under Settings → Account type.</p></div>
+        <div class="connrows">${raw(['instagram', 'tiktok'].filter(p => conns.available?.[p] || (conns.connections || []).some(c => c.platform === p)).map(p => {
+          const c = (conns.connections || []).find(x => x.platform === p);
+          if (!c) return h`<div class="connrow"><span class="pl">${PLAT_LABEL[p]}</span><span class="who fine">Not connected</span><button type="button" class="btn sm" data-connect="${p}">Connect ${PLAT_LABEL[p]}</button></div>`;
+          // A connection the platform has stopped honouring: say so, and make the
+          // fix one button rather than asking them to disconnect first.
+          if (c.needs_reconnect) return h`<div class="connrow needsfix"><span class="pl">${PLAT_LABEL[p]}</span><span class="who">@${c.handle || c.display_name || 'connected'} <span class="fine warn">needs reconnecting</span>${c.last_error ? raw(h`<span class="fine">${c.last_error}</span>`) : ''}</span><button type="button" class="btn sm" data-connect="${p}">Reconnect</button><button type="button" class="btn ghost sm" data-disconnect="${p}">Remove</button></div>`;
+          return h`<div class="connrow"><span class="pl">${PLAT_LABEL[p]}</span><span class="who">@${c.handle || c.display_name || 'connected'}</span><button type="button" class="btn ghost sm" data-disconnect="${p}">Disconnect</button></div>`;
+        }).join(''))}</div></div>`) : ''}
       ${raw((() => { const g = me && me.goal ? me.goal : sget('sc_goal', null)?.goal; const t = me && me.goal_target != null ? me.goal_target : sget('sc_goal', null)?.goal_target; const gp = g && latestRep ? goalProgress(g, t, latestRep) : null;
         return h`<div class="card goalcard" id="goalCard"><div class="t"><div class="n">Your goal</div><h2>${g ? goalLabel(g) : 'Not set yet'}</h2></div>
           ${gp ? raw(h`<div class="goalbar"><div class="t"><span class="v">${gp.label}</span></div><div class="bar"><div class="fill" style="width:${gp.pct}%"></div></div><div class="fine">${gp.sub}</div></div>`) : g ? raw('<p class="fine">Progress shows once a report is open in this session.</p>') : raw('<p class="fine">Pick one and the plan, Monday moves and post writing lean toward it.</p>')}

@@ -109,6 +109,10 @@ router.get("/health", async (req, res) => {
   health.apis.twitter = process.env.TWITTER_BEARER_TOKEN ? "configured" : "missing";
   health.apis.instagram = process.env.INSTAGRAM_ACCESS_TOKEN ? "configured" : "missing";
 
+  // Connected accounts: why each platform is on or off, and the exact URLs that
+  // must be registered on the developer apps. Names and URLs only, no secrets.
+  health.connect = connect.configReport();
+
   res.json(health);
 });
 
@@ -413,27 +417,89 @@ router.get("/account/connections", authMiddleware, async (req, res) => {
 router.post("/connect/:platform/url", authMiddleware, async (req, res) => {
   try {
     const returnTo = /^#\/[A-Za-z0-9/_?=&.-]{0,180}$/.test(String(req.body?.return_to || "")) ? String(req.body.return_to) : "";
-    res.json({ url: connect.authUrl(req.params.platform, req.user.id, { returnTo }) });
+    const url = connect.authUrl(req.params.platform, req.user.id, { returnTo });
+    // Binds the trip to this browser; the callback requires it back.
+    res.cookie(connect.NONCE_COOKIE, connect.nonceOf(url), connect.nonceCookieOpts());
+    res.json({ url });
   } catch (err) { sendError(res, err.status || 500, err.code || "CONNECT_ERROR", err.message); }
 });
 // Where the platform sends the browser back. Public by nature; the signed state names the account.
 router.get("/connect/:platform/callback", async (req, res) => {
   const app = (process.env.APP_URL || `${req.protocol}://${req.get("host")}`).replace(/\/$/, "");
   const back = (dest, params) => res.redirect(`${app}/${dest || "#/reports"}${(dest || "#/reports").includes("?") ? "&" : "?"}${new URLSearchParams(params)}`);
+  res.clearCookie(connect.NONCE_COOKIE, connect.nonceCookieOpts());
   try {
-    const r = await connect.handleCallback(req.params.platform, req.query);
+    const r = await connect.handleCallback(req.params.platform, req.query, { cookieNonce: req.cookies?.[connect.NONCE_COOKIE] || "" });
     events.track("account_connected", { accountId: r.accountId, props: { platform: r.platform, handle: r.handle } });
-    return back(r.returnTo, { connected: r.platform, handle: r.handle || "" });
+    // Proof of life: read the profile and recent posts so the UI can say what
+    // it actually got. Never fails the connection — the token is already good.
+    const pull = await connect.firstPull(r.accountId, r.platform).catch(() => ({ posts: 0, ok: false }));
+    events.track("account_first_pull", { accountId: r.accountId, props: { platform: r.platform, posts: pull.posts, ok: !!pull.ok } });
+    return back(r.returnTo, { connected: r.platform, handle: r.handle || "", pulled: String(pull.posts || 0), ...(pull.ok ? {} : { pull_error: String(pull.error || "").slice(0, 160) }) });
   } catch (err) {
-    console.warn(`[Connect] ${req.params.platform} callback failed: ${err.message}`);
-    return back(err.returnTo, { connect_error: err.message.slice(0, 160), platform: connect.platformOf(req.params.platform) || "" });
+    console.warn(`[Connect] ${req.params.platform} callback failed (${err.code || "?"}): ${err.message}`);
+    const platform = connect.platformOf(req.params.platform) || "";
+    events.track("account_connect_failed", { accountId: err.accountId || null, props: { platform, code: err.code || "UNKNOWN", reason: String(err.message || "").slice(0, 120) } });
+    return back(err.returnTo, { connect_error: err.message.slice(0, 220), connect_code: err.code || "", platform });
   }
 });
+// ---- Meta's required callbacks. Both are public (Meta calls them, not the
+// browser) and both authenticate by the signed_request HMAC, not by our session.
+// Registered on the app dashboard; the exact URLs are in /health → connect.
+router.post("/connect/instagram/deauthorize", async (req, res) => {
+  try {
+    const data = connect.parseSignedRequest(req.body?.signed_request);
+    const accounts = await connect.forgetInstagramUser(data.user_id);
+    for (const accountId of accounts) events.track("account_disconnected", { accountId, props: { platform: "instagram", reason: "deauthorized_on_platform" } });
+    console.log(`[Connect] Instagram deauthorize for user ${data.user_id}: ${accounts.length} connection(s) deleted`);
+    res.json({ ok: true });
+  } catch (err) {
+    console.warn(`[Connect] Instagram deauthorize rejected: ${err.message}`);
+    sendError(res, err.status || 400, err.code || "DEAUTHORIZE_ERROR", err.message);
+  }
+});
+
+// POST = Meta asking us to delete. GET ?code= = the status page a person can
+// open to confirm it happened, which is the `url` we hand back below.
+router.post("/connect/instagram/data-deletion", async (req, res) => {
+  try {
+    const data = connect.parseSignedRequest(req.body?.signed_request);
+    const accounts = await connect.forgetInstagramUser(data.user_id);
+    for (const accountId of accounts) events.track("account_disconnected", { accountId, props: { platform: "instagram", reason: "data_deletion_request" } });
+    const code = connect.deletionCode(data.user_id);
+    console.log(`[Connect] Instagram data deletion for user ${data.user_id}: ${accounts.length} connection(s) deleted, code ${code}`);
+    const app = (process.env.APP_URL || `${req.protocol}://${req.get("host")}`).replace(/\/$/, "");
+    res.json({ url: `${app}/api/growth-engine/v1/connect/instagram/data-deletion?code=${encodeURIComponent(code)}`, confirmation_code: code });
+  } catch (err) {
+    console.warn(`[Connect] Instagram data deletion rejected: ${err.message}`);
+    sendError(res, err.status || 400, err.code || "DATA_DELETION_ERROR", err.message);
+  }
+});
+router.get("/connect/instagram/data-deletion", async (req, res) => {
+  const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  let body;
+  try {
+    const extUserId = connect.readDeletionCode(req.query.code);
+    const remaining = await geDb.findConnectionsByExtUserId("instagram", extUserId).catch(() => []);
+    body = remaining.length
+      ? `<h1>Deletion in progress</h1><p>We still hold a connection for this Instagram account. It will be removed shortly. Email <a href="mailto:${esc(process.env.SUPPORT_EMAIL || "hello@futreeng.com")}">${esc(process.env.SUPPORT_EMAIL || "hello@futreeng.com")}</a> if this does not clear.</p>`
+      : `<h1>Deleted</h1><p>We no longer hold any Instagram access token or connected-account record for this Instagram account. Reports you created before disconnecting are covered by the retention windows in our <a href="/#/legal/privacy">Privacy Policy</a>.</p>`;
+    body += `<p class="c">Confirmation code: <code>${esc(req.query.code)}</code></p>`;
+  } catch {
+    body = `<h1>Unknown code</h1><p>We could not read that confirmation code. Email <a href="mailto:${esc(process.env.SUPPORT_EMAIL || "hello@futreeng.com")}">${esc(process.env.SUPPORT_EMAIL || "hello@futreeng.com")}</a> and we will confirm by hand.</p>`;
+  }
+  res.type("html").send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Data deletion — Scalecraft Social</title><style>body{font:16px/1.6 system-ui,sans-serif;max-width:34rem;margin:4rem auto;padding:0 1.25rem;color:#111}h1{font-size:1.4rem}code{background:#f3f3f3;padding:.15em .4em;border-radius:3px}.c{color:#666;font-size:.9rem}</style></head><body>${body}</body></html>`);
+});
+
 router.delete("/account/connections/:platform", authMiddleware, async (req, res) => {
   try {
     const p = connect.platformOf(req.params.platform); if (!p) return sendError(res, 400, "BAD_PLATFORM", "Unknown platform");
     const c = await geDb.getConnection(req.user.id, p);
-    if (c) { await connect.revoke(c); await geDb.deleteConnection(req.user.id, p); }
+    if (c) {
+      await connect.revoke(c);
+      await geDb.deleteConnection(req.user.id, p);
+      events.track("account_disconnected", { accountId: req.user.id, props: { platform: p, reason: "user_disconnected" } });
+    }
     res.json({ deleted: !!c });
   } catch (err) { sendError(res, 500, "DISCONNECT_ERROR", err.message); }
 });

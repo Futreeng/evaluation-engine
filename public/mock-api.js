@@ -161,6 +161,31 @@
   const reports = new Map();
   let savedContext = null;
   let mockGoal = { goal: null, goal_target: null };
+
+  // Connected accounts. Per-platform state the mock mutates, so the UI's
+  // Connect / Reconnect / Disconnect buttons behave as they do against the real
+  // API. ?mock_connect=needsfix | none | fail picks the starting state.
+  const mockConnStart = (() => { try { return new URLSearchParams(location.search).get('mock_connect') || ''; } catch { return ''; } })();
+  const mockConnState = {
+    instagram: mockConnStart === 'none' || mockConnStart === 'fail' ? 'none' : mockConnStart === 'needsfix' ? 'needs_reconnect' : 'active',
+    tiktok: 'none',
+  };
+  const MOCK_CONN = {
+    instagram: { handle: 'sunrisefitnessbk', display_name: 'Sunrise Fitness', scopes: 'instagram_business_basic,instagram_business_manage_insights' },
+    tiktok: { handle: 'sunrise.fitness', display_name: 'Sunrise Fitness', scopes: 'user.info.basic,user.info.profile,user.info.stats,video.list' },
+  };
+  function mockConns() {
+    return Object.keys(MOCK_CONN).filter(p => mockConnState[p] !== 'none').map(p => {
+      const needs = mockConnState[p] === 'needs_reconnect';
+      return {
+        platform: p, handle: MOCK_CONN[p].handle, display_name: MOCK_CONN[p].display_name, avatar_url: null,
+        connected_at: Date.now() - 86400000, updated_at: Date.now() - 3600000,
+        expires_at: needs ? Date.now() - 86400000 : Date.now() + 50 * 86400000,
+        scopes: MOCK_CONN[p].scopes, status: needs ? 'needs_reconnect' : 'active', needs_reconnect: needs,
+        last_error: needs ? 'Instagram no longer accepts that login — it expired or was revoked. Connect again to refresh it.' : null,
+      };
+    });
+  }
   const mockPrefs = { weekly_score: true, monday_move: true, milestones: true, post_reviews: true, product_news: false, paused: false };
   let entitlement = { account_id: 'acct_mock', current_tier: 'social_snapshot' };
   let queueDepth = 2;
@@ -318,9 +343,24 @@
       if (path === '/auth/login' && body.password === 'wrong') return json(401, { error: 'Invalid email or password', code: 'AUTH_FAILED' });
       return json(200, { token: 'mock.' + btoa(body.email) + '.' + Date.now(), user: { user_id: 'usr_mock', email: body.email, company_name: body.company_name || null } });
     }
-    if (method === 'GET' && path === '/account/connections') return json(200, { available: { instagram: true, tiktok: true }, connections: [{ platform: 'instagram', handle: 'sunrisefitnessbk', display_name: 'Sunrise Fitness', connected_at: Date.now() - 86400000, expires_at: Date.now() + 50 * 86400000, scopes: 'instagram_business_basic,instagram_business_manage_insights', last_error: null }] });
-    if (method === 'POST' && /^\/connect\/(instagram|tiktok)\/url$/.test(path)) return json(200, { url: '#/reports?connected=' + path.split('/')[2] + '&handle=sunrisefitnessbk' });
-    if (method === 'DELETE' && path.startsWith('/account/connections/')) return json(200, { deleted: true });
+    // Connected accounts. `mockConns` is mutable so Connect / Disconnect /
+    // Reconnect actually change what the page shows, the way the real API does.
+    // Add ?mock_connect=needsfix to the URL to land on the needs-reconnect state,
+    // or ?mock_connect=none to start with nothing connected.
+    if (method === 'GET' && path === '/account/connections') return json(200, { available: { instagram: true, tiktok: true }, connections: mockConns() });
+    if (method === 'POST' && /^\/connect\/(instagram|tiktok)\/url$/.test(path)) {
+      const p = path.split('/')[2];
+      // The real route hands back a platform URL; the mock short-circuits
+      // straight to the return trip, including the first-pull count.
+      const fail = new URLSearchParams(location.search).get('mock_connect') === 'fail';
+      mockConnState[p] = fail ? 'none' : 'active';
+      const back = (body.return_to && /^#\//.test(body.return_to)) ? body.return_to : '#/reports';
+      const q = fail
+        ? 'connect_error=' + encodeURIComponent('You cancelled on the platform\u2019s page \u2014 nothing was connected.') + '&connect_code=DENIED&platform=' + p
+        : 'connected=' + p + '&handle=' + (p === 'tiktok' ? 'sunrise.fitness' : 'sunrisefitnessbk') + '&pulled=' + (p === 'tiktok' ? 18 : 24);
+      return json(200, { url: back + (back.includes('?') ? '&' : '?') + q });
+    }
+    if (method === 'DELETE' && path.startsWith('/account/connections/')) { const p = path.split('/').pop(); const had = mockConnState[p] !== 'none'; mockConnState[p] = 'none'; return json(200, { deleted: had }); }
     if (method === 'GET' && path === '/auth/me') return json(200, { user_id: 'usr_mock', email: 'maya@sunrisefitness.co', company_name: 'Sunrise Fitness BK', is_admin: false, is_business: false, niche: 'fitness_creator', ref_code: 'mockref1', goal: mockGoal.goal, goal_target: mockGoal.goal_target });
     if (method === 'PUT' && path === '/account/goal') { mockGoal = { goal: body.goal, goal_target: body.goal === 'followers' ? Number(body.goal_target) || null : null }; return json(200, mockGoal); }
     return json(404, { error: 'No mock route for ' + method + ' ' + path });

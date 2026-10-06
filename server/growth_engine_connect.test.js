@@ -40,7 +40,9 @@ const days = (n) => new Date(Date.now() - n * 86400000);
   await test("state round-trips, is bound to the account, and rejects tampering", async () => {
     const st = connect.makeState({ accountId, platform: "tiktok", returnTo: "#/reports", verifier: "v1" });
     const back = connect.readState(st);
-    assert.deepEqual(back, { accountId, platform: "tiktok", returnTo: "#/reports", verifier: "v1" });
+    assert.deepEqual({ ...back, nonce: undefined }, { accountId, platform: "tiktok", returnTo: "#/reports", verifier: "v1", nonce: undefined });
+    // The nonce is what the session cookie is matched against on the way back.
+    assert.match(back.nonce, /^[0-9a-f]{16}$/);
     const [payload] = st.split(".");
     assert.throws(() => connect.readState(payload + ".AAAA"), /signature/);
     assert.throws(() => connect.readState("nope"), /state/i);
@@ -182,6 +184,140 @@ const days = (n) => new Date(Date.now() - n * 86400000);
   await test("deleting the account removes its connections", async () => {
     await geDb.deleteAccount(accountId);
     assert.deepEqual(await geDb.listConnections(accountId), []);
+  });
+
+  // ---- Wave 2: session binding, the refused half-connections, Meta's callbacks.
+
+  await test("a state replayed from another browser is refused; the right cookie passes", async () => {
+    const acc = "acct_nonce_1";
+    const url = connect.authUrl("tiktok", acc, { returnTo: "#/reports" });
+    const state = new URL(url).searchParams.get("state");
+    const nonce = connect.nonceOf(url);
+    assert.match(nonce, /^[0-9a-f]{16}$/, "nonceOf reads the nonce back out of the URL");
+    // Wrong cookie → refused before any token is exchanged.
+    await assert.rejects(
+      () => connect.handleCallback("tiktok", { code: "c", state }, { cookieNonce: "0000000000000000" }),
+      (e) => e.code === "BAD_STATE" && /not started in this browser/.test(e.message));
+    // Matching cookie → proceeds (and the fake network completes the exchange).
+    const r = await connect.handleCallback("tiktok", { code: "c", state }, { cookieNonce: nonce });
+    assert.equal(r.accountId, acc);
+    await geDb.deleteAccount(acc);
+  });
+
+  await test("a personal Instagram account is refused with a plain-language message", async () => {
+    const acc = "acct_personal_1";
+    routes.unshift({ prefix: "https://graph.instagram.com/v21.0/me?", body: { user_id: "9", username: "just_me", account_type: "PERSONAL", followers_count: 10, media_count: 3 } });
+    const u = new URL(connect.authUrl("instagram", acc, {}));
+    await assert.rejects(
+      () => connect.handleCallback("instagram", { code: "c", state: u.searchParams.get("state") }),
+      (e) => e.code === "PERSONAL_ACCOUNT" && /Business or Creator/.test(e.message));
+    assert.equal(await geDb.getConnection(acc, "instagram"), null, "nothing was stored");
+    routes.shift();
+  });
+
+  await test("a connection missing a scope is refused rather than half-stored", async () => {
+    const acc = "acct_scope_1";
+    assert.deepEqual(connect.missingScopes("tiktok", "user.info.basic,video.list"), ["user.info.profile", "user.info.stats"]);
+    assert.deepEqual(connect.missingScopes("tiktok", "user.info.basic,user.info.profile,user.info.stats,video.list"), []);
+    routes.unshift({ prefix: "https://open.tiktokapis.com/v2/oauth/token/", body: { access_token: "a", refresh_token: "r", expires_in: 86400, open_id: "o", scope: "user.info.basic,video.list" } });
+    const u = new URL(connect.authUrl("tiktok", acc, {}));
+    await assert.rejects(
+      () => connect.handleCallback("tiktok", { code: "c", state: u.searchParams.get("state") }),
+      (e) => e.code === "SCOPE_DENIED" && /user\.info\.profile and user\.info\.stats/.test(e.message));
+    assert.equal(await geDb.getConnection(acc, "tiktok"), null, "nothing was stored");
+    routes.shift();
+  });
+
+  await test("a failed refresh marks the connection needs_reconnect instead of failing silently", async () => {
+    const acc = "acct_reconnect_1";
+    await geDb.setConnection(acc, "tiktok", {
+      extUserId: "o", handle: "someone", tokenEnc: require("./crypto").encrypt("old", process.env.ENCRYPTION_KEY),
+      refreshEnc: require("./crypto").encrypt("oldrefresh", process.env.ENCRYPTION_KEY),
+      expiresAt: Date.now() + 60000, refreshExpiresAt: Date.now() + 86400000, scopes: "user.info.basic", status: "active",
+    });
+    routes.unshift({ prefix: "https://open.tiktokapis.com/v2/oauth/token/", status: 400, body: { error: "invalid_grant", error_description: "Refresh token is invalid" } });
+    const conn = await geDb.getConnection(acc, "tiktok");
+    await assert.rejects(() => connect.liveToken(conn), (e) => e.code === "RECONNECT");
+    const after = await geDb.getConnection(acc, "tiktok");
+    assert.equal(after.status, "needs_reconnect");
+    assert.ok(after.lastError, "the reason is recorded for the UI");
+    assert.equal(connect.publicView(after).needs_reconnect, true);
+    routes.shift();
+    await geDb.deleteAccount(acc);
+  });
+
+  await test("the first pull reports how many posts came back", async () => {
+    const acc = "acct_pull_1";
+    const u = new URL(connect.authUrl("tiktok", acc, {}));
+    await connect.handleCallback("tiktok", { code: "c", state: u.searchParams.get("state") });
+    const pull = await connect.firstPull(acc, "tiktok");
+    assert.ok(pull.ok, `first pull should succeed: ${pull.error || ""}`);
+    assert.ok(pull.posts > 0, "pulled at least one post");
+    assert.deepEqual(await connect.firstPull("acct_nobody", "tiktok"), { posts: 0, followers: null, ok: false, error: "No connection" });
+    await geDb.deleteAccount(acc);
+  });
+
+  await test("Meta's signed_request is verified, and a bad signature is refused", async () => {
+    process.env.META_APP_SECRET = "meta_test_secret";
+    const crypto = require("crypto");
+    const payload = Buffer.from(JSON.stringify({ algorithm: "HMAC-SHA256", user_id: "ig_12345", issued_at: 1 })).toString("base64url");
+    const sig = crypto.createHmac("sha256", "meta_test_secret").update(payload).digest("base64url");
+    assert.equal(connect.parseSignedRequest(`${sig}.${payload}`).user_id, "ig_12345");
+    assert.throws(() => connect.parseSignedRequest(`AAAA.${payload}`), (e) => e.code === "BAD_SIGNED_REQUEST");
+    assert.throws(() => connect.parseSignedRequest("nodot"), (e) => e.code === "BAD_SIGNED_REQUEST");
+    // Without the secret we refuse rather than trusting an unverified body.
+    delete process.env.META_APP_SECRET;
+    assert.throws(() => connect.parseSignedRequest(`${sig}.${payload}`), (e) => e.code === "NO_META_APP_SECRET");
+    process.env.META_APP_SECRET = "meta_test_secret";
+  });
+
+  await test("deauthorize forgets every connection for that Instagram user", async () => {
+    const acc = "acct_deauth_1";
+    await geDb.setConnection(acc, "instagram", {
+      extUserId: "ig_999", handle: "gone_soon", tokenEnc: require("./crypto").encrypt("t", process.env.ENCRYPTION_KEY),
+      expiresAt: Date.now() + 86400000, scopes: "instagram_business_basic",
+    });
+    assert.equal((await geDb.findConnectionsByExtUserId("instagram", "ig_999")).length, 1);
+    const touched = await connect.forgetInstagramUser("ig_999");
+    assert.deepEqual(touched, [acc]);
+    assert.equal(await geDb.getConnection(acc, "instagram"), null);
+    assert.deepEqual(await geDb.findConnectionsByExtUserId("instagram", "ig_999"), []);
+    assert.deepEqual(await connect.forgetInstagramUser("ig_nobody"), [], "an unknown user is a no-op, not an error");
+  });
+
+  await test("a data-deletion confirmation code round-trips and rejects tampering", async () => {
+    const code = connect.deletionCode("ig_777");
+    assert.equal(connect.readDeletionCode(code), "ig_777");
+    assert.throws(() => connect.readDeletionCode(code.split(".")[0] + ".AAAAAAAAAAAAAAAAAAAAAAAA"), (e) => e.code === "BAD_CODE");
+    assert.throws(() => connect.readDeletionCode("rubbish"), (e) => e.code === "BAD_CODE");
+  });
+
+  await test("a platform stays off when its flag is switched off, even with credentials set", async () => {
+    assert.equal(connect.available().tiktok, true);
+    process.env.CONNECT_TIKTOK_ENABLED = "0";
+    assert.equal(connect.available().tiktok, false, "the flag subtracts");
+    assert.throws(() => connect.authUrl("tiktok", "acct_x", {}), (e) => e.code === "CONNECT_UNAVAILABLE");
+    delete process.env.CONNECT_TIKTOK_ENABLED;
+    assert.equal(connect.available().tiktok, true);
+    // The flag never adds: no credentials means off whatever the flag says.
+    const key = process.env.TIKTOK_CLIENT_KEY; delete process.env.TIKTOK_CLIENT_KEY;
+    process.env.CONNECT_TIKTOK_ENABLED = "1";
+    assert.equal(connect.available().tiktok, false);
+    process.env.TIKTOK_CLIENT_KEY = key; delete process.env.CONNECT_TIKTOK_ENABLED;
+  });
+
+  await test("the config report names the URLs to register and never a secret", async () => {
+    const r = connect.configReport();
+    assert.equal(r.platforms.tiktok.redirect_uri, "https://scalecraft.test/api/growth-engine/v1/connect/tiktok/callback");
+    assert.equal(r.platforms.instagram.redirect_uri, "https://scalecraft.test/api/growth-engine/v1/connect/instagram/callback");
+    assert.equal(r.platforms.instagram.deauthorize_url, "https://scalecraft.test/api/growth-engine/v1/connect/instagram/deauthorize");
+    assert.equal(r.platforms.instagram.data_deletion_url, "https://scalecraft.test/api/growth-engine/v1/connect/instagram/data-deletion");
+    assert.equal(r.platforms.tiktok.scopes, "user.info.basic,user.info.profile,user.info.stats,video.list");
+    assert.equal(r.encryption_key, "configured");
+    const blob = JSON.stringify(r);
+    for (const secret of ["tts_test", "igs_test", "meta_test_secret", "test-secret", process.env.ENCRYPTION_KEY]) {
+      assert.ok(!blob.includes(secret), `config report leaked a secret (${secret.slice(0, 6)}…)`);
+    }
   });
 
   console.log(`${passed} passed`);

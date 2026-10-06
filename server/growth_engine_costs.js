@@ -29,9 +29,12 @@ const DEFAULT_RATES = {
     _default: { in: 0.50, out: 1.50 },
   },
   scrape: { "apify:instagram-profile": 0.003, "apify:instagram-post": 0.0023, "apify:tiktok-video": 0.004, _default: 0.003 },
+  // Official platform APIs (connected accounts). Free at our volume, but the
+  // call count is the thing that runs into rate limits, so it is still recorded.
+  api: { "instagram-graph": 0, "tiktok-open": 0, _default: 0 },
 };
 let RATES = DEFAULT_RATES;
-try { if (process.env.COST_RATES_JSON) { const o = JSON.parse(process.env.COST_RATES_JSON); RATES = { llm: { ...DEFAULT_RATES.llm, ...(o.llm || {}) }, scrape: { ...DEFAULT_RATES.scrape, ...(o.scrape || {}) } }; } } catch { console.warn("[Costs] COST_RATES_JSON did not parse; using defaults"); }
+try { if (process.env.COST_RATES_JSON) { const o = JSON.parse(process.env.COST_RATES_JSON); RATES = { llm: { ...DEFAULT_RATES.llm, ...(o.llm || {}) }, scrape: { ...DEFAULT_RATES.scrape, ...(o.scrape || {}) }, api: { ...DEFAULT_RATES.api, ...(o.api || {}) } }; } } catch { console.warn("[Costs] COST_RATES_JSON did not parse; using defaults"); }
 
 let geDb = null;
 const db = () => (geDb ||= require("./growth_engine_db_select"));
@@ -54,6 +57,12 @@ function scrape({ unit, quantity = 1, handle, platform }) {
   const cents = (RATES.scrape[unit] ?? RATES.scrape._default) * quantity * 100;
   write({ kind: "scrape", provider: "apify", model: unit, label: handle ? `@${handle}` : "", quantity, detail: { platform }, cents });
 }
+// Record a call to an official platform API on a connected account.
+// unit: "instagram-graph" | "tiktok-open"; label is the endpoint, not the token.
+function api({ unit, endpoint, quantity = 1, handle, platform }) {
+  const cents = (RATES.api[unit] ?? RATES.api._default) * quantity * 100;
+  write({ kind: "api", provider: unit, model: String(endpoint || "").slice(0, 60), label: handle ? `@${handle}` : "", quantity, detail: { platform }, cents });
+}
 function write(row) {
   const c = current();
   db().insertCost({ ...row, accountId: c.accountId || null, jobId: c.jobId || null, reportId: c.reportId || null, feature: c.feature || "other" })
@@ -62,4 +71,4 @@ function write(row) {
 // Let the job queue set the report id once it exists.
 function setReport(reportId) { const s = als.getStore(); if (s) s.reportId = reportId; }
 
-module.exports = { run, current, llm, scrape, setReport, RATES };
+module.exports = { run, current, llm, scrape, api, setReport, RATES };
