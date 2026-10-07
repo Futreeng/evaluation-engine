@@ -1053,7 +1053,7 @@
                 return h`<div class="dimcard bd${hue}"><div class="top"><span class="n">${raw(glyph(d.label))}${d.label}</span><span class="s hue${hue}">${sc} · ${g}${dd && dd.delta ? raw(h`<span class="dd g-${dd.delta > 0 ? 'strong' : 'weak'}">${dd.delta > 0 ? '+' : ''}${dd.delta}</span>`) : ''}</span></div>
                   ${av != null ? raw(h`<div class="vsavg">${vsAvgText(sc, av, niche)}</div>`) : ''}
                   <div class="bar in ${av != null && i === 0 ? 'cap' : ''}"><div class="fill bg${hue}" style="width:${sc}%"></div>${av != null ? raw(h`<div class="mark" style="left:${clamp(av, 0, 100)}%"></div>${i === 0 ? raw(h`<span class="marklbl" style="left:${clamp(av, 0, 100)}%">${niche} avg</span>`) : ''}`) : ''}</div>
-                  <p>${d.explanation || ''}</p>${raw(checklistHTML(d.evidence))}${raw(evidenceHTML(d.evidence_posts))}${(() => { const ph = phaseForDim(d.label, phases); return ph ? raw(h`<a class="todo" href="#" data-dim-fix="${ph.key}m1">What to do about this →</a>`) : ''; })()}</div>`; }).join(''))}
+                  <p>${d.explanation || ''}</p>${raw(connectedMetricsHTML(d.label, report.connected_metrics))}${raw(checklistHTML(d.evidence))}${raw(evidenceHTML(d.evidence_posts))}${(() => { const ph = phaseForDim(d.label, phases); return ph ? raw(h`<a class="todo" href="#" data-dim-fix="${ph.key}m1">What to do about this →</a>`) : ''; })()}</div>`; }).join(''))}
               <div class="fine">${s.category_avg != null ? raw(h`The marker is your ${niche} average. ${raw(confPill(s.category_confidence || { level: s.category_sample_size >= 100 ? 'high' : s.category_sample_size >= 25 ? 'some' : 'low', label: s.category_sample_size >= 100 ? 'High confidence' : s.category_sample_size >= 25 ? 'Some evidence' : 'Needs more data', n: s.category_sample_size }))}`) : pending ? `The marker is your niche average. Your ${niche} average appears once ${pending.min_n} accounts are scored — ${pending.n} so far.` : nicheKnown ? 'The marker is your niche average.' : `Scored against all creators — we don't have enough ${niche} accounts yet.`}</div>
             </div>
           </details>
@@ -1226,7 +1226,21 @@
       $view.querySelector('[data-action=roast]')?.addEventListener('click', () => { if (report.roast) reveal(report.roast); else pick(); });
       if (new URLSearchParams(location.hash.split('?')[1] || '').get('roast') === '1') { if (report.roast) reveal(report.roast); else pick(); }
     }
-    // Connected-account line under the data window: connect, or rescore through the API once connected.
+    // The numbers only a connected account can see. They already move this
+  // dimension's score; without showing them, connecting moved the number for no
+  // visible reason. Rendered only on Engagement Quality, only when the platform
+  // actually returned something — TikTok reports no saves or reach.
+  function connectedMetricsHTML(label, cm) {
+    if (!cm || !/engagement/i.test(label || '')) return '';
+    const rows = [];
+    if (cm.saves_per_post != null) rows.push([fmtN(cm.saves_per_post), 'saves a post', cm.total_saves != null ? `${fmtN(cm.total_saves)} in total` : '']);
+    if (cm.avg_reach_per_post != null) rows.push([fmtN(cm.avg_reach_per_post), 'reach a post', cm.reach_per_follower_pct != null ? `${cm.reach_per_follower_pct}% of your followers` : '']);
+    if (cm.total_shares != null) rows.push([fmtN(cm.total_shares), 'shares', '']);
+    if (!rows.length) return '';
+    return h`<div class="connmetrics"><div class="n">From your connected account</div><div class="rows">${raw(rows.map(([v, l, sub]) => h`<div class="m"><span class="v">${v}</span><span class="l">${l}</span>${sub ? raw(h`<span class="sub">${sub}</span>`) : ''}</div>`).join(''))}</div><p class="fine">A logged-out visitor cannot see these. They are part of your Engagement Quality score.</p></div>`;
+  }
+
+  // Connected-account line under the data window: connect, or rescore through the API once connected.
     (async () => {
       const line = $view.querySelector('[data-connectline]'); if (!line) return;
       let conns = null; try { conns = await api('/account/connections', {}, { allow401: true }); } catch { return; }
@@ -2279,7 +2293,7 @@
       <p class="lede sm">The four numbers are computed by fixed rules from your public posts. The writing — the explanations, the moves, the calendar — is done by a language model that receives those numbers and your posts. It never sets or changes a number, and every fact it cites is checked against the data it was given.</p>
       <div class="cannot"><div class="n">What we read</div><p>Your public profile and your most recent posts (30 on Instagram, fewer if the account has fewer; TikTok videos the same way). For each post: when it went up, its format, the caption, likes, comments and views where the platform shows them. From the profile: your bio, link, follower count and story highlights.</p></div>
       <div class="dimlist">${raw(dims.map(([l, hue, t, chips, moves]) => h`<div class="card dimx bd${hue}"><div class="n">${l}</div><p>${t}</p><div class="chips2">${raw(chips.map(c => h`<span class="pill tone">${c}</span>`).join(''))}</div><p class="mv">What moves it: ${moves}</p></div>`).join(''))}</div>
-      <div class="cannot"><div class="n">What we cannot see</div><p>We read public data only. That means no saves, no reach, no story views, no audience demographics, and nothing from a private account. A report is based on your most recent public posts — usually 30, fewer on a newer account — within the window shown on it. If a number here disagrees with your own analytics, yours is the more complete one — ours is the one a stranger can see.</p></div>
+      <div class="cannot"><div class="n">What we cannot see</div><p>Unless you connect the account yourself, we read public data only — and that means no saves, no reach, no story views, no audience demographics, and nothing from a private account. Connecting an account changes this for that account only: Instagram then reports its saves, reach and shares to us through the official API, and those figures appear on the report and feed Engagement Quality. We still never see audience demographics, story views, or anything about an account nobody has connected. A report is based on your most recent public posts — usually 30, fewer on a newer account — within the window shown on it. If a number here disagrees with your own analytics, yours is the more complete one — ours is the one a stranger can see.</p></div>
       <div class="cannot"><div class="n">Niche targets and the niche average</div><p>Each niche has a target set — posts per week, video share, engagement rate — that the dimensions score against. Those targets are working assumptions until enough accounts are scored to measure them. Separately, the niche average marker on your report is measured: it’s the average score of accounts we’ve scored in your niche, shown once the niche has at least ${minN} scored accounts. Below that the report says the average is pending and scores you against the general creator target. The same rule gates “what’s working in your niche” and the public benchmarks. “Scores higher than X% of accounts” uses the same gate; your history line compares you with you.</p></div>
       <div class="cannot"><div class="n">What the score is not</div><p>It isn’t a prediction of reach, followers or income. It’s a measurement of habits the platforms reward, from what a stranger can see, plus the plan to change them. A high score with a bad product won’t sell; a low score with a good one leaves growth on the table.</p></div>
     </div></div>${raw(footer())}`;

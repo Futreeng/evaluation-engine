@@ -21,7 +21,14 @@
       tier: 'social_snapshot',
       generated_at: Date.now(), refresh_due_at: Date.now() + 7 * 86400000,
       narrative: null, raw_personas: { gap_auditor: '' }, data_confidence: 'high',
-      data_window: "Based on your last 12 posts. We can't see saves, reach or story views.", tz: 'America/New_York', email: 'maya@sunrisefitness.co',
+      // ?mock_connect=report renders the report as a connected one, so the
+      // data window, the hidden rescore link and the saves/reach block can all
+      // be exercised without a backend.
+      ...(mockConnStart === 'report'
+        ? { data_window: 'Based on your last 12 posts, read from your connected Instagram account — saves, reach and shares included.', data_source: 'api',
+            connected_metrics: { saves_per_post: 41.5, total_saves: 498, avg_reach_per_post: 3120, reach_per_follower_pct: 56.3, total_shares: 212 } }
+        : { data_window: "Based on your last 12 posts. We can't see saves, reach or story views.", data_source: 'public', connected_metrics: null }),
+      tz: 'America/New_York', email: 'maya@sunrisefitness.co',
       competitor_handles: [], competitors: null,
       scores: {
         overall: 47,
