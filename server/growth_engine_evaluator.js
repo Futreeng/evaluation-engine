@@ -772,6 +772,20 @@ async function runSnapshot(accountId, inputParams, onStage = () => {}) {
     best_times: postRecords.length ? bestTimes(postRecords, { tz: inputParams.tz || "UTC", platform }) : null,
     data_window: postRecords.length ? (realData?.connected ? `Based on your last ${postRecords.length} posts, read from your connected ${platform === "tiktok" ? "TikTok" : "Instagram"} account${platform === "tiktok" ? "." : " — saves, reach and shares included."}` : `Based on your last ${postRecords.length} posts. We can't see saves, reach or story views.`) : null,
     data_source: realData?.connected ? "api" : "public",
+    // The figures a logged-out scrape cannot reach. They already move the
+    // Engagement Quality score (growth_engine_scoring.js reads total_saves), but
+    // nothing showed them, so connecting changed the number with no visible
+    // reason. Only fields the platform actually returned are included — TikTok
+    // reports no saves or reach, so it simply carries fewer keys.
+    connected_metrics: (() => {
+      if (!realData?.connected) return null;
+      const eng = realData.metrics?.engagement || {};
+      const out = {};
+      for (const k of ["saves_per_post", "total_saves", "avg_reach_per_post", "reach_per_follower_pct", "total_shares"]) {
+        if (eng[k] != null && Number.isFinite(Number(eng[k]))) out[k] = Number(eng[k]);
+      }
+      return Object.keys(out).length ? out : null;
+    })(),
     plan_context: inputParams.plan_context || null,
     data_confidence: structured ? "full" : "narrative_only",
     narrative,
